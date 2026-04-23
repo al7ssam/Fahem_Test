@@ -1,0 +1,373 @@
+import "./style.css";
+import { io, type Socket } from "socket.io-client";
+
+type Phase = "name" | "lobby" | "countdown" | "playing" | "result";
+
+const app = document.querySelector<HTMLDivElement>("#app")!;
+
+let socket: Socket | null = null;
+let phase: Phase = "name";
+let mySocketId: string | null = null;
+let currentQuestionId: number | null = null;
+let endsAt = 0;
+let timerHandle: number | null = null;
+
+function el(html: string): HTMLElement {
+  const t = document.createElement("template");
+  t.innerHTML = html.trim();
+  return t.content.firstElementChild as HTMLElement;
+}
+
+function clearTimer(): void {
+  if (timerHandle != null) {
+    window.clearInterval(timerHandle);
+    timerHandle = null;
+  }
+}
+
+function render(): void {
+  clearTimer();
+  app.innerHTML = "";
+
+  if (phase === "name") {
+    app.append(
+      el(`
+        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white flex flex-col items-center justify-center p-4">
+          <div class="max-w-md w-full space-y-6 text-center">
+            <h1 class="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-l from-amber-300 to-orange-400">فاهم</h1>
+            <p class="text-slate-300 text-lg">تحدٍّ سريع — من يبقى آخر من يفوز؟</p>
+            <div class="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-xl backdrop-blur space-y-4">
+              <label class="block text-right text-sm text-slate-400">اسمك في اللعبة</label>
+              <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="w-full rounded-xl bg-slate-900/80 border border-white/10 px-4 py-3 text-right text-lg outline-none focus:ring-2 focus:ring-amber-400/60" />
+              <button id="join-btn" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950 shadow-lg active:scale-[0.98] transition">دخول اللوبي</button>
+              <p id="join-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
+            </div>
+          </div>
+        </div>
+      `),
+    );
+    const input = app.querySelector<HTMLInputElement>("#name-input")!;
+    const btn = app.querySelector<HTMLButtonElement>("#join-btn")!;
+    const err = app.querySelector<HTMLParagraphElement>("#join-err")!;
+    btn.addEventListener("click", () => {
+      err.textContent = "";
+      const name = input.value.trim();
+      if (!name) {
+        err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        return;
+      }
+      connectSocket(name);
+    });
+    return;
+  }
+
+  if (phase === "lobby") {
+    app.append(
+      el(`
+        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white p-4 flex flex-col max-w-lg mx-auto w-full">
+          <header class="flex items-center justify-between py-4">
+            <h1 class="text-2xl font-extrabold text-amber-300">فاهم</h1>
+            <span id="conn" class="text-xs px-2 py-1 rounded-full bg-white/10">…</span>
+          </header>
+          <div class="flex-1 flex flex-col gap-4">
+            <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
+              <h2 class="text-lg font-bold mb-2 text-right">اللاعبون</h2>
+              <ul id="players" class="space-y-2 text-right"></ul>
+            </div>
+            <button id="ready-btn" class="w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 py-4 text-lg font-bold shadow-lg active:scale-[0.98] transition">جاهز للعب</button>
+            <p class="text-center text-slate-400 text-sm">يُشترط لاعبان جاهزان على الأقل لبدء التحدي خلال ٣ ثوانٍ.</p>
+          </div>
+        </div>
+      `),
+    );
+    updateConnectionBadge();
+    return;
+  }
+
+  if (phase === "countdown") {
+    app.append(
+      el(`
+        <div class="min-h-screen bg-gradient-to-b from-slate-950 to-indigo-950 text-white flex flex-col items-center justify-center p-6 text-center">
+          <p class="text-slate-300 mb-4">تبدأ المباراة خلال</p>
+          <div id="cd" class="text-7xl font-black text-amber-300 tabular-nums">٣</div>
+        </div>
+      `),
+    );
+    return;
+  }
+
+  if (phase === "playing") {
+    app.append(
+      el(`
+        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950 text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
+          <div class="flex items-center justify-between gap-2">
+            <div id="hearts" class="flex gap-1 text-2xl"></div>
+            <div id="clock" class="text-xl font-mono font-bold text-amber-300 tabular-nums">—</div>
+          </div>
+          <div id="q-card" class="rounded-2xl bg-white/5 border border-white/10 p-5 flex-1 flex flex-col gap-4 shadow-xl">
+            <p id="q-text" class="text-right text-xl font-semibold leading-relaxed min-h-[4rem]"></p>
+            <div id="opts" class="grid gap-2"></div>
+          </div>
+          <p id="status" class="text-center text-slate-400 text-sm min-h-[1.25rem]"></p>
+        </div>
+      `),
+    );
+    renderHearts(3);
+    startQuestionTimer();
+    return;
+  }
+
+  if (phase === "result") {
+    app.append(
+      el(`
+        <div class="min-h-screen bg-gradient-to-b from-slate-950 to-slate-900 text-white p-6 flex flex-col items-center justify-center text-center gap-6 max-w-md mx-auto">
+          <h2 id="res-title" class="text-3xl font-extrabold"></h2>
+          <p id="res-body" class="text-slate-300 text-lg"></p>
+          <button id="again" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950">العب مجدداً</button>
+        </div>
+      `),
+    );
+    const again = app.querySelector<HTMLButtonElement>("#again")!;
+    again.addEventListener("click", () => {
+      phase = "name";
+      socket?.disconnect();
+      socket = null;
+      mySocketId = null;
+      render();
+    });
+  }
+}
+
+function updateConnectionBadge(): void {
+  const badge = app.querySelector<HTMLSpanElement>("#conn");
+  if (!badge || !socket) return;
+  if (socket.connected) {
+    badge.textContent = "متصل";
+    badge.className = "text-xs px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300";
+  } else {
+    badge.textContent = "غير متصل";
+    badge.className = "text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-300";
+  }
+}
+
+function renderLobbyPlayers(list: { socketId: string; name: string; ready: boolean }[]): void {
+  const ul = app.querySelector<HTMLUListElement>("#players");
+  const readyBtn = app.querySelector<HTMLButtonElement>("#ready-btn");
+  if (!ul || !readyBtn) return;
+  ul.innerHTML = "";
+  for (const p of list) {
+    const li = document.createElement("li");
+    li.className =
+      "flex items-center justify-between rounded-xl bg-slate-900/50 px-3 py-2 border border-white/5";
+    const you = p.socketId === mySocketId ? " (أنت)" : "";
+    li.innerHTML = `<span class="font-medium">${escapeHtml(p.name)}${you}</span><span class="text-sm ${p.ready ? "text-emerald-400" : "text-slate-500"}">${p.ready ? "جاهز" : "ينتظر"}</span>`;
+    ul.appendChild(li);
+  }
+  readyBtn.onclick = () => {
+    socket?.emit("player_ready", {}, () => undefined);
+  };
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function connectSocket(name: string): void {
+  socket?.removeAllListeners();
+  socket?.disconnect();
+
+  const s = io({
+    path: "/socket.io",
+    transports: ["websocket", "polling"],
+  });
+  socket = s;
+
+  let cdInterval: number | null = null;
+
+  s.on("connect", () => {
+    mySocketId = s.id ?? null;
+    s.emit("join_lobby", { name }, (ack: { ok?: boolean }) => {
+      if (!ack?.ok) {
+        phase = "name";
+        render();
+        const err = document.querySelector("#join-err");
+        if (err) err.textContent = "تعذر الدخول. حاول مرة أخرى.";
+        return;
+      }
+      phase = "lobby";
+      render();
+    });
+  });
+
+  s.on("disconnect", () => {
+    updateConnectionBadge();
+  });
+
+  s.on("lobby_state", (payload: { players: { socketId: string; name: string; ready: boolean }[] }) => {
+    if (phase !== "lobby") return;
+    renderLobbyPlayers(payload.players);
+    updateConnectionBadge();
+  });
+
+  s.on("match_starting", (payload: { seconds: number }) => {
+    if (phase !== "lobby") return;
+    phase = "countdown";
+    render();
+    let left = payload.seconds;
+    const cd = app.querySelector<HTMLDivElement>("#cd");
+    const arabic = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"];
+    const show = () => {
+      if (cd) cd.textContent = left <= 9 ? arabic[left] ?? String(left) : String(left);
+    };
+    show();
+    cdInterval = window.setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        if (cdInterval) window.clearInterval(cdInterval);
+        cdInterval = null;
+      } else show();
+    }, 1000);
+  });
+
+  s.on("game_started", () => {
+    if (cdInterval) {
+      window.clearInterval(cdInterval);
+      cdInterval = null;
+    }
+    phase = "playing";
+    render();
+  });
+
+  s.on(
+    "question",
+    (q: {
+      questionId: number;
+      prompt: string;
+      options: string[];
+      endsAt: number;
+    }) => {
+      currentQuestionId = q.questionId;
+      endsAt = q.endsAt;
+      phase = "playing";
+      if (!app.querySelector("#q-text")) render();
+      const text = app.querySelector<HTMLParagraphElement>("#q-text");
+      const opts = app.querySelector<HTMLDivElement>("#opts");
+      const status = app.querySelector<HTMLParagraphElement>("#status");
+      if (!text || !opts) return;
+      text.textContent = q.prompt;
+      opts.innerHTML = "";
+      q.options.forEach((label, idx) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className =
+          "w-full text-right rounded-xl border border-white/10 bg-slate-800/60 px-4 py-3 text-base font-medium hover:bg-slate-700/80 active:scale-[0.99] transition";
+        b.textContent = label;
+        b.addEventListener("click", () => {
+          if (currentQuestionId == null) return;
+          if (status) status.textContent = "تم إرسال إجابتك.";
+          s.emit("answer", {
+            questionId: currentQuestionId,
+            choiceIndex: idx,
+          });
+          opts.querySelectorAll("button").forEach((btn) => {
+            (btn as HTMLButtonElement).disabled = true;
+          });
+        });
+        opts.appendChild(b);
+      });
+      if (status) status.textContent = "";
+      startQuestionTimer();
+    },
+  );
+
+  s.on(
+    "question_result",
+    (payload: {
+      players: { socketId: string; hearts: number; eliminated: boolean }[];
+    }) => {
+      const me = payload.players.find((p) => p.socketId === mySocketId);
+      if (me && phase === "playing") renderHearts(me.hearts);
+      const status = app.querySelector<HTMLParagraphElement>("#status");
+      if (status) status.textContent = "جاري السؤال التالي…";
+    },
+  );
+
+  s.on(
+    "game_over",
+    (payload: {
+      winner: { socketId: string; name: string } | null;
+      players: { socketId: string; name: string; hearts: number; eliminated: boolean }[];
+      reason?: string;
+    }) => {
+      if (cdInterval) {
+        window.clearInterval(cdInterval);
+        cdInterval = null;
+      }
+      clearTimer();
+      phase = "result";
+      render();
+      const me = payload.players.find((p) => p.socketId === mySocketId);
+      const title = app.querySelector<HTMLHeadingElement>("#res-title");
+      const body = app.querySelector<HTMLParagraphElement>("#res-body");
+      if (!title || !body) return;
+      if (payload.reason === "no_questions") {
+        title.textContent = "لا توجد أسئلة";
+        body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
+        return;
+      }
+      if (payload.winner && payload.winner.socketId === mySocketId) {
+        title.textContent = "فزت!";
+        body.textContent = "أحسنت — بقيت حتى النهاية.";
+      } else if (payload.winner) {
+        title.textContent = "انتهت الجولة";
+        body.textContent = `الفائز: ${payload.winner.name}`;
+      } else {
+        title.textContent = "تعادل أو لا فائز";
+        body.textContent = "حاول مرة أخرى!";
+      }
+      if (me) {
+        body.textContent += ` — قلوبك المتبقية: ${me.hearts}`;
+      }
+    },
+  );
+
+  s.on("player_eliminated", (p: { name: string; reason?: string }) => {
+    const status = app.querySelector<HTMLParagraphElement>("#status");
+    if (status && phase === "playing") {
+      status.textContent =
+        p.reason === "disconnect"
+          ? `${p.name} خرج من اللعبة.`
+          : `${p.name} نفدت قلوبه.`;
+    }
+  });
+
+  s.connect();
+}
+
+function renderHearts(n: number): void {
+  const h = app.querySelector<HTMLDivElement>("#hearts");
+  if (!h) return;
+  h.innerHTML = "";
+  for (let i = 0; i < 3; i++) {
+    const span = document.createElement("span");
+    span.textContent = i < n ? "❤️" : "🖤";
+    h.appendChild(span);
+  }
+}
+
+function startQuestionTimer(): void {
+  clearTimer();
+  const clock = app.querySelector<HTMLDivElement>("#clock");
+  if (!clock) return;
+  timerHandle = window.setInterval(() => {
+    const ms = Math.max(0, endsAt - Date.now());
+    const sec = Math.ceil(ms / 1000);
+    clock.textContent = `${sec}s`;
+  }, 200);
+}
+
+render();
