@@ -8,7 +8,7 @@
     "build": "npm run build:client && npm run build:server",
     "build:client": "vite build --config client/vite.config.ts",
     "build:server": "tsc -p server/tsconfig.json",
-    "start": "node dist/server/index.js",
+    "start": "npm run db:migrate && node dist/server/index.js",
     "dev": "concurrently -k \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "tsx watch server/index.ts",
     "dev:client": "vite --config client/vite.config.ts --port 5173",

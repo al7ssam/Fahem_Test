@@ -9,7 +9,7 @@ services:
     runtime: node
     plan: free
     buildCommand: npm install --include=dev && npm run build
-    startCommand: node dist/server/index.js
+    startCommand: npm run db:migrate && node dist/server/index.js
     healthCheckPath: /health
     envVars:
       - key: CLIENT_ORIGIN
