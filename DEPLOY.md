@@ -8,13 +8,14 @@
 ## خطوات سريعة
 
 1. أنشئ **PostgreSQL** على Render واحفظ `Internal Database URL` (أو External إن لزم).
-2. أنشئ **Web Service** من نفس المستودع:
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm start`
+2. أنشئ **Web Service** من نفس المستودع (Root Directory = جذر المستودع حيث يوجد `package.json`):
+   - **Build Command**: `npm install --include=dev && npm run build`  
+     (إذا ضبطت `NODE_ENV=production` قبل التثبيت، فبدون `--include=dev` لن يُثبَّت Vite/TypeScript وسيظهر خطأ **127** لأن `vite` أو `tsc` غير موجودين.)
+   - **Start Command**: `node dist/server/index.js` (أو `npm start`)
 3. أضف متغيرات البيئة في الخدمة:
    - `DATABASE_URL`: الصق رابط الاتصال بقاعدة البيانات.
-   - `NODE_ENV`: `production`
    - `CLIENT_ORIGIN`: رابط موقعك العام على Render (مثل `https://fahem.onrender.com`) ليعمل CORS بشكل صحيح.
+   - `NODE_ENV`: اختياري — Render يضبط الإنتاج عادةً في وقت التشغيل؛ تجنّب جعل التثبيت «production only» بدون تضمين dev إن غيّرت سلوك npm لديك.
 4. بعد أول نشر، نفّذ الترحيل والبذر (مرة واحدة) من shell Render أو من جهازك مع نفس `DATABASE_URL`:
    - `npm run db:migrate`
    - `npm run db:seed`

@@ -1,13 +1,16 @@
+# Root للمستودع يجب أن يكون مجلد يحتوي package.json (لا تضبط Root Directory في لوحة Render
+# على مجلد فرعي ما لم يكن المشروع هناك).
+#
+# NODE_ENV=production يجعل npm يتخطى devDependencies أثناء التثبيت فيعجز البناء عن
+# العثور على vite/tsc (exit 127). نثبت devDependencies صراحةً ثم نبني.
 services:
   - type: web
     name: fahem
     runtime: node
     plan: free
-    buildCommand: npm install && npm run build
-    startCommand: npm start
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: node dist/server/index.js
     healthCheckPath: /health
     envVars:
-      - key: NODE_ENV
-        value: production
       - key: CLIENT_ORIGIN
         sync: false
