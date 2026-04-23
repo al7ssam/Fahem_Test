@@ -13,6 +13,27 @@ const questionBodySchema = z.object({
   difficulty: z.string().trim().max(32).optional(),
 });
 
+/** عنصر استيراد JSON: يقبل correctIndex أو correct_index */
+const importItemSchema = z
+  .object({
+    prompt: z.string().trim().min(1).max(2000),
+    options: z.array(z.string().trim().min(1).max(500)).length(4),
+    correctIndex: z.number().int().min(0).max(3).optional(),
+    correct_index: z.number().int().min(0).max(3).optional(),
+    difficulty: z.string().trim().max(32).optional(),
+  })
+  .refine((d) => d.correctIndex !== undefined || d.correct_index !== undefined, {
+    message: "correctIndex or correct_index required",
+  })
+  .transform((d) => ({
+    prompt: d.prompt,
+    options: d.options,
+    correctIndex: (d.correctIndex ?? d.correct_index) as number,
+    difficulty: d.difficulty,
+  }));
+
+const importArraySchema = z.array(importItemSchema).min(1).max(200);
+
 function timingSafeEqualString(a: string, b: string): boolean {
   try {
     const bufA = Buffer.from(a, "utf8");
@@ -22,6 +43,21 @@ function timingSafeEqualString(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+function verifyAdmin(req: Request, res: Response): boolean {
+  if (!config.adminSecret) {
+    res
+      .status(503)
+      .json({ ok: false, error: "admin_secret_not_configured" });
+    return false;
+  }
+  const provided = String(req.header("x-admin-secret") ?? "").trim();
+  if (!timingSafeEqualString(provided, config.adminSecret)) {
+    res.status(403).json({ ok: false, error: "forbidden" });
+    return false;
+  }
+  return true;
 }
 
 function adminTemplatePath(): string {
@@ -46,6 +82,26 @@ function readAdminHtml(questionCount: number | null): string {
   return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
 }
 
+function extractQuestionsArray(body: unknown): unknown[] | null {
+  if (Array.isArray(body)) return body;
+  if (body && typeof body === "object") {
+    const o = body as Record<string, unknown>;
+    if (Array.isArray(o.questions)) return o.questions;
+    if (Array.isArray(o.items)) return o.items;
+    if (typeof o.prompt === "string" && Array.isArray(o.options)) {
+      return [body];
+    }
+  }
+  return null;
+}
+
+function zodIssuesSummary(err: z.ZodError, limit = 5): Array<{ path: string; message: string }> {
+  return err.errors.slice(0, limit).map((e) => ({
+    path: e.path.join("."),
+    message: e.message,
+  }));
+}
+
 export function registerAdminRoutes(app: Express): void {
   app.get("/admin", async (_req: Request, res: Response) => {
     try {
@@ -67,22 +123,15 @@ export function registerAdminRoutes(app: Express): void {
   });
 
   app.post("/api/admin/questions", async (req: Request, res: Response) => {
-    if (!config.adminSecret) {
-      res
-        .status(503)
-        .json({ ok: false, error: "admin_secret_not_configured" });
-      return;
-    }
-
-    const provided = String(req.header("x-admin-secret") ?? "").trim();
-    if (!timingSafeEqualString(provided, config.adminSecret)) {
-      res.status(403).json({ ok: false, error: "forbidden" });
-      return;
-    }
+    if (!verifyAdmin(req, res)) return;
 
     const parsed = questionBodySchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ ok: false, error: "invalid_body" });
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
       return;
     }
 
@@ -111,5 +160,67 @@ export function registerAdminRoutes(app: Express): void {
     } catch {
       res.status(500).json({ ok: false, error: "insert_failed" });
     }
+  });
+
+  app.post("/api/admin/questions/import", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+
+    const rawList = extractQuestionsArray(req.body);
+    if (!rawList) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_shape",
+        message:
+          "Body must be a JSON array, { \"questions\": [...] }, { \"items\": [...] }, or one question object with prompt + options",
+      });
+      return;
+    }
+
+    const parsed = importArraySchema.safeParse(rawList);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_questions",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+
+    const rows = parsed.data;
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const row of rows) {
+        await client.query(
+          `INSERT INTO questions (prompt, options, correct_index, difficulty)
+           VALUES ($1, $2::jsonb, $3, $4)`,
+          [
+            row.prompt,
+            JSON.stringify(row.options),
+            row.correctIndex,
+            row.difficulty ?? null,
+          ],
+        );
+      }
+      await client.query("COMMIT");
+    } catch {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      res.status(500).json({ ok: false, error: "import_failed" });
+      return;
+    } finally {
+      client.release();
+    }
+
+    const total = await countQuestions();
+    res.status(201).json({
+      ok: true,
+      inserted: rows.length,
+      totalQuestions: total ?? undefined,
+    });
   });
 }

@@ -41,9 +41,40 @@
         -webkit-font-smoothing: antialiased;
       }
       .wrap {
-        max-width: 32rem;
+        max-width: 36rem;
         margin: 0 auto;
         padding: 1.5rem 1rem 3rem;
+      }
+      .section-title {
+        margin: 0 0 0.75rem;
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--text);
+        text-align: right;
+      }
+      .spacer {
+        height: 1.25rem;
+      }
+      textarea.mono {
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        font-size: 0.85rem;
+        min-height: 10rem;
+        direction: ltr;
+        text-align: left;
+      }
+      .example-pre {
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        font-size: 0.72rem;
+        direction: ltr;
+        text-align: left;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        overflow-x: auto;
+        margin-bottom: 0.75rem;
+        color: var(--muted);
+        line-height: 1.45;
       }
       h1 {
         margin: 0 0 0.25rem;
@@ -213,12 +244,45 @@
         <div class="msg" id="msg" aria-live="polite"></div>
       </form>
 
+      <div class="spacer"></div>
+
+      <div class="card">
+        <h2 class="section-title">استيراد من JSON</h2>
+        <p class="subtitle" style="margin-top: 0; margin-bottom: 0.75rem">
+          الصق مصفوفة أسئلة، أو كائنًا يحتوي
+          <code dir="ltr">questions</code> أو
+          <code dir="ltr">items</code>، أو سؤالًا واحدًا ككائن. يُقبل
+          <code dir="ltr">correctIndex</code> أو
+          <code dir="ltr">correct_index</code> (0–3).
+        </p>
+        <label for="json-input">محتوى JSON</label>
+        <textarea
+          id="json-input"
+          class="mono"
+          spellcheck="false"
+          placeholder='[ { "prompt": "...", "options": ["أ","ب","ج","د"], "correctIndex": 0 } ]'
+        ></textarea>
+        <p class="stat-label" style="margin-bottom: 0.35rem">مثال:</p>
+        <pre class="example-pre" id="json-example"></pre>
+        <button type="button" class="btn" id="json-import-btn">
+          استيراد إلى قاعدة البيانات
+        </button>
+        <div class="msg" id="json-msg" aria-live="polite"></div>
+      </div>
+
       <p class="hint">
         يُرسل المفتاح في رأس الطلب فقط ولا يُخزَّن في المتصفح. استخدم HTTPS
         (مثل Render) في الإنتاج.
       </p>
     </div>
     <script>
+      (function () {
+        var exampleEl = document.getElementById("json-example");
+        if (exampleEl) {
+          exampleEl.textContent =
+            '[\n  {\n    "prompt": "ما عاصمة فرنسا؟",\n    "options": ["باريس", "لندن", "برلين", "مدريد"],\n    "correctIndex": 0,\n    "difficulty": "easy"\n  },\n  {\n    "prompt": "٢ + ٢؟",\n    "options": ["3", "4", "5", "6"],\n    "correct_index": 1\n  }\n]';
+        }
+      })();
       (function () {
         var form = document.getElementById("q-form");
         var msg = document.getElementById("msg");
@@ -314,6 +378,91 @@
             setMsg("خطأ في الاتصال.", false);
           } finally {
             btn.disabled = false;
+          }
+        });
+      })();
+      (function () {
+        var jsonBtn = document.getElementById("json-import-btn");
+        var jsonInput = document.getElementById("json-input");
+        var jsonMsg = document.getElementById("json-msg");
+        var totalEl = document.getElementById("total-display");
+
+        function setJsonMsg(text, ok) {
+          jsonMsg.textContent = text || "";
+          jsonMsg.className = "msg " + (ok ? "ok" : "err");
+        }
+
+        jsonBtn.addEventListener("click", async function () {
+          setJsonMsg("", true);
+          var secret = document.getElementById("admin-secret").value.trim();
+          if (!secret) {
+            setJsonMsg("أدخل مفتاح الإدارة في النموذج أعلاه.", false);
+            return;
+          }
+          var text = jsonInput.value.trim();
+          if (!text) {
+            setJsonMsg("الصق JSON أولاً.", false);
+            return;
+          }
+          var body;
+          try {
+            body = JSON.parse(text);
+          } catch (e) {
+            setJsonMsg("JSON غير صالح: تحقق من الفواصل والاقتباس.", false);
+            return;
+          }
+
+          jsonBtn.disabled = true;
+          try {
+            var res = await fetch("/api/admin/questions/import", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Admin-Secret": secret,
+              },
+              body: JSON.stringify(body),
+            });
+            var data = await res.json().catch(function () {
+              return {};
+            });
+
+            if (res.ok && data.ok) {
+              setJsonMsg(
+                "تم استيراد " +
+                  data.inserted +
+                  " سؤالاً بنجاح.",
+                true
+              );
+              if (typeof data.totalQuestions === "number") {
+                totalEl.textContent = String(data.totalQuestions);
+              }
+            } else if (data.error === "forbidden") {
+              setJsonMsg("مفتاح الإدارة غير صحيح.", false);
+            } else if (data.error === "admin_secret_not_configured") {
+              setJsonMsg("لم يُضبط ADMIN_SECRET على الخادم.", false);
+            } else if (data.error === "invalid_shape") {
+              setJsonMsg(
+                data.message ||
+                  "الشكل غير مدعوم: مصفوفة أو questions أو items.",
+                false
+              );
+            } else if (data.error === "invalid_questions" && data.issues) {
+              setJsonMsg(
+                "تحقق من البيانات: " +
+                  data.issues
+                    .map(function (i) {
+                      return i.path + ": " + i.message;
+                    })
+                    .join(" | "),
+                false
+              );
+            } else {
+              setJsonMsg("تعذر الاستيراد.", false);
+            }
+          } catch (e) {
+            setJsonMsg("خطأ في الاتصال.", false);
+          } finally {
+            jsonBtn.disabled = false;
           }
         });
       })();
