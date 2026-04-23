@@ -3,6 +3,7 @@ import path from "path";
 import cors from "cors";
 import helmet from "helmet";
 import { config } from "./config";
+import { registerAdminRoutes } from "./routes/admin";
 
 export function createApp() {
   const app = express();
@@ -23,6 +24,9 @@ export function createApp() {
   app.get("/health", (_req, res) => {
     res.status(200).json({ ok: true, service: "fahem" });
   });
+
+  app.use(express.json({ limit: "64kb" }));
+  registerAdminRoutes(app);
 
   if (config.isProduction) {
     const staticDir = path.join(process.cwd(), "client", "dist");

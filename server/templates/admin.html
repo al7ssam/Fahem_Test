@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>إدارة الأسئلة — فاهم</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-from: #020617;
+        --bg-mid: #1e1b4b;
+        --bg-to: #0f172a;
+        --card: rgba(255, 255, 255, 0.05);
+        --border: rgba(255, 255, 255, 0.1);
+        --text: #f8fafc;
+        --muted: #94a3b8;
+        --amber: #fbbf24;
+        --amber2: #ea580c;
+        --emerald: #10b981;
+        --danger: #f87171;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Tajawal", system-ui, sans-serif;
+        background: linear-gradient(
+          to bottom,
+          var(--bg-from),
+          var(--bg-mid),
+          var(--bg-to)
+        );
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
+      }
+      .wrap {
+        max-width: 32rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 3rem;
+      }
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.75rem;
+        font-weight: 800;
+        background: linear-gradient(to left, var(--amber), var(--amber2));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      .subtitle {
+        color: var(--muted);
+        margin: 0 0 1.25rem;
+        font-size: 1rem;
+      }
+      .stat {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 0.85rem 1rem;
+        margin-bottom: 1.25rem;
+        border-radius: 1rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+      }
+      .stat-label {
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+      .stat-value {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: var(--amber);
+        font-variant-numeric: tabular-nums;
+      }
+      .card {
+        border-radius: 1rem;
+        padding: 1.25rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+      }
+      label {
+        display: block;
+        text-align: right;
+        font-size: 0.85rem;
+        color: var(--muted);
+        margin-bottom: 0.35rem;
+      }
+      input[type="text"],
+      input[type="password"],
+      textarea,
+      select {
+        width: 100%;
+        border-radius: 0.75rem;
+        border: 1px solid var(--border);
+        background: rgba(15, 23, 42, 0.75);
+        color: var(--text);
+        padding: 0.65rem 0.85rem;
+        font-family: inherit;
+        font-size: 1rem;
+        margin-bottom: 0.85rem;
+        text-align: right;
+      }
+      textarea {
+        min-height: 5rem;
+        resize: vertical;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.35);
+      }
+      .btn {
+        width: 100%;
+        margin-top: 0.5rem;
+        padding: 0.85rem;
+        border: none;
+        border-radius: 0.75rem;
+        font-family: inherit;
+        font-size: 1.05rem;
+        font-weight: 700;
+        cursor: pointer;
+        background: linear-gradient(to left, var(--amber), var(--amber2));
+        color: #0f172a;
+        transition: transform 0.08s ease;
+      }
+      .btn:active {
+        transform: scale(0.98);
+      }
+      .btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .msg {
+        min-height: 1.5rem;
+        margin-top: 0.75rem;
+        text-align: center;
+        font-size: 0.9rem;
+      }
+      .msg.ok {
+        color: var(--emerald);
+      }
+      .msg.err {
+        color: var(--danger);
+      }
+      .hint {
+        font-size: 0.8rem;
+        color: var(--muted);
+        text-align: center;
+        margin-top: 1.25rem;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>إدارة الأسئلة</h1>
+      <p class="subtitle">فاهم — إضافة سؤال جديد إلى قاعدة البيانات</p>
+
+      <div class="stat">
+        <span class="stat-label">إجمالي الأسئلة حالياً</span>
+        <span class="stat-value" id="total-display">{{QUESTION_COUNT}}</span>
+      </div>
+
+      <form class="card" id="q-form" novalidate>
+        <label for="admin-secret">مفتاح الإدارة</label>
+        <input
+          id="admin-secret"
+          type="password"
+          autocomplete="off"
+          placeholder="ADMIN_SECRET"
+          required
+        />
+
+        <label for="prompt">نص السؤال</label>
+        <textarea id="prompt" required maxlength="2000"></textarea>
+
+        <label for="opt0">الخيار ١</label>
+        <input id="opt0" type="text" required maxlength="500" />
+        <label for="opt1">الخيار ٢</label>
+        <input id="opt1" type="text" required maxlength="500" />
+        <label for="opt2">الخيار ٣</label>
+        <input id="opt2" type="text" required maxlength="500" />
+        <label for="opt3">الخيار ٤</label>
+        <input id="opt3" type="text" required maxlength="500" />
+
+        <label for="correct">الإجابة الصحيحة</label>
+        <select id="correct" required>
+          <option value="0">الخيار ١</option>
+          <option value="1">الخيار ٢</option>
+          <option value="2">الخيار ٣</option>
+          <option value="3">الخيار ٤</option>
+        </select>
+
+        <label for="difficulty">الصعوبة (اختياري)</label>
+        <input
+          id="difficulty"
+          type="text"
+          maxlength="32"
+          placeholder="مثال: easy"
+        />
+
+        <button type="submit" class="btn" id="submit-btn">حفظ السؤال</button>
+        <div class="msg" id="msg" aria-live="polite"></div>
+      </form>
+
+      <p class="hint">
+        يُرسل المفتاح في رأس الطلب فقط ولا يُخزَّن في المتصفح. استخدم HTTPS
+        (مثل Render) في الإنتاج.
+      </p>
+    </div>
+    <script>
+      (function () {
+        var form = document.getElementById("q-form");
+        var msg = document.getElementById("msg");
+        var btn = document.getElementById("submit-btn");
+        var totalEl = document.getElementById("total-display");
+
+        function setMsg(text, ok) {
+          msg.textContent = text || "";
+          msg.className = "msg " + (ok ? "ok" : "err");
+        }
+
+        async function refreshCount() {
+          try {
+            var r = await fetch("/api/admin/question-count");
+            var j = await r.json();
+            if (j.ok && typeof j.totalQuestions === "number") {
+              totalEl.textContent = String(j.totalQuestions);
+            }
+          } catch (e) {}
+        }
+
+        form.addEventListener("submit", async function (ev) {
+          ev.preventDefault();
+          setMsg("", true);
+          var secret = document.getElementById("admin-secret").value.trim();
+          var prompt = document.getElementById("prompt").value.trim();
+          var options = [
+            document.getElementById("opt0").value.trim(),
+            document.getElementById("opt1").value.trim(),
+            document.getElementById("opt2").value.trim(),
+            document.getElementById("opt3").value.trim(),
+          ];
+          var correctIndex = parseInt(
+            document.getElementById("correct").value,
+            10
+          );
+          var diff = document.getElementById("difficulty").value.trim();
+
+          if (!secret) {
+            setMsg("أدخل مفتاح الإدارة.", false);
+            return;
+          }
+          if (!prompt || options.some(function (o) { return !o; })) {
+            setMsg("أكمل جميع الحقول المطلوبة.", false);
+            return;
+          }
+
+          btn.disabled = true;
+          try {
+            var body = {
+              prompt: prompt,
+              options: options,
+              correctIndex: correctIndex,
+            };
+            if (diff) body.difficulty = diff;
+
+            var res = await fetch("/api/admin/questions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Admin-Secret": secret,
+              },
+              body: JSON.stringify(body),
+            });
+            var data = await res.json().catch(function () {
+              return {};
+            });
+
+            if (res.ok && data.ok) {
+              setMsg("تم حفظ السؤال بنجاح.", true);
+              if (typeof data.totalQuestions === "number") {
+                totalEl.textContent = String(data.totalQuestions);
+              } else {
+                await refreshCount();
+              }
+              document.getElementById("prompt").value = "";
+              document.getElementById("opt0").value = "";
+              document.getElementById("opt1").value = "";
+              document.getElementById("opt2").value = "";
+              document.getElementById("opt3").value = "";
+              document.getElementById("correct").value = "0";
+              document.getElementById("difficulty").value = "";
+            } else if (data.error === "forbidden") {
+              setMsg("مفتاح الإدارة غير صحيح.", false);
+            } else if (data.error === "admin_secret_not_configured") {
+              setMsg("لم يُضبط ADMIN_SECRET على الخادم.", false);
+            } else if (data.error === "invalid_body") {
+              setMsg("البيانات غير صالحة. تحقق من الطول والخيارات الأربعة.", false);
+            } else {
+              setMsg("تعذر الحفظ. حاول لاحقاً.", false);
+            }
+          } catch (e) {
+            setMsg("خطأ في الاتصال.", false);
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

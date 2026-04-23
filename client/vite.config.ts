@@ -19,6 +19,8 @@ export default defineConfig({
         target: "http://127.0.0.1:3000",
         ws: true,
       },
+      "/admin": { target: "http://127.0.0.1:3000" },
+      "/api/admin": { target: "http://127.0.0.1:3000" },
     },
   },
 });
