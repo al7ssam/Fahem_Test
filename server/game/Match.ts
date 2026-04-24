@@ -54,6 +54,7 @@ export class Match {
   private studyPhaseResolve: (() => void) | null = null;
   private studyWaitTimer: ReturnType<typeof setTimeout> | null = null;
   private macroRound = 0;
+  private activeRoundToken = "";
   private questionQueue: QuestionRow[] = [];
   private queueIndex = 0;
   private resultMessages: ResultMessages | null = null;
@@ -132,6 +133,8 @@ export class Match {
 
   private emitRoundReadyState(): void {
     this.io.to(this.room).emit("round_ready_state", {
+      roundToken: this.activeRoundToken,
+      macroRound: this.macroRound,
       readySocketIds: [...this.roundReady],
       totalActive: this.countActive(),
     });
@@ -203,26 +206,34 @@ export class Match {
   private async runStudyPhase(
     cards: Array<{ id: number; questionId: number; body: string; order: number }>,
   ): Promise<void> {
+    this.activeRoundToken = `${this.matchId}:${this.macroRound}:${Date.now()}`;
     this.roundReady.clear();
     this.clearRoundReadyWait();
+    const now = Date.now();
     const readyWindowMs = Math.min(
       20_000,
       Math.max(3_000, Math.floor(this.studyPhaseMs * 0.2)),
     );
-    const readyEndsAt = Date.now() + (readyWindowMs || DEFAULT_ROUND_READY_MS);
-    const studyEndsAt = Date.now() + this.studyPhaseMs;
+    const readyStartsAt = now;
+    const studyStartsAt = now;
+    const readyEndsAt = readyStartsAt + (readyWindowMs || DEFAULT_ROUND_READY_MS);
+    const studyEndsAt = studyStartsAt + this.studyPhaseMs;
 
     this.io.to(this.room).emit("study_phase", {
       cards,
+      roundToken: this.activeRoundToken,
+      startsAt: studyStartsAt,
       endsAt: studyEndsAt,
-      serverNow: Date.now(),
+      serverNow: now,
       macroRound: this.macroRound,
       scope: "match_start",
     });
 
     this.io.to(this.room).emit("round_ready_window", {
+      roundToken: this.activeRoundToken,
+      startsAt: readyStartsAt,
       endsAt: readyEndsAt,
-      serverNow: Date.now(),
+      serverNow: now,
       macroRound: this.macroRound,
     });
     this.emitRoundReadyState();
@@ -233,6 +244,8 @@ export class Match {
         this.roundReadyTimer = null;
         this.roundReadyResolve = null;
         this.io.to(this.room).emit("round_ready_closed", {
+          roundToken: this.activeRoundToken,
+          startsAt: readyStartsAt,
           endsAt: readyEndsAt,
           serverNow: Date.now(),
           macroRound: this.macroRound,
@@ -256,7 +269,9 @@ export class Match {
     this.clearStudyWait();
 
     this.io.to(this.room).emit("study_phase_end", {
+      roundToken: this.activeRoundToken,
       macroRound: this.macroRound,
+      startsAt: studyStartsAt,
       studyEndsAt,
       serverNow: Date.now(),
     });

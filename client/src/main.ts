@@ -168,6 +168,7 @@ function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): v
 }
 
 let studyEndsAt = 0;
+let readyWindowEndsAt = 0;
 let spectatorEligible = false;
 let spectatorFollowing = false;
 let currentLeaderboard: Array<{
@@ -178,6 +179,10 @@ let currentLeaderboard: Array<{
 }> = [];
 type ReadyBtnState = "idle" | "window_open" | "submitted" | "closed";
 let readyBtnState: ReadyBtnState = "idle";
+type StudyPhaseState = "idle" | "ready_window" | "study_content" | "transition_to_question";
+let studyPhaseState: StudyPhaseState = "idle";
+let activeStudyRoundToken: string | null = null;
+let activeStudyMacroRound = 0;
 let clockOffsetMs = 0;
 
 function syncClock(serverNow?: number): void {
@@ -188,6 +193,13 @@ function syncClock(serverNow?: number): void {
 
 function nowSynced(): number {
   return Date.now() + clockOffsetMs;
+}
+
+function isCurrentStudyRound(token?: string | null, macroRound?: number): boolean {
+  if (!token || !activeStudyRoundToken) return false;
+  if (token !== activeStudyRoundToken) return false;
+  if (typeof macroRound === "number" && macroRound !== activeStudyMacroRound) return false;
+  return true;
 }
 
 function el(html: string): HTMLElement {
@@ -314,8 +326,11 @@ function render(): void {
         <div class="study-shell min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
           <div class="flex items-center justify-between gap-2 pt-1">
             <h2 class="text-lg font-bold text-amber-200 drop-shadow-sm">مراجعة قبل الأسئلة</h2>
-            <div id="study-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums drop-shadow-sm">—</div>
+            <div id="study-main-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums drop-shadow-sm">—</div>
           </div>
+          <p id="study-main-clock-label" class="text-right text-slate-300 text-xs min-h-[1rem]">وقت المذاكرة</p>
+          <p id="study-ready-clock-label" class="text-right text-indigo-200 text-xs min-h-[1rem]">نافذة الجاهزية</p>
+          <div id="study-ready-clock" class="text-lg font-mono font-bold text-indigo-200 tabular-nums">—</div>
           <button id="round-ready-btn" type="button" class="w-full rounded-xl bg-indigo-600/80 hover:bg-indigo-500 py-2 text-sm font-bold">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
           <p id="study-hint" class="text-right text-slate-300/90 text-sm min-h-[1.25rem] leading-relaxed"></p>
           <p id="study-ready-state" class="text-right text-amber-200/90 text-xs min-h-[1.1rem] leading-relaxed"></p>
@@ -325,9 +340,10 @@ function render(): void {
     );
     const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
     if (hint) {
-      hint.textContent = hasCards
-        ? "اقرأ نص المذاكرة لكل سؤال — البطاقات تختفي عند انتهاء الوقت."
-        : "جاري تجهيز الجولة…";
+      hint.textContent =
+        studyPhaseState === "study_content" && hasCards
+          ? "اقرأ نص المذاكرة لكل سؤال — البطاقات تختفي عند انتهاء الوقت."
+          : "جاري بدء الجولة…";
     }
     const container = app.querySelector<HTMLDivElement>("#study-cards");
     const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
@@ -643,8 +659,12 @@ function connectSocket(name: string, mode: GameMode): void {
       if (payload.gameMode === "study_then_quiz") {
         phase = "studying";
         studyCards = [];
+        readyWindowEndsAt = 0;
         studyEndsAt = nowSynced();
         readyBtnState = "idle";
+        studyPhaseState = "idle";
+        activeStudyRoundToken = null;
+        activeStudyMacroRound = 0;
         render();
       } else {
         phase = "playing";
@@ -655,10 +675,19 @@ function connectSocket(name: string, mode: GameMode): void {
 
   s.on(
     "round_ready_window",
-    (payload: { endsAt: number; serverNow?: number; macroRound?: number }) => {
+    (payload: {
+      roundToken?: string;
+      startsAt?: number;
+      endsAt: number;
+      serverNow?: number;
+      macroRound?: number;
+    }) => {
       syncClock(payload.serverNow);
       phase = "studying";
-      studyEndsAt = payload.endsAt;
+      activeStudyRoundToken = payload.roundToken ?? null;
+      activeStudyMacroRound = payload.macroRound ?? activeStudyMacroRound;
+      readyWindowEndsAt = payload.endsAt;
+      studyPhaseState = "ready_window";
       readyBtnState = "window_open";
       if (!app.querySelector("#study-cards")) render();
       const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
@@ -683,15 +712,24 @@ function connectSocket(name: string, mode: GameMode): void {
     "study_phase",
     (payload: {
       cards: Array<{ id: number; questionId?: number; body: string; order: number }>;
+      roundToken?: string;
+      startsAt?: number;
       endsAt: number;
       serverNow?: number;
       macroRound?: number;
       scope?: string;
     }) => {
       syncClock(payload.serverNow);
+      if (payload.roundToken) {
+        activeStudyRoundToken = payload.roundToken;
+      }
+      if (typeof payload.macroRound === "number") {
+        activeStudyMacroRound = payload.macroRound;
+      }
       studyCards = payload.cards ?? [];
       studyEndsAt = payload.endsAt;
       phase = "studying";
+      studyPhaseState = "study_content";
       if (!app.querySelector("#study-cards")) render();
       const container = app.querySelector<HTMLDivElement>("#study-cards");
       const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
@@ -706,11 +744,7 @@ function connectSocket(name: string, mode: GameMode): void {
       const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
       const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyBtn) {
-        if (readyBtnState === "window_open" || readyBtnState === "submitted") {
-          readyBtn.disabled = readyBtnState === "submitted";
-        } else {
-          readyBtn.disabled = true;
-        }
+        readyBtn.disabled = readyBtnState !== "window_open";
         readyBtn.textContent =
           readyBtnState === "submitted"
             ? "تم تسجيل جاهزيتك"
@@ -739,38 +773,64 @@ function connectSocket(name: string, mode: GameMode): void {
     },
   );
 
-  s.on("study_phase_end", () => {
-    readyBtnState = "closed";
-    const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
-    if (hint && phase === "studying") {
-      hint.textContent = "انتهت المراجعة — تبدأ الأسئلة الآن.";
-    }
-    const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
-    if (readyStateEl && phase === "studying") {
-      readyStateEl.textContent = "أُغلقت نافذة الجاهزية.";
-    }
-    clearTimer();
-  });
-
-  s.on("round_ready_closed", (payload: { serverNow?: number; macroRound?: number }) => {
-    syncClock(payload.serverNow);
-    if (phase !== "studying") return;
-    if (readyBtnState !== "submitted") {
+  s.on(
+    "study_phase_end",
+    (payload: {
+      roundToken?: string;
+      macroRound?: number;
+      startsAt?: number;
+      studyEndsAt?: number;
+      serverNow?: number;
+    }) => {
+      syncClock(payload.serverNow);
+      if (!isCurrentStudyRound(payload.roundToken, payload.macroRound)) return;
+      studyPhaseState = "transition_to_question";
       readyBtnState = "closed";
-    }
-    const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
-    const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
-    if (readyBtn) {
-      readyBtn.disabled = true;
-      readyBtn.textContent = "أُغلقت نافذة الجاهزية";
-    }
-    if (readyStateEl) {
-      readyStateEl.textContent =
-        readyBtnState === "submitted"
-          ? "تم تسجيل جاهزيتك. المذاكرة مستمرة حتى انتهاء وقت البطاقات."
-          : "أُغلقت نافذة الجاهزية. المذاكرة مستمرة حتى انتهاء وقت البطاقات.";
-    }
-  });
+      readyWindowEndsAt = 0;
+      const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
+      if (hint && phase === "studying") {
+        hint.textContent = "انتهت المراجعة — تبدأ الأسئلة الآن.";
+      }
+      const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
+      if (readyStateEl && phase === "studying") {
+        readyStateEl.textContent = "أُغلقت نافذة الجاهزية.";
+      }
+      clearTimer();
+    },
+  );
+
+  s.on(
+    "round_ready_closed",
+    (payload: {
+      roundToken?: string;
+      startsAt?: number;
+      endsAt?: number;
+      serverNow?: number;
+      macroRound?: number;
+    }) => {
+      syncClock(payload.serverNow);
+      if (phase !== "studying") return;
+      if (!isCurrentStudyRound(payload.roundToken, payload.macroRound)) return;
+      if (studyPhaseState === "transition_to_question") return;
+      studyPhaseState = "study_content";
+      readyWindowEndsAt = 0;
+      if (readyBtnState !== "submitted") {
+        readyBtnState = "closed";
+      }
+      const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
+      const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
+      if (readyBtn) {
+        readyBtn.disabled = true;
+        readyBtn.textContent = "أُغلقت نافذة الجاهزية";
+      }
+      if (readyStateEl) {
+        readyStateEl.textContent =
+          readyBtnState === "submitted"
+            ? "تم تسجيل جاهزيتك. المذاكرة مستمرة حتى انتهاء وقت البطاقات."
+            : "أُغلقت نافذة الجاهزية. المذاكرة مستمرة حتى انتهاء وقت البطاقات.";
+      }
+    },
+  );
 
   s.on(
     "question",
@@ -961,16 +1021,25 @@ function connectSocket(name: string, mode: GameMode): void {
     applyResultScreenPresentation("lose", "💔");
   });
 
-  s.on("round_ready_state", (p: { readySocketIds: string[]; totalActive: number }) => {
-    const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
-    if (hint && phase === "studying") {
-      hint.textContent = `المذاكرة جارية — جاهزون للجولة: ${p.readySocketIds.length}/${p.totalActive}`;
-    }
-    const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
-    if (readyStateEl && phase === "studying") {
-      readyStateEl.textContent = `جاهزية اللاعبين: ${p.readySocketIds.length}/${p.totalActive}`;
-    }
-  });
+  s.on(
+    "round_ready_state",
+    (p: {
+      roundToken?: string;
+      macroRound?: number;
+      readySocketIds: string[];
+      totalActive: number;
+    }) => {
+      if (!isCurrentStudyRound(p.roundToken, p.macroRound)) return;
+      const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
+      if (hint && phase === "studying") {
+        hint.textContent = `المذاكرة جارية — جاهزون للجولة: ${p.readySocketIds.length}/${p.totalActive}`;
+      }
+      const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
+      if (readyStateEl && phase === "studying") {
+        readyStateEl.textContent = `جاهزية اللاعبين: ${p.readySocketIds.length}/${p.totalActive}`;
+      }
+    },
+  );
 
   s.connect();
 }
@@ -999,12 +1068,31 @@ function startQuestionTimer(): void {
 
 function startStudyTimer(): void {
   clearTimer();
-  const clock = app.querySelector<HTMLDivElement>("#study-clock");
-  if (!clock) return;
+  const mainClock = app.querySelector<HTMLDivElement>("#study-main-clock");
+  const readyClock = app.querySelector<HTMLDivElement>("#study-ready-clock");
+  const mainLabel = app.querySelector<HTMLParagraphElement>("#study-main-clock-label");
+  const readyLabel = app.querySelector<HTMLParagraphElement>("#study-ready-clock-label");
+  if (!mainClock && !readyClock) return;
   timerHandle = window.setInterval(() => {
-    const ms = Math.max(0, studyEndsAt - nowSynced());
-    const sec = Math.max(0, Math.floor((ms + 250) / 1000));
-    clock.textContent = `${sec}s`;
+    const now = nowSynced();
+    const studyMs = Math.max(0, studyEndsAt - now);
+    const studySec = Math.max(0, Math.floor((studyMs + 250) / 1000));
+    const readyMs = Math.max(0, readyWindowEndsAt - now);
+    const readySec = Math.max(0, Math.floor((readyMs + 250) / 1000));
+
+    if (mainClock) {
+      mainClock.textContent = `${studySec}s`;
+    }
+    if (readyClock) {
+      readyClock.textContent = readyWindowEndsAt > 0 ? `${readySec}s` : "—";
+    }
+    if (mainLabel) {
+      mainLabel.textContent = "وقت المذاكرة";
+    }
+    if (readyLabel) {
+      readyLabel.textContent =
+        readyWindowEndsAt > 0 ? "نافذة الجاهزية" : "نافذة الجاهزية (مغلقة)";
+    }
   }, 200);
 }
 
