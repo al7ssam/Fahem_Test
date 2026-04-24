@@ -495,6 +495,8 @@
             <input id="gs-study-ms" type="text" inputmode="numeric" value="60000" />
             <label for="gs-max-players">الحد الأقصى للاعبين في المباراة</label>
             <input id="gs-max-players" type="text" inputmode="numeric" value="10" />
+            <label for="gs-fill-seconds">ثوانٍ انتظار تجميع اللاعبين بعد اكتمال اثنين (نافذة قبل بدء الجولة)</label>
+            <input id="gs-fill-seconds" type="text" inputmode="numeric" value="5" />
             <div class="btn-row">
               <button type="button" class="btn btn-secondary" id="gs-load-btn">تحميل</button>
               <button type="button" class="btn" id="gs-save-btn">حفظ</button>
@@ -782,6 +784,7 @@
               document.getElementById("gs-round-size").value = String(j.studyRoundQuestionCount ?? 8);
               document.getElementById("gs-study-ms").value = String(j.studyPhaseMs ?? 60000);
               document.getElementById("gs-max-players").value = String(j.maxPlayersPerMatch ?? 10);
+              document.getElementById("gs-fill-seconds").value = String(j.matchFillWindowSeconds ?? 5);
               setGsMsg("تم التحميل.", true);
             } else setGsMsg("تعذر التحميل.", false);
           } catch (e) { setGsMsg("خطأ في الاتصال.", false); }
@@ -793,9 +796,10 @@
             maxStudyRounds: parseInt(document.getElementById("gs-max-rounds").value, 10),
             studyRoundQuestionCount: parseInt(document.getElementById("gs-round-size").value, 10),
             studyPhaseMs: parseInt(document.getElementById("gs-study-ms").value, 10),
-            maxPlayersPerMatch: parseInt(document.getElementById("gs-max-players").value, 10)
+            maxPlayersPerMatch: parseInt(document.getElementById("gs-max-players").value, 10),
+            matchFillWindowSeconds: parseInt(document.getElementById("gs-fill-seconds").value, 10)
           };
-          if (!body.maxStudyRounds || !body.studyRoundQuestionCount || !body.studyPhaseMs || !body.maxPlayersPerMatch) {
+          if (!body.maxStudyRounds || !body.studyRoundQuestionCount || !body.studyPhaseMs || !body.maxPlayersPerMatch || !body.matchFillWindowSeconds) {
             return setGsMsg("تحقق من القيم الرقمية.", false);
           }
           gsSave.disabled = true;

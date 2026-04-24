@@ -2,7 +2,7 @@ import "./style.css";
 import { io, type Socket } from "socket.io-client";
 
 type GameMode = "direct" | "study_then_quiz";
-type Phase = "name" | "lobby" | "countdown" | "studying" | "playing" | "result";
+type Phase = "name" | "matchmaking" | "countdown" | "studying" | "playing" | "result";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -19,7 +19,6 @@ const LOBBY_MSG_WAIT_NEXT =
 const LOBBY_MSG_CANCELLED =
   "تم إلغاء بدء المباراة — لا يوجد الآن عدد كافٍ من اللاعبين الجاهزين.";
 let lobbyPlayersList: Array<{ socketId: string; name: string; ready: boolean }> = [];
-let lobbyReadySubmitting = false;
 let currentMatchPlayers: Array<{
   socketId: string;
   name: string;
@@ -249,7 +248,7 @@ function render(): void {
                   <span class="mode-option-desc">بطاقة مراجعة لكل سؤال ثم كتلة أسئلة في الجولة</span>
                 </button>
               </div>
-              <button id="join-btn" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950 shadow-lg active:scale-[0.98] transition">دخول اللوبي</button>
+              <button id="join-btn" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950 shadow-lg active:scale-[0.98] transition">ابدأ التحدي</button>
               <p id="join-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
             </div>
           </div>
@@ -288,7 +287,7 @@ function render(): void {
     return;
   }
 
-  if (phase === "lobby") {
+  if (phase === "matchmaking") {
     app.append(
       el(`
         <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white p-4 flex flex-col max-w-lg mx-auto w-full">
@@ -297,14 +296,10 @@ function render(): void {
             <span id="conn" class="text-xs px-2 py-1 rounded-full bg-white/10">…</span>
           </header>
           <p id="lobby-mode" class="text-right text-sm text-slate-400 mb-2"></p>
-          <div class="flex-1 flex flex-col gap-4">
-            <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
-              <h2 class="text-lg font-bold mb-2 text-right">اللاعبون</h2>
-              <ul id="players" class="space-y-2 text-right"></ul>
-            </div>
-            <button id="ready-btn" class="w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 py-4 text-lg font-bold shadow-lg active:scale-[0.98] transition">جاهز للعب</button>
-            <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem]"></p>
-            <p class="text-center text-slate-400 text-sm">يُشترط لاعبان جاهزان على الأقل لبدء التحدي خلال ٥ ثوانٍ.</p>
+          <div class="flex-1 flex flex-col items-center justify-center gap-8 py-6">
+            <div class="h-14 w-14 rounded-full border-4 border-amber-400/25 border-t-amber-400 animate-spin shrink-0" role="status" aria-label="جاري البحث"></div>
+            <p id="mm-status" class="text-center text-slate-200 text-lg font-medium px-2 leading-relaxed"></p>
+            <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem] max-w-md"></p>
           </div>
         </div>
       `),
@@ -313,7 +308,7 @@ function render(): void {
     updateLobbyModeLabel();
     const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
     if (noticeEl) noticeEl.textContent = lobbyNotice;
-    renderLobbyPlayers(lobbyPlayersList);
+    syncMatchmakingStatusText();
     return;
   }
 
@@ -321,6 +316,7 @@ function render(): void {
     app.append(
       el(`
         <div class="min-h-screen bg-gradient-to-b from-slate-950 to-indigo-950 text-white flex flex-col items-center justify-center p-6 text-center">
+          <p id="cd-subtitle" class="text-emerald-200/95 text-base max-w-md mb-3 leading-relaxed">تم العثور على منافسين. جاري اكتمال المجموعة…</p>
           <p class="text-slate-300 mb-4">تبدأ المباراة خلال</p>
           <div id="cd" class="text-7xl font-black text-amber-300 tabular-nums">٣</div>
         </div>
@@ -470,7 +466,6 @@ function render(): void {
       currentGameMode = null;
       studyCards = [];
       lobbyPlayersList = [];
-      lobbyReadySubmitting = false;
       render();
     });
   }
@@ -481,8 +476,8 @@ function updateLobbyModeLabel(): void {
   if (!elMode || !currentGameMode) return;
   elMode.textContent =
     currentGameMode === "direct"
-      ? "اللوبي: نمط مباشر"
-      : "اللوبي: مراجعة ثم أسئلة";
+      ? "البحث عن تحدي — نمط مباشر"
+      : "البحث عن تحدي — مراجعة ثم أسئلة";
 }
 
 function updateConnectionBadge(): void {
@@ -497,49 +492,14 @@ function updateConnectionBadge(): void {
   }
 }
 
-function renderLobbyPlayers(
-  list: { socketId: string; name: string; ready: boolean }[],
-): void {
-  lobbyPlayersList = list;
-  const ul = app.querySelector<HTMLUListElement>("#players");
-  const readyBtn = app.querySelector<HTMLButtonElement>("#ready-btn");
-  if (!ul || !readyBtn) return;
-  ul.innerHTML = "";
-  for (const p of list) {
-    const li = document.createElement("li");
-    li.className =
-      "flex items-center justify-between rounded-xl bg-slate-900/50 px-3 py-2 border border-white/5";
-    const you = p.socketId === mySocketId ? " (أنت)" : "";
-    li.innerHTML = `<span class="font-medium">${escapeHtml(p.name)}${you}</span><span class="text-sm ${p.ready ? "text-emerald-400" : "text-slate-500"}">${p.ready ? "جاهز" : "ينتظر"}</span>`;
-    ul.appendChild(li);
-  }
-  const me = lobbyPlayersList.find((p) => p.socketId === mySocketId);
-  if (me?.ready) {
-    lobbyReadySubmitting = false;
-  }
-  const showPending = lobbyReadySubmitting && !me?.ready;
-  readyBtn.classList.toggle("btn-pending", showPending);
-  readyBtn.setAttribute("aria-busy", showPending ? "true" : "false");
-  readyBtn.disabled = showPending || Boolean(me?.ready);
-  readyBtn.textContent = me?.ready ? "أنت جاهز" : showPending ? "جارٍ التسجيل…" : "جاهز للعب";
-  readyBtn.onclick = () => {
-    const cur = lobbyPlayersList.find((p) => p.socketId === mySocketId);
-    if (lobbyReadySubmitting || cur?.ready) return;
-    lobbyReadySubmitting = true;
-    readyBtn.disabled = true;
-    readyBtn.classList.add("btn-pending");
-    readyBtn.setAttribute("aria-busy", "true");
-    readyBtn.textContent = "جارٍ التسجيل…";
-    socket?.emit("player_ready", {}, (ack: { ok?: boolean }) => {
-      if (!ack?.ok) {
-        lobbyReadySubmitting = false;
-        readyBtn.classList.remove("btn-pending");
-        readyBtn.setAttribute("aria-busy", "false");
-        readyBtn.disabled = false;
-        readyBtn.textContent = "جاهز للعب";
-      }
-    });
-  };
+function syncMatchmakingStatusText(): void {
+  const el = app.querySelector<HTMLParagraphElement>("#mm-status");
+  if (!el) return;
+  const readyCount = lobbyPlayersList.filter((p) => p.ready).length;
+  el.textContent =
+    readyCount < 2
+      ? "جاري البحث عن منافسين…"
+      : "تم العثور على لاعبين. جاري تجهيز المباراة…";
 }
 
 function renderPlayingPlayersPanel(): void {
@@ -609,7 +569,6 @@ function connectSocket(name: string, mode: GameMode): void {
   socket = s;
 
   lobbyPlayersList = [];
-  lobbyReadySubmitting = false;
 
   let cdInterval: number | null = null;
 
@@ -646,7 +605,7 @@ function connectSocket(name: string, mode: GameMode): void {
         if (errEl) errEl.textContent = "تعذر الدخول. حاول مرة أخرى.";
         return;
       }
-      phase = "lobby";
+      phase = "matchmaking";
       render();
     });
   });
@@ -665,7 +624,7 @@ function connectSocket(name: string, mode: GameMode): void {
       maxPlayersPerMatch?: number;
       countdownSecondsRemaining?: number;
     }) => {
-      if (phase !== "lobby" && phase !== "countdown") return;
+      if (phase !== "matchmaking" && phase !== "countdown") return;
       if (payload.mode) currentGameMode = payload.mode;
       currentMatchPlayers = payload.players.map((p) => ({
         socketId: p.socketId,
@@ -685,7 +644,7 @@ function connectSocket(name: string, mode: GameMode): void {
           }
           lobbyNotice = LOBBY_MSG_WAIT_NEXT;
           lobbyPlayersList = payload.players;
-          phase = "lobby";
+          phase = "matchmaking";
           render();
           return;
         }
@@ -695,14 +654,13 @@ function connectSocket(name: string, mode: GameMode): void {
       }
 
       if (
-        phase === "lobby" &&
+        phase === "matchmaking" &&
         payload.isStarting &&
         mySocketId &&
         participants.length > 0 &&
         isSelected
       ) {
         lobbyNotice = "";
-        lobbyReadySubmitting = false;
         lobbyPlayersList = payload.players;
         phase = "countdown";
         render();
@@ -710,7 +668,7 @@ function connectSocket(name: string, mode: GameMode): void {
           Math.max(1, payload.countdownSecondsRemaining ?? DEFAULT_LOBBY_COUNTDOWN_SEC),
         );
       } else if (
-        phase === "lobby" &&
+        phase === "matchmaking" &&
         payload.isStarting &&
         mySocketId &&
         participants.length > 0 &&
@@ -719,10 +677,11 @@ function connectSocket(name: string, mode: GameMode): void {
         lobbyNotice = LOBBY_MSG_WAIT_NEXT;
       }
 
-      if (phase === "lobby") {
-        renderLobbyPlayers(payload.players);
-      } else {
-        lobbyPlayersList = payload.players;
+      lobbyPlayersList = payload.players;
+      if (phase === "matchmaking") {
+        syncMatchmakingStatusText();
+        const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+        if (noticeEl) noticeEl.textContent = lobbyNotice;
       }
       updateConnectionBadge();
       updateLobbyModeLabel();
@@ -740,9 +699,9 @@ function connectSocket(name: string, mode: GameMode): void {
           window.clearInterval(cdInterval);
           cdInterval = null;
         }
-        phase = "lobby";
+        phase = "matchmaking";
         render();
-      } else if (phase === "lobby") {
+      } else if (phase === "matchmaking") {
         render();
       }
       return;
@@ -751,9 +710,8 @@ function connectSocket(name: string, mode: GameMode): void {
       startCountdownTicks(Math.max(1, payload.seconds));
       return;
     }
-    if (phase !== "lobby") return;
+    if (phase !== "matchmaking") return;
     lobbyNotice = "";
-    lobbyReadySubmitting = false;
     phase = "countdown";
     render();
     startCountdownTicks(Math.max(1, payload.seconds));
@@ -765,10 +723,10 @@ function connectSocket(name: string, mode: GameMode): void {
       cdInterval = null;
     }
     if (phase === "countdown") {
-      phase = "lobby";
+      phase = "matchmaking";
     }
     lobbyNotice = LOBBY_MSG_CANCELLED;
-    if (phase === "lobby") render();
+    if (phase === "matchmaking") render();
   });
 
   s.on(
@@ -789,7 +747,6 @@ function connectSocket(name: string, mode: GameMode): void {
       }
       if (payload.gameMode) currentGameMode = payload.gameMode;
       lobbyNotice = "";
-      lobbyReadySubmitting = false;
       if (payload.players) {
         currentMatchPlayers = payload.players.map((p) => ({ ...p }));
       }

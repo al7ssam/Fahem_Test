@@ -55,6 +55,7 @@ const gameSettingsPatchSchema = z.object({
   studyRoundQuestionCount: z.number().int().min(1).max(30),
   studyPhaseMs: z.number().int().min(5000).max(300000),
   maxPlayersPerMatch: z.number().int().min(2).max(100),
+  matchFillWindowSeconds: z.number().int().min(1).max(120),
 });
 
 const questionPatchSchema = z.object({
@@ -289,7 +290,7 @@ export function registerAdminRoutes(app: Express): void {
       const rows = await pool.query<{ key: string; value: string }>(
         `SELECT key, value
          FROM app_settings
-         WHERE key IN ('game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms', 'max_players_per_match')`,
+         WHERE key IN ('game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms', 'max_players_per_match', 'match_fill_window_seconds')`,
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
       const maxStudyRounds = Number(map.get("game_max_study_rounds") ?? "3");
@@ -300,12 +301,18 @@ export function registerAdminRoutes(app: Express): void {
         100,
         Math.max(2, Number.isFinite(maxPlayersRaw) ? maxPlayersRaw : 10),
       );
+      const fillRaw = Number(map.get("match_fill_window_seconds") ?? "5");
+      const matchFillWindowSeconds = Math.min(
+        120,
+        Math.max(1, Number.isFinite(fillRaw) ? fillRaw : 5),
+      );
       res.json({
         ok: true,
         maxStudyRounds,
         studyRoundQuestionCount,
         studyPhaseMs,
         maxPlayersPerMatch,
+        matchFillWindowSeconds,
       });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
@@ -331,13 +338,15 @@ export function registerAdminRoutes(app: Express): void {
            ('game_max_study_rounds', $1),
            ('game_study_round_size', $2),
            ('game_study_phase_ms', $3),
-           ('max_players_per_match', $4)
+           ('max_players_per_match', $4),
+           ('match_fill_window_seconds', $5)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [
           String(parsed.data.maxStudyRounds),
           String(parsed.data.studyRoundQuestionCount),
           String(parsed.data.studyPhaseMs),
           String(parsed.data.maxPlayersPerMatch),
+          String(parsed.data.matchFillWindowSeconds),
         ],
       );
       res.json({ ok: true });

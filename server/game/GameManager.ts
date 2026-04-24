@@ -14,7 +14,7 @@ const answerSchema = z.object({
   choiceIndex: z.number().int().min(0).max(3),
 });
 
-const MATCH_START_SECONDS = 5;
+const DEFAULT_MATCH_FILL_WINDOW_SECONDS = 5;
 const DEFAULT_MAX_PLAYERS_PER_MATCH = 10;
 
 type LobbyEntry = {
@@ -67,6 +67,7 @@ export class GameManager {
   };
   private readyOrderCounter = 0;
   private maxPlayersPerMatch = DEFAULT_MAX_PLAYERS_PER_MATCH;
+  private matchFillWindowSeconds = DEFAULT_MATCH_FILL_WINDOW_SECONDS;
 
   constructor(private readonly io: Server) {}
 
@@ -110,13 +111,14 @@ export class GameManager {
         this.lobbies[mode].set(socket.id, {
           socketId: socket.id,
           name,
-          ready: false,
-          readyOrder: null,
+          ready: true,
+          readyOrder: ++this.readyOrderCounter,
           mode,
         });
         await socket.join(this.lobbyRoom(mode));
         this.broadcastLobby(mode);
         socket.emit("lobby_state", this.buildLobbyPayload(mode));
+        this.enqueueScheduleMatchStart(mode);
         cb?.({ ok: true });
       } catch {
         cb?.({ ok: false, error: "server" });
@@ -245,6 +247,25 @@ export class GameManager {
     }
   }
 
+  private async loadMatchFillWindowSeconds(): Promise<number> {
+    try {
+      const pool = getPool();
+      const rows = await pool.query<{ value: string }>(
+        `SELECT value FROM app_settings WHERE key = 'match_fill_window_seconds' LIMIT 1`,
+      );
+      const raw = Number(rows.rows[0]?.value ?? DEFAULT_MATCH_FILL_WINDOW_SECONDS);
+      const next = Math.min(
+        120,
+        Math.max(1, Number.isFinite(raw) ? raw : DEFAULT_MATCH_FILL_WINDOW_SECONDS),
+      );
+      this.matchFillWindowSeconds = next;
+      return next;
+    } catch {
+      this.matchFillWindowSeconds = DEFAULT_MATCH_FILL_WINDOW_SECONDS;
+      return this.matchFillWindowSeconds;
+    }
+  }
+
   private broadcastLobby(mode: GameMode): void {
     this.io.to(this.lobbyRoom(mode)).emit("lobby_state", this.buildLobbyPayload(mode));
   }
@@ -278,7 +299,8 @@ export class GameManager {
   }
 
   private emitMatchStarting(mode: GameMode, locked: string[], maxPlayers: number): void {
-    const endsAt = this.countdownEndsAt[mode] ?? Date.now() + MATCH_START_SECONDS * 1000;
+    const fillMs = this.matchFillWindowSeconds * 1000;
+    const endsAt = this.countdownEndsAt[mode] ?? Date.now() + fillMs;
     const seconds = Math.max(1, Math.ceil((endsAt - Date.now()) / 1000));
     this.io.to(this.lobbyRoom(mode)).emit("match_starting", {
       seconds,
@@ -330,6 +352,8 @@ export class GameManager {
     }
 
     const maxPlayers = await this.loadMaxPlayersPerMatch();
+    const fillSeconds = await this.loadMatchFillWindowSeconds();
+    const fillMs = fillSeconds * 1000;
     const locked = this.sortedReadyPlayers(mode)
       .slice(0, maxPlayers)
       .map((p) => p.socketId);
@@ -341,7 +365,7 @@ export class GameManager {
     }
 
     this.lockedParticipants[mode] = locked;
-    this.countdownEndsAt[mode] = Date.now() + MATCH_START_SECONDS * 1000;
+    this.countdownEndsAt[mode] = Date.now() + fillMs;
     this.emitMatchStarting(mode, locked, maxPlayers);
     this.broadcastLobby(mode);
 
@@ -349,7 +373,7 @@ export class GameManager {
       this.matchStartTimers[mode] = null;
       this.countdownEndsAt[mode] = null;
       void this.startMatchFromLobby(mode);
-    }, MATCH_START_SECONDS * 1000);
+    }, fillMs);
   }
 
   private async startMatchFromLobby(gameMode: GameMode): Promise<void> {
