@@ -8,3 +8,4 @@ CREATE TABLE IF NOT EXISTS questions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_questions_created_at ON questions (created_at);
+-- fix
