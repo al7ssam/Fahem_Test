@@ -194,8 +194,8 @@ export class Match {
 
   private async runStudyThenQuizLoop(pool: ReturnType<typeof getPool>): Promise<void> {
     const prefetch = Math.min(MAX_ROUNDS, config.studyMatchPrefetch);
-    const refillBatch = Math.max(1, config.studyQuizBlockSize);
-    const maxCardsFull = config.maxStudyCardsMatchStart;
+    const blockSize = Math.max(1, config.studyQuizBlockSize);
+    const maxCardsPerBlock = Math.max(1, config.maxStudyCardsDisplay);
 
     this.questionQueue = [];
     this.queueIndex = 0;
@@ -205,35 +205,40 @@ export class Match {
       return;
     }
 
-    this.macroRound = 1;
-    const ids = this.questionQueue.map((q) => q.id);
-    const cards = await getStudyPhaseCardsFromQuestionIds(
-      pool,
-      ids,
-      maxCardsFull,
-    );
-    const endsAt = Date.now() + config.studyPhaseMs;
-    if (cards.length > 0) {
-      await this.runStudyPhase(cards, endsAt);
-    }
-    if (this.finished) return;
-
     while (!this.finished && this.countActive() > 1) {
-      if (this.queueIndex >= this.questionQueue.length) {
-        const lenBefore = this.questionQueue.length;
-        await this.fillQuestionQueue(pool, refillBatch);
-        if (this.queueIndex >= this.questionQueue.length) {
-          if (this.questionQueue.length === lenBefore) {
-            this.emitNoQuestions();
-            return;
-          }
-        }
+      const remaining = this.questionQueue.length - this.queueIndex;
+      if (remaining < blockSize) {
+        await this.fillQuestionQueue(pool, blockSize - remaining);
       }
-      if (this.round >= MAX_ROUNDS) return;
-      const q = this.questionQueue[this.queueIndex];
-      this.queueIndex += 1;
-      await this.playOneQuestion(pool, q);
-      if (this.finished) return;
+      if (this.queueIndex >= this.questionQueue.length) {
+        this.emitNoQuestions();
+        return;
+      }
+
+      this.macroRound += 1;
+      const block = this.questionQueue.slice(
+        this.queueIndex,
+        Math.min(this.questionQueue.length, this.queueIndex + blockSize),
+      );
+      const blockIds = block.map((q) => q.id);
+      const cards = await getStudyPhaseCardsFromQuestionIds(
+        pool,
+        blockIds,
+        Math.min(maxCardsPerBlock, blockIds.length),
+      );
+      if (cards.length > 0) {
+        const endsAt = Date.now() + config.studyPhaseMs;
+        await this.runStudyPhase(cards, endsAt);
+        if (this.finished) return;
+      }
+
+      for (const q of block) {
+        if (this.finished || this.countActive() <= 1 || this.round >= MAX_ROUNDS) {
+          return;
+        }
+        this.queueIndex += 1;
+        await this.playOneQuestion(pool, q);
+      }
     }
   }
 
