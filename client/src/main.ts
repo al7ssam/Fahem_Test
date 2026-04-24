@@ -44,6 +44,8 @@ function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): v
   const root = app.querySelector<HTMLDivElement>("#result-screen");
   const video = app.querySelector<HTMLVideoElement>("#res-video");
   const emojiEl = app.querySelector<HTMLParagraphElement>("#res-emoji");
+  const gate = app.querySelector<HTMLDivElement>("#res-audio-gate");
+  const gateBtn = app.querySelector<HTMLButtonElement>("#res-audio-gate-btn");
   if (!root || !video || !emojiEl) return;
 
   root.classList.remove(
@@ -52,11 +54,14 @@ function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): v
     "result-screen--tie",
     "result-screen--empty",
     "result-screen--emoji-fallback",
+    "result-screen--needs-interaction",
   );
   root.classList.add(`result-screen--${kind}`);
 
   emojiEl.textContent = emoji;
   emojiEl.classList.remove("result-screen__emoji--visible");
+  gate?.setAttribute("hidden", "true");
+  gateBtn?.setAttribute("aria-hidden", "true");
 
   const prefersReduced =
     typeof window.matchMedia === "function" &&
@@ -86,10 +91,14 @@ function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): v
           ? "فيديو قصير يعبّر عن الخسارة"
           : "فيديو قصير للتعادل";
     video.setAttribute("aria-label", aria);
-    video.muted = true;
-    video.defaultMuted = true;
+    video.muted = false;
+    video.defaultMuted = false;
+    video.volume = 1;
     video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
     video.loop = true;
+    video.removeAttribute("controls");
     video.setAttribute("src", src);
     video.load();
 
@@ -98,13 +107,42 @@ function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): v
       emojiEl.classList.add("result-screen__emoji--visible");
     };
 
+    const showInteractionGate = (): void => {
+      if (!gate || !gateBtn) {
+        showEmojiFallback();
+        return;
+      }
+      root.classList.add("result-screen--needs-interaction");
+      gate.removeAttribute("hidden");
+      gateBtn.removeAttribute("aria-hidden");
+      gateBtn.focus();
+      video.setAttribute("controls", "controls");
+    };
+
     video.onerror = () => {
       showEmojiFallback();
     };
 
     void video.play().catch(() => {
-      showEmojiFallback();
+      showInteractionGate();
     });
+
+    if (gateBtn) {
+      gateBtn.onclick = () => {
+        video.muted = false;
+        video.defaultMuted = false;
+        video.volume = 1;
+        void video.play()
+          .then(() => {
+            root.classList.remove("result-screen--needs-interaction");
+            gate?.setAttribute("hidden", "true");
+            gateBtn.setAttribute("aria-hidden", "true");
+          })
+          .catch(() => {
+            showEmojiFallback();
+          });
+      };
+    }
   }
 }
 
@@ -294,6 +332,11 @@ function render(): void {
                 preload="metadata"
               ></video>
               <p id="res-emoji" class="result-screen__emoji" aria-hidden="true"></p>
+              <div id="res-audio-gate" class="result-screen__audio-gate" hidden>
+                <button id="res-audio-gate-btn" type="button" class="result-screen__audio-gate-btn" aria-hidden="true">
+                  اضغط لتشغيل الفيديو مع الصوت
+                </button>
+              </div>
             </div>
           </div>
           <h2 id="res-title" class="result-screen__title text-3xl font-extrabold tracking-tight"></h2>

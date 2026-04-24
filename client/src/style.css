@@ -343,6 +343,51 @@ body {
   object-fit: cover;
 }
 
+.result-screen__audio-gate {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(
+    180deg,
+    rgba(15, 23, 42, 0.15) 0%,
+    rgba(15, 23, 42, 0.78) 65%
+  );
+  padding: 1rem;
+  z-index: 4;
+}
+
+.result-screen--needs-interaction .result-screen__audio-gate {
+  display: flex;
+}
+
+.result-screen__audio-gate-btn {
+  width: min(100%, 16rem);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 0.9rem;
+  padding: 0.85rem 1rem;
+  background: rgba(15, 23, 42, 0.88);
+  color: #f8fafc;
+  font-size: 0.98rem;
+  font-weight: 800;
+  line-height: 1.4;
+  text-align: center;
+  cursor: pointer;
+  box-shadow:
+    0 10px 24px -10px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset;
+}
+
+.result-screen__audio-gate-btn:hover {
+  background: rgba(30, 41, 59, 0.96);
+}
+
+.result-screen__audio-gate-btn:focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.92);
+  outline-offset: 2px;
+}
+
 .result-screen__emoji {
   position: absolute;
   inset: 0;
