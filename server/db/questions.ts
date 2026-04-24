@@ -11,13 +11,19 @@ export type QuestionRow = {
 export async function getRandomQuestion(
   pool: Pool,
   excludeIds: number[],
+  requireStudyBody = false,
 ): Promise<QuestionRow | null> {
   const params: unknown[] = [];
-  let where = "";
+  const whereParts: string[] = [];
   if (excludeIds.length > 0) {
     params.push(excludeIds);
-    where = `WHERE id != ALL($1::int[])`;
+    whereParts.push(`id != ALL($${params.length}::int[])`);
   }
+  if (requireStudyBody) {
+    whereParts.push(`study_body IS NOT NULL AND btrim(study_body) <> ''`);
+  }
+  const where =
+    whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
   const sql = `
     SELECT id, prompt, options, correct_index, study_body
     FROM questions

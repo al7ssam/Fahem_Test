@@ -10,29 +10,7 @@ import { getResultMessages, type ResultMessages } from "../db/resultCopy";
 
 const QUESTION_MS = 15_000;
 const MAX_ROUNDS = 50;
-const DEBUG_ENDPOINT =
-  "http://127.0.0.1:7858/ingest/21276b47-29bb-43f7-9ac2-a61c3561acb1";
-
-function postDebugLog(payload: {
-  runId: string;
-  hypothesisId: string;
-  location: string;
-  message: string;
-  data: Record<string, unknown>;
-}): void {
-  fetch(DEBUG_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "d38fe2",
-    },
-    body: JSON.stringify({
-      sessionId: "d38fe2",
-      ...payload,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-}
+const STUDY_ROUND_SIZE = 8;
 
 export type GameMode = "direct" | "study_then_quiz";
 
@@ -217,22 +195,8 @@ export class Match {
 
   private async runStudyThenQuizLoop(pool: ReturnType<typeof getPool>): Promise<void> {
     const prefetch = Math.min(MAX_ROUNDS, config.studyMatchPrefetch);
-    const blockSize = Math.max(1, config.studyQuizBlockSize);
-    const maxCardsPerBlock = Math.max(1, config.maxStudyCardsDisplay);
-    // #region agent log
-    postDebugLog({
-      runId: "before-fix",
-      hypothesisId: "H4",
-      location: "server/game/Match.ts:runStudyThenQuizLoop:init",
-      message: "Study mode config values",
-      data: {
-        prefetch,
-        blockSize,
-        maxCardsPerBlock,
-        studyQuizBlockSizeCfg: config.studyQuizBlockSize,
-      },
-    });
-    // #endregion
+    const blockSize = STUDY_ROUND_SIZE;
+    const maxCardsPerBlock = STUDY_ROUND_SIZE;
 
     this.questionQueue = [];
     this.queueIndex = 0;
@@ -247,6 +211,11 @@ export class Match {
       if (remaining < blockSize) {
         await this.fillQuestionQueue(pool, blockSize - remaining);
       }
+      // نلتزم بدفعات ثابتة: 8 بطاقات ثم 8 أسئلة في كل جولة.
+      if (this.questionQueue.length - this.queueIndex < blockSize) {
+        this.emitNoQuestions();
+        return;
+      }
       if (this.queueIndex >= this.questionQueue.length) {
         this.emitNoQuestions();
         return;
@@ -258,64 +227,23 @@ export class Match {
         Math.min(this.questionQueue.length, this.queueIndex + blockSize),
       );
       const blockIds = block.map((q) => q.id);
-      // #region agent log
-      postDebugLog({
-        runId: "before-fix",
-        hypothesisId: "H1",
-        location: "server/game/Match.ts:runStudyThenQuizLoop:block",
-        message: "Selected block question ids",
-        data: {
-          macroRound: this.macroRound,
-          queueIndex: this.queueIndex,
-          blockIds,
-          queueLen: this.questionQueue.length,
-        },
-      });
-      // #endregion
       const cards = await getStudyPhaseCardsFromQuestionIds(
         pool,
         blockIds,
         Math.min(maxCardsPerBlock, blockIds.length),
       );
-      // #region agent log
-      postDebugLog({
-        runId: "before-fix",
-        hypothesisId: "H1",
-        location: "server/game/Match.ts:runStudyThenQuizLoop:cards",
-        message: "Fetched study cards for block",
-        data: {
-          macroRound: this.macroRound,
-          blockIds,
-          cardQuestionIds: cards.map((c) => c.questionId),
-          cardIds: cards.map((c) => c.id),
-          cardCount: cards.length,
-        },
-      });
-      // #endregion
-      if (cards.length > 0) {
-        const endsAt = Date.now() + config.studyPhaseMs;
-        await this.runStudyPhase(cards, endsAt);
-        if (this.finished) return;
+      if (cards.length !== blockSize) {
+        this.emitNoQuestions();
+        return;
       }
+      const endsAt = Date.now() + config.studyPhaseMs;
+      await this.runStudyPhase(cards, endsAt);
+      if (this.finished) return;
 
       for (const q of block) {
         if (this.finished || this.countActive() <= 1 || this.round >= MAX_ROUNDS) {
           return;
         }
-        // #region agent log
-        postDebugLog({
-          runId: "before-fix",
-          hypothesisId: "H2",
-          location: "server/game/Match.ts:runStudyThenQuizLoop:question-loop",
-          message: "About to emit question from current block",
-          data: {
-            macroRound: this.macroRound,
-            qid: q.id,
-            blockIds,
-            queueIndexBeforeInc: this.queueIndex,
-          },
-        });
-        // #endregion
         this.queueIndex += 1;
         await this.playOneQuestion(pool, q);
       }
@@ -332,7 +260,7 @@ export class Match {
     }
     let added = 0;
     while (added < targetMore) {
-      const q = await getRandomQuestion(pool, [...exclude]);
+      const q = await getRandomQuestion(pool, [...exclude], true);
       if (!q) break;
       exclude.add(q.id);
       this.questionQueue.push(q);

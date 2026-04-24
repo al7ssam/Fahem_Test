@@ -25,29 +25,6 @@ const DEFAULT_RESULT_MESSAGES = {
   loser: "انتهت الجولة لصالح لاعب آخر.",
   tie: "تعادل أو لا فائز — حاول مرة أخرى!",
 } as const;
-const DEBUG_ENDPOINT =
-  "http://127.0.0.1:7858/ingest/21276b47-29bb-43f7-9ac2-a61c3561acb1";
-
-function postDebugLog(payload: {
-  runId: string;
-  hypothesisId: string;
-  location: string;
-  message: string;
-  data: Record<string, unknown>;
-}): void {
-  fetch(DEBUG_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Debug-Session-Id": "d38fe2",
-    },
-    body: JSON.stringify({
-      sessionId: "d38fe2",
-      ...payload,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-}
 let studyEndsAt = 0;
 
 function el(html: string): HTMLElement {
@@ -390,20 +367,6 @@ function connectSocket(name: string, mode: GameMode): void {
       scope?: string;
     }) => {
       studyCards = payload.cards ?? [];
-      // #region agent log
-      postDebugLog({
-        runId: "before-fix",
-        hypothesisId: "H3",
-        location: "client/src/main.ts:study_phase",
-        message: "Client received study_phase cards",
-        data: {
-          cardsQuestionIds: studyCards.map((c) => c.questionId ?? c.id),
-          cardsCount: studyCards.length,
-          scope: payload.scope ?? null,
-          macroRound: payload.macroRound ?? null,
-        },
-      });
-      // #endregion
       studyEndsAt = payload.endsAt;
       phase = "studying";
       if (!app.querySelector("#study-cards")) render();
@@ -447,19 +410,6 @@ function connectSocket(name: string, mode: GameMode): void {
       options: string[];
       endsAt: number;
     }) => {
-      // #region agent log
-      postDebugLog({
-        runId: "before-fix",
-        hypothesisId: "H3",
-        location: "client/src/main.ts:question",
-        message: "Client received question with current study cards snapshot",
-        data: {
-          incomingQuestionId: q.questionId,
-          currentStudyCardQuestionIds: studyCards.map((c) => c.questionId ?? c.id),
-          phase,
-        },
-      });
-      // #endregion
       currentQuestionId = q.questionId;
       endsAt = q.endsAt;
       phase = "playing";
