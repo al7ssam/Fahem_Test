@@ -18,6 +18,9 @@ let currentMatchPlayers: Array<{
   name: string;
   hearts: number;
   eliminated: boolean;
+  isSpectator?: boolean;
+  skillPoints?: number;
+  lastAward?: number;
 }> = [];
 let studyCards: Array<{
   id: number;
@@ -165,6 +168,14 @@ function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): v
 }
 
 let studyEndsAt = 0;
+let spectatorEligible = false;
+let spectatorFollowing = false;
+let currentLeaderboard: Array<{
+  rank: number;
+  name: string;
+  skillPoints: number;
+  medal: "gold" | "silver" | "bronze" | null;
+}> = [];
 
 function el(html: string): HTMLElement {
   const t = document.createElement("template");
@@ -292,6 +303,7 @@ function render(): void {
             <h2 class="text-lg font-bold text-amber-200 drop-shadow-sm">مراجعة قبل الأسئلة</h2>
             <div id="study-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums drop-shadow-sm">—</div>
           </div>
+          <button id="round-ready-btn" type="button" class="w-full rounded-xl bg-indigo-600/80 hover:bg-indigo-500 py-2 text-sm font-bold">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
           <p id="study-hint" class="text-right text-slate-300/90 text-sm min-h-[1.25rem] leading-relaxed"></p>
           <div id="study-cards" class="flex-1 space-y-4 overflow-y-auto max-h-[72vh] pb-4"></div>
         </div>
@@ -304,6 +316,14 @@ function render(): void {
         : "جاري تجهيز الجولة…";
     }
     const container = app.querySelector<HTMLDivElement>("#study-cards");
+    const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
+    if (readyBtn) {
+      readyBtn.onclick = () => {
+        socket?.emit("round_ready", {});
+        readyBtn.disabled = true;
+        readyBtn.textContent = "تم تسجيل جاهزيتك";
+      };
+    }
     if (container && hasCards) {
       studyCards.forEach((c, i) => {
         const card = document.createElement("div");
@@ -331,6 +351,7 @@ function render(): void {
             <div id="opts" class="grid gap-2"></div>
           </div>
           <p id="status" class="text-center text-slate-400 text-sm min-h-[1.25rem]"></p>
+          <p id="spectator-badge" class="text-center text-amber-200 text-sm min-h-[1.25rem]"></p>
         </div>
       `),
     );
@@ -365,10 +386,21 @@ function render(): void {
           <h2 id="res-title" class="result-screen__title text-3xl font-extrabold tracking-tight"></h2>
           <p id="res-kicker" class="result-screen__kicker text-sm font-semibold min-h-[1.25rem]"></p>
           <p id="res-body" class="result-screen__body text-lg leading-relaxed"></p>
+          <button id="continue-watch" type="button" class="result-screen__again w-full rounded-xl py-3 text-base font-bold shadow-lg active:scale-[0.98] transition hidden">متابعة الجولة كمشاهد</button>
+          <div id="res-leaderboard" class="w-full text-right"></div>
           <button id="again" type="button" class="result-screen__again w-full rounded-xl py-3 text-lg font-bold shadow-lg active:scale-[0.98] transition">العب مجدداً</button>
         </div>
       `),
     );
+    const continueWatch = app.querySelector<HTMLButtonElement>("#continue-watch");
+    if (continueWatch) {
+      continueWatch.addEventListener("click", () => {
+        spectatorFollowing = true;
+        spectatorEligible = false;
+        continueWatch.classList.add("hidden");
+        socket?.emit("continue_as_spectator", {});
+      });
+    }
     const again = app.querySelector<HTMLButtonElement>("#again")!;
     again.addEventListener("click", () => {
       phase = "name";
@@ -435,9 +467,38 @@ function renderPlayingPlayersPanel(): void {
     const row = document.createElement("div");
     const isMe = p.socketId === mySocketId;
     row.className = `players-panel__row ${isMe ? "players-panel__row--me" : ""}`;
-    row.innerHTML = `<span>${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}</span><span>${p.eliminated ? "خرج" : "نشط"} · ❤️ ${p.hearts}</span>`;
+    const points = p.skillPoints ?? 0;
+    const bonus = p.lastAward && p.lastAward > 0 ? ` <span class="players-panel__award">+${p.lastAward}</span>` : "";
+    row.innerHTML = `<span>${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}</span><span>${p.eliminated ? "خرج" : "نشط"} · ❤️ ${p.hearts} · ⭐ ${points}${bonus}</span>`;
     panel.appendChild(row);
   }
+}
+
+function renderLeaderboard(): void {
+  const box = app.querySelector<HTMLDivElement>("#res-leaderboard");
+  if (!box) return;
+  if (!currentLeaderboard.length) {
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = `<h3 class="text-lg font-bold mb-2 text-amber-200">لوحة المتصدرين</h3>`;
+  const list = document.createElement("div");
+  list.className = "players-panel";
+  currentLeaderboard.forEach((row) => {
+    const item = document.createElement("div");
+    item.className = "players-panel__row";
+    const medal =
+      row.medal === "gold"
+        ? "🥇"
+        : row.medal === "silver"
+          ? "🥈"
+          : row.medal === "bronze"
+            ? "🥉"
+            : "";
+    item.innerHTML = `<span>${medal} #${row.rank} ${escapeHtml(row.name)}</span><span>⭐ ${row.skillPoints}</span>`;
+    list.appendChild(item);
+  });
+  box.appendChild(list);
 }
 
 function escapeHtml(s: string): string {
@@ -541,6 +602,8 @@ function connectSocket(name: string, mode: GameMode): void {
       if (payload.players) {
         currentMatchPlayers = payload.players.map((p) => ({ ...p }));
       }
+      spectatorEligible = false;
+      spectatorFollowing = false;
       if (payload.gameMode === "study_then_quiz") {
         phase = "studying";
         studyCards = [];
@@ -605,6 +668,7 @@ function connectSocket(name: string, mode: GameMode): void {
       options: string[];
       endsAt: number;
     }) => {
+      if (spectatorEligible && !spectatorFollowing) return;
       currentQuestionId = q.questionId;
       endsAt = q.endsAt;
       phase = "playing";
@@ -622,6 +686,7 @@ function connectSocket(name: string, mode: GameMode): void {
           "w-full text-right rounded-xl border border-white/10 bg-slate-800/60 px-4 py-3 text-base font-medium hover:bg-slate-700/80 active:scale-[0.99] transition";
         b.textContent = label;
         b.addEventListener("click", () => {
+          if (spectatorFollowing) return;
           if (currentQuestionId == null) return;
           if (status) status.textContent = "تم إرسال إجابتك.";
           s.emit("answer", {
@@ -635,6 +700,10 @@ function connectSocket(name: string, mode: GameMode): void {
         opts.appendChild(b);
       });
       if (status) status.textContent = "";
+      const spectatorBadge = app.querySelector<HTMLParagraphElement>("#spectator-badge");
+      if (spectatorBadge) {
+        spectatorBadge.textContent = spectatorFollowing ? "وضع المشاهد: يمكنك المتابعة بدون إجابة." : "";
+      }
       startQuestionTimer();
     },
   );
@@ -642,14 +711,28 @@ function connectSocket(name: string, mode: GameMode): void {
   s.on(
     "question_result",
     (payload: {
-      players: { socketId: string; hearts: number; eliminated: boolean }[];
+      players: {
+        socketId: string;
+        hearts: number;
+        eliminated: boolean;
+        skillPoints?: number;
+        lastAward?: number;
+        isSpectator?: boolean;
+      }[];
     }) => {
       const me = payload.players.find((p) => p.socketId === mySocketId);
       if (me && phase === "playing") renderHearts(me.hearts);
       currentMatchPlayers = currentMatchPlayers.map((player) => {
         const next = payload.players.find((p) => p.socketId === player.socketId);
         return next
-          ? { ...player, hearts: next.hearts, eliminated: next.eliminated }
+          ? {
+              ...player,
+              hearts: next.hearts,
+              eliminated: next.eliminated,
+              skillPoints: next.skillPoints ?? player.skillPoints ?? 0,
+              lastAward: next.lastAward ?? 0,
+              isSpectator: next.isSpectator ?? player.isSpectator ?? false,
+            }
           : player;
       });
       renderPlayingPlayersPanel();
@@ -662,9 +745,23 @@ function connectSocket(name: string, mode: GameMode): void {
     "game_over",
     (payload: {
       winner: { socketId: string; name: string } | null;
-      players: { socketId: string; name: string; hearts: number; eliminated: boolean }[];
+      players: {
+        socketId: string;
+        name: string;
+        hearts: number;
+        eliminated: boolean;
+        skillPoints?: number;
+        lastAward?: number;
+        isSpectator?: boolean;
+      }[];
       reason?: string;
       resultMessages?: { winner: string; loser: string; tie: string };
+      leaderboard?: Array<{
+        rank: number;
+        name: string;
+        skillPoints: number;
+        medal: "gold" | "silver" | "bronze" | null;
+      }>;
     }) => {
       if (cdInterval) {
         window.clearInterval(cdInterval);
@@ -675,6 +772,7 @@ function connectSocket(name: string, mode: GameMode): void {
       render();
       const me = payload.players.find((p) => p.socketId === mySocketId);
       currentMatchPlayers = payload.players.map((p) => ({ ...p }));
+      currentLeaderboard = payload.leaderboard ?? [];
       const title = app.querySelector<HTMLHeadingElement>("#res-title");
       const body = app.querySelector<HTMLParagraphElement>("#res-body");
       const kicker = app.querySelector<HTMLParagraphElement>("#res-kicker");
@@ -712,8 +810,9 @@ function connectSocket(name: string, mode: GameMode): void {
         body.textContent = tieCopy;
       }
       if (me) {
-        body.textContent += ` — قلوبك المتبقية: ${me.hearts}`;
+        body.textContent += ` — قلوبك المتبقية: ${me.hearts} — نقاطك: ${me.skillPoints ?? 0}`;
       }
+      renderLeaderboard();
       applyResultScreenPresentation(kind, emojiForFallback);
     },
   );
@@ -729,6 +828,29 @@ function connectSocket(name: string, mode: GameMode): void {
         p.reason === "disconnect"
           ? `${p.name} خرج من اللعبة.`
           : `${p.name} نفدت قلوبه.`;
+    }
+  });
+
+  s.on("spectator_offer", (p: { socketId?: string }) => {
+    if (!mySocketId || p.socketId !== mySocketId) return;
+    spectatorEligible = true;
+    phase = "result";
+    render();
+    const title = app.querySelector<HTMLHeadingElement>("#res-title");
+    const body = app.querySelector<HTMLParagraphElement>("#res-body");
+    const kicker = app.querySelector<HTMLParagraphElement>("#res-kicker");
+    const continueWatch = app.querySelector<HTMLButtonElement>("#continue-watch");
+    if (kicker) kicker.textContent = "تم إقصاؤك من الإجابة";
+    if (title) title.textContent = "خرجت من الجولة";
+    if (body) body.textContent = "يمكنك متابعة المباراة كمشاهد حتى النهاية.";
+    if (continueWatch) continueWatch.classList.remove("hidden");
+    applyResultScreenPresentation("lose", "💔");
+  });
+
+  s.on("round_ready_state", (p: { readySocketIds: string[]; totalActive: number }) => {
+    const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
+    if (hint && phase === "studying") {
+      hint.textContent = `جاهزون للجولة: ${p.readySocketIds.length}/${p.totalActive}`;
     }
   });
 

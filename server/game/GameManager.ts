@@ -95,6 +95,21 @@ export class GameManager {
       cb?.({ ok: true });
     });
 
+    socket.on("round_ready", (_raw, cb) => {
+      const match = this.socketToMatch.get(socket.id);
+      if (!match) {
+        cb?.({ ok: false });
+        return;
+      }
+      match.markRoundReady(socket.id);
+      cb?.({ ok: true });
+    });
+
+    socket.on("continue_as_spectator", (_raw, cb) => {
+      const match = this.socketToMatch.get(socket.id);
+      cb?.({ ok: Boolean(match) });
+    });
+
     socket.on("disconnect", () => {
       this.removeFromLobby(socket.id);
       const match = this.socketToMatch.get(socket.id);

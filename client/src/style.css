@@ -190,6 +190,24 @@ body {
   color: #fde68a;
 }
 
+.players-panel__award {
+  color: #facc15;
+  font-weight: 800;
+  margin-inline-start: 0.2rem;
+  animation: points-pop 0.45s ease-out;
+}
+
+@keyframes points-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 /* شاشة نهاية الجولة — فوز / خسارة / تعادل */
 @keyframes result-screen-enter {
   from {
