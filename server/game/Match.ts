@@ -147,6 +147,7 @@ export class Match {
   }
 
   private clearStudyWait(): void {
+    this.clearRoundReadyWait();
     if (this.studyWaitTimer) {
       clearTimeout(this.studyWaitTimer);
       this.studyWaitTimer = null;
@@ -203,45 +204,55 @@ export class Match {
     cards: Array<{ id: number; questionId: number; body: string; order: number }>,
   ): Promise<void> {
     this.roundReady.clear();
+    this.clearRoundReadyWait();
     const readyWindowMs = Math.min(
       20_000,
       Math.max(3_000, Math.floor(this.studyPhaseMs * 0.2)),
     );
     const readyEndsAt = Date.now() + (readyWindowMs || DEFAULT_ROUND_READY_MS);
+    const studyEndsAt = Date.now() + this.studyPhaseMs;
+
+    this.io.to(this.room).emit("study_phase", {
+      cards,
+      endsAt: studyEndsAt,
+      serverNow: Date.now(),
+      macroRound: this.macroRound,
+      scope: "match_start",
+    });
+
     this.io.to(this.room).emit("round_ready_window", {
       endsAt: readyEndsAt,
+      serverNow: Date.now(),
       macroRound: this.macroRound,
     });
     this.emitRoundReadyState();
-    const ms = Math.max(0, readyEndsAt - Date.now());
-    await new Promise<void>((resolve) => {
+
+    const waitReady = new Promise<void>((resolve) => {
       this.roundReadyResolve = resolve;
       this.roundReadyTimer = setTimeout(() => {
         this.roundReadyTimer = null;
         this.roundReadyResolve = null;
         resolve();
-      }, ms);
+      }, Math.max(0, readyEndsAt - Date.now()));
     });
 
-    const studyEndsAt = Date.now() + this.studyPhaseMs;
-    this.io.to(this.room).emit("study_phase", {
-      cards,
-      endsAt: studyEndsAt,
-      macroRound: this.macroRound,
-      scope: "match_start",
-    });
-
-    await new Promise<void>((resolve) => {
+    const waitStudy = new Promise<void>((resolve) => {
       this.studyPhaseResolve = resolve;
       this.studyWaitTimer = setTimeout(() => {
         this.studyWaitTimer = null;
         this.studyPhaseResolve = null;
         resolve();
-      }, this.studyPhaseMs);
+      }, Math.max(0, studyEndsAt - Date.now()));
     });
+
+    await Promise.race([waitReady, waitStudy]);
+    this.clearRoundReadyWait();
+    this.clearStudyWait();
+
     this.io.to(this.room).emit("study_phase_end", {
       macroRound: this.macroRound,
       studyEndsAt,
+      serverNow: Date.now(),
     });
   }
 
@@ -417,6 +428,7 @@ export class Match {
       prompt: q.prompt,
       options: q.options,
       endsAt: this.answerDeadline,
+      serverNow: Date.now(),
       round: this.round,
     });
 

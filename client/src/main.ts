@@ -176,6 +176,19 @@ let currentLeaderboard: Array<{
   skillPoints: number;
   medal: "gold" | "silver" | "bronze" | null;
 }> = [];
+type ReadyBtnState = "idle" | "window_open" | "submitted" | "closed";
+let readyBtnState: ReadyBtnState = "idle";
+let clockOffsetMs = 0;
+
+function syncClock(serverNow?: number): void {
+  if (typeof serverNow !== "number" || !Number.isFinite(serverNow)) return;
+  const nextOffset = serverNow - Date.now();
+  clockOffsetMs = Math.round((clockOffsetMs * 0.6) + (nextOffset * 0.4));
+}
+
+function nowSynced(): number {
+  return Date.now() + clockOffsetMs;
+}
 
 function el(html: string): HTMLElement {
   const t = document.createElement("template");
@@ -305,6 +318,7 @@ function render(): void {
           </div>
           <button id="round-ready-btn" type="button" class="w-full rounded-xl bg-indigo-600/80 hover:bg-indigo-500 py-2 text-sm font-bold">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
           <p id="study-hint" class="text-right text-slate-300/90 text-sm min-h-[1.25rem] leading-relaxed"></p>
+          <p id="study-ready-state" class="text-right text-amber-200/90 text-xs min-h-[1.1rem] leading-relaxed"></p>
           <div id="study-cards" class="flex-1 space-y-4 overflow-y-auto max-h-[72vh] pb-4"></div>
         </div>
       `),
@@ -317,12 +331,34 @@ function render(): void {
     }
     const container = app.querySelector<HTMLDivElement>("#study-cards");
     const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
+    const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
     if (readyBtn) {
+      readyBtn.disabled = readyBtnState === "submitted" || readyBtnState === "closed";
+      if (readyBtnState === "submitted") {
+        readyBtn.textContent = "تم تسجيل جاهزيتك";
+      } else if (readyBtnState === "closed") {
+        readyBtn.textContent = "أُغلقت نافذة الجاهزية";
+      } else {
+        readyBtn.textContent = "جاهز للجولة (تخطي العداد عند جاهزية الجميع)";
+      }
       readyBtn.onclick = () => {
+        if (readyBtnState !== "window_open") return;
         socket?.emit("round_ready", {});
+        readyBtnState = "submitted";
         readyBtn.disabled = true;
         readyBtn.textContent = "تم تسجيل جاهزيتك";
+        if (readyStateEl) {
+          readyStateEl.textContent = "جاهزيتك مسجلة. بانتظار بقية اللاعبين...";
+        }
       };
+    }
+    if (readyStateEl && !readyStateEl.textContent) {
+      readyStateEl.textContent =
+        readyBtnState === "window_open"
+          ? "زر الجاهزية متاح الآن."
+          : readyBtnState === "closed"
+            ? "بدأت/انتهت المرحلة التالية؛ زر الجاهزية غير متاح."
+            : "";
     }
     if (container && hasCards) {
       studyCards.forEach((c, i) => {
@@ -607,7 +643,8 @@ function connectSocket(name: string, mode: GameMode): void {
       if (payload.gameMode === "study_then_quiz") {
         phase = "studying";
         studyCards = [];
-        studyEndsAt = Date.now();
+        studyEndsAt = nowSynced();
+        readyBtnState = "idle";
         render();
       } else {
         phase = "playing";
@@ -618,10 +655,11 @@ function connectSocket(name: string, mode: GameMode): void {
 
   s.on(
     "round_ready_window",
-    (payload: { endsAt: number; macroRound?: number }) => {
+    (payload: { endsAt: number; serverNow?: number; macroRound?: number }) => {
+      syncClock(payload.serverNow);
       phase = "studying";
-      studyCards = [];
       studyEndsAt = payload.endsAt;
+      readyBtnState = "window_open";
       if (!app.querySelector("#study-cards")) render();
       const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
       if (hint) {
@@ -629,9 +667,13 @@ function connectSocket(name: string, mode: GameMode): void {
           "جاري انتظار جاهزية اللاعبين للجولة — يمكن تخطي العداد إذا ضغط الجميع جاهز.";
       }
       const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
+      const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyBtn) {
         readyBtn.disabled = false;
         readyBtn.textContent = "جاهز للجولة (تخطي العداد عند جاهزية الجميع)";
+      }
+      if (readyStateEl) {
+        readyStateEl.textContent = "نافذة الجاهزية مفتوحة الآن.";
       }
       startStudyTimer();
     },
@@ -642,9 +684,11 @@ function connectSocket(name: string, mode: GameMode): void {
     (payload: {
       cards: Array<{ id: number; questionId?: number; body: string; order: number }>;
       endsAt: number;
+      serverNow?: number;
       macroRound?: number;
       scope?: string;
     }) => {
+      syncClock(payload.serverNow);
       studyCards = payload.cards ?? [];
       studyEndsAt = payload.endsAt;
       phase = "studying";
@@ -660,9 +704,25 @@ function connectSocket(name: string, mode: GameMode): void {
           studyCards.length > 0 ? full : "جاري تجهيز الجولة…";
       }
       const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
+      const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyBtn) {
-        readyBtn.disabled = true;
-        readyBtn.textContent = "بدأت المراجعة";
+        if (readyBtnState === "window_open" || readyBtnState === "submitted") {
+          readyBtn.disabled = readyBtnState === "submitted";
+        } else {
+          readyBtn.disabled = true;
+        }
+        readyBtn.textContent =
+          readyBtnState === "submitted"
+            ? "تم تسجيل جاهزيتك"
+            : "جاهز للجولة (تخطي العداد عند جاهزية الجميع)";
+      }
+      if (readyStateEl) {
+        readyStateEl.textContent =
+          readyBtnState === "window_open"
+            ? "المذاكرة بدأت — ما زالت نافذة الجاهزية مفتوحة."
+            : readyBtnState === "submitted"
+              ? "المذاكرة بدأت — تم إرسال جاهزيتك."
+              : "";
       }
       if (container) {
         container.innerHTML = "";
@@ -680,9 +740,14 @@ function connectSocket(name: string, mode: GameMode): void {
   );
 
   s.on("study_phase_end", () => {
+    readyBtnState = "closed";
     const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
     if (hint && phase === "studying") {
       hint.textContent = "انتهت المراجعة — تبدأ الأسئلة الآن.";
+    }
+    const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
+    if (readyStateEl && phase === "studying") {
+      readyStateEl.textContent = "أُغلقت نافذة الجاهزية.";
     }
     clearTimer();
   });
@@ -694,7 +759,9 @@ function connectSocket(name: string, mode: GameMode): void {
       prompt: string;
       options: string[];
       endsAt: number;
+      serverNow?: number;
     }) => {
+      syncClock(q.serverNow);
       if (spectatorEligible && !spectatorFollowing) return;
       currentQuestionId = q.questionId;
       endsAt = q.endsAt;
@@ -877,7 +944,11 @@ function connectSocket(name: string, mode: GameMode): void {
   s.on("round_ready_state", (p: { readySocketIds: string[]; totalActive: number }) => {
     const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
     if (hint && phase === "studying") {
-      hint.textContent = `جاهزون للجولة: ${p.readySocketIds.length}/${p.totalActive}`;
+      hint.textContent = `المذاكرة جارية — جاهزون للجولة: ${p.readySocketIds.length}/${p.totalActive}`;
+    }
+    const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
+    if (readyStateEl && phase === "studying") {
+      readyStateEl.textContent = `جاهزية اللاعبين: ${p.readySocketIds.length}/${p.totalActive}`;
     }
   });
 
@@ -900,8 +971,8 @@ function startQuestionTimer(): void {
   const clock = app.querySelector<HTMLDivElement>("#clock");
   if (!clock) return;
   timerHandle = window.setInterval(() => {
-    const ms = Math.max(0, endsAt - Date.now());
-    const sec = Math.ceil(ms / 1000);
+    const ms = Math.max(0, endsAt - nowSynced());
+    const sec = Math.max(0, Math.floor((ms + 250) / 1000));
     clock.textContent = `${sec}s`;
   }, 200);
 }
@@ -911,8 +982,8 @@ function startStudyTimer(): void {
   const clock = app.querySelector<HTMLDivElement>("#study-clock");
   if (!clock) return;
   timerHandle = window.setInterval(() => {
-    const ms = Math.max(0, studyEndsAt - Date.now());
-    const sec = Math.ceil(ms / 1000);
+    const ms = Math.max(0, studyEndsAt - nowSynced());
+    const sec = Math.max(0, Math.floor((ms + 250) / 1000));
     clock.textContent = `${sec}s`;
   }, 200);
 }
