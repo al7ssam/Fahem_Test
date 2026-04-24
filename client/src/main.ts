@@ -13,6 +13,12 @@ let currentQuestionId: number | null = null;
 let endsAt = 0;
 let timerHandle: number | null = null;
 let currentGameMode: GameMode | null = null;
+let currentMatchPlayers: Array<{
+  socketId: string;
+  name: string;
+  hearts: number;
+  eliminated: boolean;
+}> = [];
 let studyCards: Array<{
   id: number;
   questionId?: number;
@@ -181,6 +187,7 @@ function render(): void {
             <div id="hearts" class="flex gap-1 text-2xl"></div>
             <div id="clock" class="text-xl font-mono font-bold text-amber-300 tabular-nums">—</div>
           </div>
+          <div id="players-panel" class="players-panel"></div>
           <div id="q-card" class="rounded-2xl bg-white/5 border border-white/10 p-5 flex-1 flex flex-col gap-4 shadow-xl">
             <p id="q-text" class="text-right text-xl font-semibold leading-relaxed min-h-[4rem]"></p>
             <div id="opts" class="grid gap-2"></div>
@@ -190,6 +197,7 @@ function render(): void {
       `),
     );
     renderHearts(3);
+    renderPlayingPlayersPanel();
     startQuestionTimer();
     return;
   }
@@ -259,6 +267,23 @@ function renderLobbyPlayers(
   };
 }
 
+function renderPlayingPlayersPanel(): void {
+  const panel = app.querySelector<HTMLDivElement>("#players-panel");
+  if (!panel) return;
+  panel.innerHTML = "";
+  if (currentMatchPlayers.length === 0) {
+    panel.textContent = "بانتظار بيانات اللاعبين...";
+    return;
+  }
+  for (const p of currentMatchPlayers) {
+    const row = document.createElement("div");
+    const isMe = p.socketId === mySocketId;
+    row.className = `players-panel__row ${isMe ? "players-panel__row--me" : ""}`;
+    row.innerHTML = `<span>${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}</span><span>${p.eliminated ? "خرج" : "نشط"} · ❤️ ${p.hearts}</span>`;
+    panel.appendChild(row);
+  }
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -308,6 +333,12 @@ function connectSocket(name: string, mode: GameMode): void {
     }) => {
       if (phase !== "lobby") return;
       if (payload.mode) currentGameMode = payload.mode;
+      currentMatchPlayers = payload.players.map((p) => ({
+        socketId: p.socketId,
+        name: p.name,
+        hearts: 3,
+        eliminated: false,
+      }));
       renderLobbyPlayers(payload.players);
       updateConnectionBadge();
       updateLobbyModeLabel();
@@ -339,13 +370,21 @@ function connectSocket(name: string, mode: GameMode): void {
     (payload: {
       matchId?: string;
       gameMode?: GameMode;
-      players?: unknown;
+      players?: Array<{
+        socketId: string;
+        name: string;
+        hearts: number;
+        eliminated: boolean;
+      }>;
     }) => {
       if (cdInterval) {
         window.clearInterval(cdInterval);
         cdInterval = null;
       }
       if (payload.gameMode) currentGameMode = payload.gameMode;
+      if (payload.players) {
+        currentMatchPlayers = payload.players.map((p) => ({ ...p }));
+      }
       if (payload.gameMode === "study_then_quiz") {
         phase = "studying";
         studyCards = [];
@@ -451,6 +490,13 @@ function connectSocket(name: string, mode: GameMode): void {
     }) => {
       const me = payload.players.find((p) => p.socketId === mySocketId);
       if (me && phase === "playing") renderHearts(me.hearts);
+      currentMatchPlayers = currentMatchPlayers.map((player) => {
+        const next = payload.players.find((p) => p.socketId === player.socketId);
+        return next
+          ? { ...player, hearts: next.hearts, eliminated: next.eliminated }
+          : player;
+      });
+      renderPlayingPlayersPanel();
       const status = app.querySelector<HTMLParagraphElement>("#status");
       if (status) status.textContent = "جاري السؤال التالي…";
     },
@@ -472,6 +518,7 @@ function connectSocket(name: string, mode: GameMode): void {
       phase = "result";
       render();
       const me = payload.players.find((p) => p.socketId === mySocketId);
+      currentMatchPlayers = payload.players.map((p) => ({ ...p }));
       const emojiEl = app.querySelector<HTMLParagraphElement>("#res-emoji");
       const title = app.querySelector<HTMLHeadingElement>("#res-title");
       const body = app.querySelector<HTMLParagraphElement>("#res-body");
@@ -506,6 +553,10 @@ function connectSocket(name: string, mode: GameMode): void {
   );
 
   s.on("player_eliminated", (p: { name: string; reason?: string }) => {
+    currentMatchPlayers = currentMatchPlayers.map((x) =>
+      x.name === p.name ? { ...x, eliminated: true, hearts: 0 } : x,
+    );
+    renderPlayingPlayersPanel();
     const status = app.querySelector<HTMLParagraphElement>("#status");
     if (status && phase === "playing") {
       status.textContent =

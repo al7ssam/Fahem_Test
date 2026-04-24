@@ -45,6 +45,11 @@ const resultMessagesPatchSchema = z.object({
   tieText: z.string().trim().min(1).max(500),
 });
 
+const aiPromptsPatchSchema = z.object({
+  promptDirect: z.string().trim().min(20).max(12_000),
+  promptStudy: z.string().trim().min(20).max(12_000),
+});
+
 const questionPatchSchema = z.object({
   prompt: z.string().trim().min(1).max(2000).optional(),
   options: z.array(z.string().trim().min(1).max(500)).length(4).optional(),
@@ -218,6 +223,51 @@ export function registerAdminRoutes(app: Express): void {
          SET winner_text = $1, loser_text = $2, tie_text = $3
          WHERE id = 1`,
         [winnerText, loserText, tieText],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-prompts", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const pool = getPool();
+      const rows = await pool.query<{ key: string; value: string }>(
+        `SELECT key, value
+         FROM app_settings
+         WHERE key IN ('prompt_direct', 'prompt_study')`,
+      );
+      const map = new Map(rows.rows.map((r) => [r.key, r.value]));
+      res.json({
+        ok: true,
+        promptDirect: map.get("prompt_direct") ?? "",
+        promptStudy: map.get("prompt_study") ?? "",
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/ai-prompts", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = aiPromptsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const pool = getPool();
+      await pool.query(
+        `INSERT INTO app_settings (key, value)
+         VALUES ('prompt_direct', $1), ('prompt_study', $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [parsed.data.promptDirect, parsed.data.promptStudy],
       );
       res.json({ ok: true });
     } catch {

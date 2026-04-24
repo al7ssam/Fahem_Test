@@ -16,6 +16,7 @@
         --bg-mid: #1e1b4b;
         --bg-to: #0f172a;
         --card: rgba(255, 255, 255, 0.05);
+        --card-2: rgba(255, 255, 255, 0.07);
         --border: rgba(255, 255, 255, 0.1);
         --text: #f8fafc;
         --muted: #94a3b8;
@@ -31,50 +32,13 @@
         margin: 0;
         min-height: 100vh;
         font-family: "Tajawal", system-ui, sans-serif;
-        background: linear-gradient(
-          to bottom,
-          var(--bg-from),
-          var(--bg-mid),
-          var(--bg-to)
-        );
+        background: linear-gradient(to bottom, var(--bg-from), var(--bg-mid), var(--bg-to));
         color: var(--text);
-        -webkit-font-smoothing: antialiased;
       }
       .wrap {
-        max-width: 52rem;
+        max-width: 56rem;
         margin: 0 auto;
         padding: 1.5rem 1rem 3rem;
-      }
-      .section-title {
-        margin: 0 0 0.75rem;
-        font-size: 1.15rem;
-        font-weight: 700;
-        color: var(--text);
-        text-align: right;
-      }
-      .spacer {
-        height: 1.25rem;
-      }
-      textarea.mono {
-        font-family: ui-monospace, "Cascadia Code", monospace;
-        font-size: 0.85rem;
-        min-height: 10rem;
-        direction: ltr;
-        text-align: left;
-      }
-      .example-pre {
-        font-family: ui-monospace, "Cascadia Code", monospace;
-        font-size: 0.72rem;
-        direction: ltr;
-        text-align: left;
-        background: rgba(15, 23, 42, 0.9);
-        border: 1px solid var(--border);
-        border-radius: 0.75rem;
-        padding: 0.75rem;
-        overflow-x: auto;
-        margin-bottom: 0.75rem;
-        color: var(--muted);
-        line-height: 1.45;
       }
       h1 {
         margin: 0 0 0.25rem;
@@ -87,66 +51,73 @@
       }
       .subtitle {
         color: var(--muted);
-        margin: 0 0 1.25rem;
-        font-size: 1rem;
+        margin: 0 0 1rem;
       }
       .stat {
         display: flex;
-        align-items: center;
         justify-content: space-between;
-        gap: 0.75rem;
         padding: 0.85rem 1rem;
-        margin-bottom: 1.25rem;
+        margin-bottom: 1rem;
         border-radius: 1rem;
         background: var(--card);
         border: 1px solid var(--border);
-      }
-      .stat-label {
-        font-size: 0.9rem;
-        color: var(--muted);
       }
       .stat-value {
-        font-size: 1.5rem;
-        font-weight: 800;
         color: var(--amber);
-        font-variant-numeric: tabular-nums;
+        font-weight: 800;
+        font-size: 1.35rem;
       }
-      .stat-row {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-        gap: 0.75rem;
-        margin-bottom: 1rem;
-      }
-      .stat-mini {
-        padding: 0.65rem 0.85rem;
-        border-radius: 0.75rem;
-        background: rgba(15, 23, 42, 0.65);
+      .accordion-item {
         border: 1px solid var(--border);
-        text-align: center;
+        border-radius: 1rem;
+        background: var(--card);
+        margin-bottom: 0.9rem;
+        overflow: hidden;
       }
-      .stat-mini .v {
-        font-size: 1.25rem;
+      .accordion-trigger {
+        width: 100%;
+        border: none;
+        background: transparent;
+        color: var(--text);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.1rem;
+        cursor: pointer;
+      }
+      .accordion-trigger:hover {
+        background: var(--card-2);
+      }
+      .accordion-title {
+        font-size: 1.2rem;
         font-weight: 800;
+      }
+      .accordion-icon {
+        transition: transform 0.2s ease;
         color: var(--amber);
       }
-      .stat-mini .l {
-        font-size: 0.75rem;
-        color: var(--muted);
+      .accordion-item.open .accordion-icon {
+        transform: rotate(180deg);
+      }
+      .accordion-content {
+        display: none;
+        padding: 0 1rem 1rem;
+      }
+      .accordion-item.open .accordion-content {
+        display: block;
       }
       .card {
-        border-radius: 1rem;
-        padding: 1.25rem;
-        background: var(--card);
+        border-radius: 0.85rem;
+        padding: 1rem;
+        background: rgba(15, 23, 42, 0.42);
         border: 1px solid var(--border);
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
-        margin-bottom: 1.25rem;
       }
       label {
         display: block;
         text-align: right;
         font-size: 0.85rem;
         color: var(--muted);
-        margin-bottom: 0.35rem;
+        margin-bottom: 0.3rem;
       }
       input[type="text"],
       input[type="password"],
@@ -161,39 +132,54 @@
         padding: 0.65rem 0.85rem;
         font-family: inherit;
         font-size: 1rem;
-        margin-bottom: 0.85rem;
+        margin-bottom: 0.8rem;
         text-align: right;
       }
       textarea {
-        min-height: 5rem;
         resize: vertical;
+        min-height: 5rem;
       }
-      input:focus,
-      textarea:focus,
-      select:focus {
-        outline: none;
-        box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.35);
+      .mono {
+        direction: ltr;
+        text-align: left;
+        font-family: ui-monospace, "Cascadia Code", monospace;
+      }
+      .example-pre {
+        direction: ltr;
+        text-align: left;
+        white-space: pre-wrap;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        font-size: 0.74rem;
+        color: var(--muted);
       }
       .btn {
         width: 100%;
-        margin-top: 0.5rem;
-        padding: 0.85rem;
+        margin-top: 0.4rem;
+        padding: 0.75rem;
         border: none;
         border-radius: 0.75rem;
         font-family: inherit;
-        font-size: 1.05rem;
+        font-size: 1rem;
         font-weight: 700;
         cursor: pointer;
         background: linear-gradient(to left, var(--amber), var(--amber2));
         color: #0f172a;
-        transition: transform 0.08s ease;
-      }
-      .btn:active {
-        transform: scale(0.98);
       }
       .btn:disabled {
-        opacity: 0.55;
+        opacity: 0.6;
         cursor: not-allowed;
+      }
+      .btn-row {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+      .btn-row .btn {
+        flex: 1;
+        min-width: 8rem;
       }
       .btn-secondary {
         background: rgba(148, 163, 184, 0.25);
@@ -205,53 +191,33 @@
         color: #fecaca;
         border: 1px solid rgba(248, 113, 113, 0.35);
       }
-      .btn-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-        margin-top: 0.5rem;
-      }
-      .btn-row .btn {
-        flex: 1;
-        min-width: 8rem;
-        margin-top: 0;
-      }
       .msg {
         min-height: 1.5rem;
-        margin-top: 0.75rem;
+        margin-top: 0.6rem;
         text-align: center;
-        font-size: 0.9rem;
       }
-      .msg.ok {
+      .ok {
         color: var(--emerald);
       }
-      .msg.err {
+      .err {
         color: var(--danger);
       }
-      .hint {
-        font-size: 0.8rem;
-        color: var(--muted);
-        text-align: center;
-        margin-top: 1.25rem;
-        line-height: 1.5;
+      .guide-block {
+        margin-bottom: 1rem;
+      }
+      .guide-title {
+        margin: 0 0 0.4rem;
+        font-weight: 700;
+        color: #fde68a;
       }
       .bank-toolbar {
         display: flex;
-        flex-wrap: wrap;
         gap: 0.5rem;
-        align-items: flex-end;
-        margin-bottom: 0.75rem;
+        flex-wrap: wrap;
       }
-      .bank-toolbar input[type="search"] {
+      .bank-toolbar input {
         flex: 1;
-        min-width: 10rem;
-        margin-bottom: 0;
-      }
-      .bank-toolbar .btn {
-        width: auto;
-        margin-top: 0;
-        padding: 0.6rem 1rem;
-        font-size: 0.9rem;
+        min-width: 12rem;
       }
       table.bank {
         width: 100%;
@@ -261,41 +227,26 @@
       table.bank th,
       table.bank td {
         border-bottom: 1px solid var(--border);
-        padding: 0.5rem 0.35rem;
+        padding: 0.45rem 0.35rem;
         text-align: right;
-        vertical-align: middle;
-      }
-      table.bank th {
-        color: var(--muted);
-        font-weight: 600;
-      }
-      table.bank tr:hover td {
-        background: rgba(255, 255, 255, 0.03);
       }
       .bank-actions {
         display: flex;
         gap: 0.35rem;
-        flex-wrap: wrap;
         justify-content: flex-end;
       }
       .bank-actions button {
         padding: 0.35rem 0.55rem;
-        font-size: 0.78rem;
         border-radius: 0.5rem;
         border: 1px solid var(--border);
         background: rgba(15, 23, 42, 0.6);
         color: var(--text);
         cursor: pointer;
       }
-      .bank-actions button:hover {
-        border-color: rgba(251, 191, 36, 0.4);
-      }
       .pager {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        margin-top: 0.75rem;
-        font-size: 0.85rem;
+        margin-top: 0.6rem;
         color: var(--muted);
       }
       .modal-overlay {
@@ -306,8 +257,6 @@
         align-items: flex-start;
         justify-content: center;
         padding: 1rem;
-        overflow-y: auto;
-        z-index: 50;
       }
       .modal-overlay[hidden] {
         display: none !important;
@@ -315,351 +264,298 @@
       .modal-box {
         width: 100%;
         max-width: 32rem;
-        margin: 2vh auto;
         background: linear-gradient(to bottom, #0f172a, #1e1b4b);
         border: 1px solid var(--border);
         border-radius: 1rem;
-        padding: 1.25rem;
+        padding: 1.2rem;
         max-height: 92vh;
         overflow-y: auto;
       }
       .modal-head {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1rem;
-      }
-      .modal-head h3 {
-        margin: 0;
-        font-size: 1.1rem;
+        margin-bottom: 0.8rem;
       }
       .close-x {
         background: transparent;
         border: none;
         color: var(--muted);
-        font-size: 1.5rem;
+        font-size: 1.4rem;
         cursor: pointer;
-        line-height: 1;
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <h1>إدارة الأسئلة</h1>
-      <p class="subtitle">فاهم — إضافة وتعديل الأسئلة ونص المذاكرة</p>
+      <h1>لوحة الإدارة</h1>
+      <p class="subtitle">فاهم — إدارة الأسئلة والإعدادات</p>
 
       <div class="stat">
-        <span class="stat-label">إجمالي الأسئلة حالياً</span>
+        <span>إجمالي الأسئلة</span>
         <span class="stat-value" id="total-display">{{QUESTION_COUNT}}</span>
       </div>
 
-      <form class="card" id="q-form" novalidate>
-        <label for="admin-secret">مفتاح الإدارة</label>
-        <input
-          id="admin-secret"
-          type="password"
-          autocomplete="off"
-          placeholder="ADMIN_SECRET"
-          required
-        />
-
-        <label for="prompt">نص السؤال</label>
-        <textarea id="prompt" required maxlength="2000"></textarea>
-
-        <label for="opt0">الخيار ١</label>
-        <input id="opt0" type="text" required maxlength="500" />
-        <label for="opt1">الخيار ٢</label>
-        <input id="opt1" type="text" required maxlength="500" />
-        <label for="opt2">الخيار ٣</label>
-        <input id="opt2" type="text" required maxlength="500" />
-        <label for="opt3">الخيار ٤</label>
-        <input id="opt3" type="text" required maxlength="500" />
-
-        <label for="correct">الإجابة الصحيحة</label>
-        <select id="correct" required>
-          <option value="0">الخيار ١</option>
-          <option value="1">الخيار ٢</option>
-          <option value="2">الخيار ٣</option>
-          <option value="3">الخيار ٤</option>
-        </select>
-
-        <label for="difficulty">الصعوبة (اختياري)</label>
-        <input
-          id="difficulty"
-          type="text"
-          maxlength="32"
-          placeholder="مثال: easy"
-        />
-
-        <label for="study-body">نص المذاكرة (اختياري — بطاقة واحدة لكل سؤال)</label>
-        <textarea id="study-body" maxlength="50000" rows="4" placeholder="نص يظهر في مرحلة المراجعة قبل الأسئلة…"></textarea>
-
-        <button type="submit" class="btn" id="submit-btn">حفظ السؤال</button>
-        <div class="msg" id="msg" aria-live="polite"></div>
-      </form>
-
-      <div class="card">
-        <h2 class="section-title">استيراد من JSON</h2>
-        <p class="subtitle" style="margin-top: 0; margin-bottom: 0.75rem">
-          الصق مصفوفة أسئلة، أو كائنًا يحتوي
-          <code dir="ltr">questions</code> أو
-          <code dir="ltr">items</code>، أو سؤالًا واحدًا ككائن. يُقبل
-          <code dir="ltr">correctIndex</code> أو
-          <code dir="ltr">correct_index</code> (0–3). لنص المذاكرة استخدم
-          <code dir="ltr">studyBody</code> أو
-          <code dir="ltr">study_body</code> (نص واحد).
-        </p>
-        <label for="json-input">محتوى JSON</label>
-        <textarea
-          id="json-input"
-          class="mono"
-          spellcheck="false"
-          placeholder='[ { "prompt": "...", "options": ["أ","ب","ج","د"], "correctIndex": 0, "studyBody": "..." } ]'
-        ></textarea>
-        <p class="stat-label" style="margin-bottom: 0.35rem">مثال:</p>
-        <pre class="example-pre" id="json-example"></pre>
-        <button type="button" class="btn" id="json-import-btn">
-          استيراد إلى قاعدة البيانات
+      <div class="accordion-item open">
+        <button class="accordion-trigger" data-acc="add">
+          <span class="accordion-title">إضافة سؤال يدويًا</span>
+          <span class="accordion-icon">⌄</span>
         </button>
-        <div class="msg" id="json-msg" aria-live="polite"></div>
+        <div class="accordion-content">
+          <form class="card" id="q-form" novalidate>
+            <label for="admin-secret">مفتاح الإدارة</label>
+            <input id="admin-secret" type="password" autocomplete="off" placeholder="ADMIN_SECRET" required />
+            <label for="prompt">نص السؤال</label>
+            <textarea id="prompt" required maxlength="2000"></textarea>
+            <label for="opt0">الخيار ١</label><input id="opt0" type="text" required maxlength="500" />
+            <label for="opt1">الخيار ٢</label><input id="opt1" type="text" required maxlength="500" />
+            <label for="opt2">الخيار ٣</label><input id="opt2" type="text" required maxlength="500" />
+            <label for="opt3">الخيار ٤</label><input id="opt3" type="text" required maxlength="500" />
+            <label for="correct">الإجابة الصحيحة</label>
+            <select id="correct" required>
+              <option value="0">الخيار ١</option>
+              <option value="1">الخيار ٢</option>
+              <option value="2">الخيار ٣</option>
+              <option value="3">الخيار ٤</option>
+            </select>
+            <label for="difficulty">الصعوبة (اختياري)</label>
+            <input id="difficulty" type="text" maxlength="32" placeholder="easy / medium / hard" />
+            <label for="study-body">نص المذاكرة (اختياري)</label>
+            <textarea id="study-body" maxlength="50000" rows="4"></textarea>
+            <button type="submit" class="btn" id="submit-btn">حفظ السؤال</button>
+            <div class="msg" id="msg"></div>
+          </form>
+        </div>
       </div>
 
-      <div class="card">
-        <h2 class="section-title">نصوص نتيجة اللعبة</h2>
-        <p class="subtitle" style="margin-top: 0; margin-bottom: 0.75rem">
-          تُعرض للاعبين مع انتهاء المباراة (فائز / خاسر / تعادل). الحد الأقصى
-          ٥٠٠ حرف لكل حقل.
-        </p>
-        <label for="rm-winner">نص الفائز</label>
-        <textarea id="rm-winner" maxlength="500" rows="2"></textarea>
-        <label for="rm-loser">نص الخاسر</label>
-        <textarea id="rm-loser" maxlength="500" rows="2"></textarea>
-        <label for="rm-tie">نص التعادل / لا فائز</label>
-        <textarea id="rm-tie" maxlength="500" rows="2"></textarea>
-        <div class="btn-row">
-          <button type="button" class="btn btn-secondary" id="rm-load-btn">
-            تحميل من الخادم
-          </button>
-          <button type="button" class="btn" id="rm-save-btn">حفظ النصوص</button>
+      <div class="accordion-item open">
+        <button class="accordion-trigger" data-acc="json-guide">
+          <span class="accordion-title">إرشادات JSON لكل نمط</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <div class="guide-block">
+              <h3 class="guide-title">نمط مباشر (Direct)</h3>
+              <p class="subtitle">مطلوب فقط: <code>prompt</code> + <code>options</code> + <code>correctIndex</code>.</p>
+              <pre class="example-pre">[
+  {
+    "prompt": "ما عاصمة السعودية؟",
+    "options": ["الرياض", "جدة", "أبها", "الدمام"],
+    "correctIndex": 0,
+    "difficulty": "easy"
+  }
+]</pre>
+            </div>
+            <div class="guide-block">
+              <h3 class="guide-title">نمط مذاكرة (Study)</h3>
+              <p class="subtitle">نفس صيغة المباشر + حقل <code>studyBody</code> كنص مذاكرة للسؤال.</p>
+              <pre class="example-pre">[
+  {
+    "prompt": "ما وظيفة الكلوروفيل في النبات؟",
+    "options": ["نقل الماء", "امتصاص الضوء", "تخزين النشا", "حماية الجذور"],
+    "correctIndex": 1,
+    "studyBody": "الكلوروفيل صبغة خضراء تمتص الضوء لبدء عملية البناء الضوئي.",
+    "difficulty": "medium"
+  }
+]</pre>
+            </div>
+            <p class="subtitle">يُقبل أيضًا <code>correct_index</code> بدل <code>correctIndex</code> و <code>study_body</code> بدل <code>studyBody</code>.</p>
+          </div>
         </div>
-        <div class="msg" id="rm-msg" aria-live="polite"></div>
       </div>
 
-      <div class="card" id="bank-section">
-        <h2 class="section-title">بنك الأسئلة</h2>
-        <p class="subtitle" style="margin-top: 0; margin-bottom: 0.75rem">
-          بحث، تعديل، حذف، وحذف جماعي. يتطلب مفتاح الإدارة أعلاه.
-        </p>
-        <div class="stat-row" id="bank-stats">
-          <div class="stat-mini">
-            <div class="v" id="st-total">—</div>
-            <div class="l">إجمالي</div>
-          </div>
-          <div class="stat-mini">
-            <div class="v" id="st-study">—</div>
-            <div class="l">مع مذاكرة</div>
-          </div>
-          <div class="stat-mini">
-            <div class="v" id="st-nostudy">—</div>
-            <div class="l">بدون مذاكرة</div>
+      <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="import">
+          <span class="accordion-title">استيراد أسئلة من JSON</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <label for="json-input">الصق JSON</label>
+            <textarea id="json-input" class="mono" spellcheck="false"></textarea>
+            <button type="button" class="btn" id="json-import-btn">استيراد</button>
+            <div class="msg" id="json-msg"></div>
           </div>
         </div>
-        <div class="bank-toolbar">
-          <input
-            type="search"
-            id="bank-q"
-            placeholder="بحث في نص السؤال…"
-            dir="rtl"
-          />
-          <button type="button" class="btn btn-secondary" id="bank-search-btn">
-            بحث
-          </button>
-          <button type="button" class="btn btn-secondary" id="bank-refresh-btn">
-            تحديث القائمة
-          </button>
-        </div>
-        <div class="btn-row" style="margin-bottom: 0.5rem">
-          <button type="button" class="btn btn-secondary" id="bank-select-page">
-            تحديد الصفحة
-          </button>
-          <button type="button" class="btn btn-danger" id="bank-bulk-del">
-            حذف المحدد
-          </button>
-        </div>
-        <div style="overflow-x: auto">
-          <table class="bank">
-            <thead>
-              <tr>
-                <th style="width: 2rem">
-                  <input type="checkbox" id="bank-check-all" title="تحديد الكل" />
-                </th>
-                <th style="width: 3rem">#</th>
-                <th>معاينة</th>
-                <th style="width: 4rem">مذاكرة</th>
-                <th style="width: 7rem">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody id="bank-tbody"></tbody>
-          </table>
-        </div>
-        <div class="pager">
-          <span id="bank-pager-info"></span>
-          <span>
-            <button type="button" class="btn btn-secondary" id="bank-prev" style="width: auto; display: inline-block; padding: 0.4rem 0.8rem; margin: 0 0.25rem">السابق</button>
-            <button type="button" class="btn btn-secondary" id="bank-next" style="width: auto; display: inline-block; padding: 0.4rem 0.8rem; margin: 0">التالي</button>
-          </span>
-        </div>
-        <div class="msg" id="bank-msg" aria-live="polite"></div>
       </div>
 
-      <p class="hint">
-        يُرسل المفتاح في رأس الطلب فقط ولا يُخزَّن في المتصفح. استخدم HTTPS
-        (مثل Render) في الإنتاج.
-      </p>
+      <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="prompts">
+          <span class="accordion-title">برومبتات الذكاء الصناعي</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <label for="ai-prompt-direct">برومبت النمط المباشر</label>
+            <textarea id="ai-prompt-direct" rows="8"></textarea>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="copy-direct-btn">نسخ النص</button>
+            </div>
+
+            <label for="ai-prompt-study">برومبت نمط المذاكرة</label>
+            <textarea id="ai-prompt-study" rows="8"></textarea>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="copy-study-btn">نسخ النص</button>
+            </div>
+
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="ai-load-btn">تحميل</button>
+              <button type="button" class="btn" id="ai-save-btn">حفظ</button>
+            </div>
+            <div class="msg" id="ai-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="result-copy">
+          <span class="accordion-title">نصوص نتيجة اللعبة</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <label for="rm-winner">نص الفائز</label>
+            <textarea id="rm-winner" maxlength="500" rows="2"></textarea>
+            <label for="rm-loser">نص الخاسر</label>
+            <textarea id="rm-loser" maxlength="500" rows="2"></textarea>
+            <label for="rm-tie">نص التعادل</label>
+            <textarea id="rm-tie" maxlength="500" rows="2"></textarea>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="rm-load-btn">تحميل</button>
+              <button type="button" class="btn" id="rm-save-btn">حفظ</button>
+            </div>
+            <div class="msg" id="rm-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="bank">
+          <span class="accordion-title">بنك الأسئلة</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card" id="bank-section">
+            <div class="bank-toolbar">
+              <input type="search" id="bank-q" placeholder="بحث في نص السؤال…" />
+              <button type="button" class="btn btn-secondary" id="bank-search-btn">بحث</button>
+              <button type="button" class="btn btn-secondary" id="bank-refresh-btn">تحديث</button>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="bank-select-page">تحديد الصفحة</button>
+              <button type="button" class="btn btn-danger" id="bank-bulk-del">حذف المحدد</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="bank">
+                <thead>
+                  <tr>
+                    <th><input type="checkbox" id="bank-check-all" /></th>
+                    <th>#</th>
+                    <th>معاينة</th>
+                    <th>مذاكرة</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="bank-tbody"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <span id="bank-pager-info"></span>
+              <span>
+                <button type="button" class="btn btn-secondary" id="bank-prev" style="width:auto;display:inline-block;padding:0.4rem 0.8rem">السابق</button>
+                <button type="button" class="btn btn-secondary" id="bank-next" style="width:auto;display:inline-block;padding:0.4rem 0.8rem">التالي</button>
+              </span>
+            </div>
+            <div class="msg" id="bank-msg"></div>
+            <div class="stat" style="margin-top:0.75rem">
+              <span>مع مذاكرة: <b id="st-study">—</b></span>
+              <span>بدون مذاكرة: <b id="st-nostudy">—</b></span>
+              <span>الكل: <b id="st-total">—</b></span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="modal-overlay" id="edit-modal" hidden>
       <div class="modal-box">
         <div class="modal-head">
           <h3>تعديل السؤال</h3>
-          <button type="button" class="close-x" id="edit-close" aria-label="إغلاق">
-            ×
-          </button>
+          <button type="button" class="close-x" id="edit-close" aria-label="إغلاق">×</button>
         </div>
         <input type="hidden" id="edit-id" />
         <label for="edit-prompt">نص السؤال</label>
         <textarea id="edit-prompt" maxlength="2000" rows="3"></textarea>
-        <label for="edit-opt0">الخيار ١</label>
-        <input id="edit-opt0" type="text" maxlength="500" />
-        <label for="edit-opt1">الخيار ٢</label>
-        <input id="edit-opt1" type="text" maxlength="500" />
-        <label for="edit-opt2">الخيار ٣</label>
-        <input id="edit-opt2" type="text" maxlength="500" />
-        <label for="edit-opt3">الخيار ٤</label>
-        <input id="edit-opt3" type="text" maxlength="500" />
+        <label for="edit-opt0">الخيار ١</label><input id="edit-opt0" type="text" maxlength="500" />
+        <label for="edit-opt1">الخيار ٢</label><input id="edit-opt1" type="text" maxlength="500" />
+        <label for="edit-opt2">الخيار ٣</label><input id="edit-opt2" type="text" maxlength="500" />
+        <label for="edit-opt3">الخيار ٤</label><input id="edit-opt3" type="text" maxlength="500" />
         <label for="edit-correct">الإجابة الصحيحة</label>
         <select id="edit-correct">
-          <option value="0">الخيار ١</option>
-          <option value="1">الخيار ٢</option>
-          <option value="2">الخيار ٣</option>
-          <option value="3">الخيار ٤</option>
+          <option value="0">الخيار ١</option><option value="1">الخيار ٢</option><option value="2">الخيار ٣</option><option value="3">الخيار ٤</option>
         </select>
-        <label for="edit-difficulty">الصعوبة</label>
-        <input id="edit-difficulty" type="text" maxlength="32" />
-        <label for="edit-study">نص المذاكرة</label>
-        <textarea id="edit-study" maxlength="50000" rows="5"></textarea>
+        <label for="edit-difficulty">الصعوبة</label><input id="edit-difficulty" type="text" maxlength="32" />
+        <label for="edit-study">نص المذاكرة</label><textarea id="edit-study" maxlength="50000" rows="5"></textarea>
         <div class="btn-row">
-          <button type="button" class="btn" id="edit-save-btn">حفظ التعديل</button>
-          <button type="button" class="btn btn-secondary" id="edit-cancel-btn">
-            إلغاء
-          </button>
+          <button type="button" class="btn" id="edit-save-btn">حفظ</button>
+          <button type="button" class="btn btn-secondary" id="edit-cancel-btn">إلغاء</button>
         </div>
-        <div class="msg" id="edit-msg" aria-live="polite"></div>
+        <div class="msg" id="edit-msg"></div>
       </div>
     </div>
 
     <script>
       (function () {
-        var exampleEl = document.getElementById("json-example");
-        if (exampleEl) {
-          exampleEl.textContent =
-            '[\n  {\n    "prompt": "ما عاصمة فرنسا؟",\n    "options": ["باريس", "لندن", "برلين", "مدريد"],\n    "correctIndex": 0,\n    "difficulty": "easy",\n    "studyBody": "باريس عاصمة فرنسا."\n  }\n]';
-        }
+        document.querySelectorAll(".accordion-trigger").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            btn.parentElement.classList.toggle("open");
+          });
+        });
       })();
+
       (function () {
         var form = document.getElementById("q-form");
         var msg = document.getElementById("msg");
         var btn = document.getElementById("submit-btn");
         var totalEl = document.getElementById("total-display");
-
-        function setMsg(text, ok) {
-          msg.textContent = text || "";
-          msg.className = "msg " + (ok ? "ok" : "err");
-        }
-
+        function setMsg(text, ok) { msg.textContent = text || ""; msg.className = "msg " + (ok ? "ok" : "err"); }
         async function refreshCount() {
           try {
             var r = await fetch("/api/admin/question-count");
             var j = await r.json();
-            if (j.ok && typeof j.totalQuestions === "number") {
-              totalEl.textContent = String(j.totalQuestions);
-            }
+            if (j.ok && typeof j.totalQuestions === "number") totalEl.textContent = String(j.totalQuestions);
           } catch (e) {}
         }
-
         form.addEventListener("submit", async function (ev) {
           ev.preventDefault();
           setMsg("", true);
           var secret = document.getElementById("admin-secret").value.trim();
-          var prompt = document.getElementById("prompt").value.trim();
-          var options = [
-            document.getElementById("opt0").value.trim(),
-            document.getElementById("opt1").value.trim(),
-            document.getElementById("opt2").value.trim(),
-            document.getElementById("opt3").value.trim(),
-          ];
-          var correctIndex = parseInt(
-            document.getElementById("correct").value,
-            10
-          );
+          var body = {
+            prompt: document.getElementById("prompt").value.trim(),
+            options: [
+              document.getElementById("opt0").value.trim(),
+              document.getElementById("opt1").value.trim(),
+              document.getElementById("opt2").value.trim(),
+              document.getElementById("opt3").value.trim()
+            ],
+            correctIndex: parseInt(document.getElementById("correct").value, 10)
+          };
           var diff = document.getElementById("difficulty").value.trim();
-          var studyBody = document.getElementById("study-body").value;
-
-          if (!secret) {
-            setMsg("أدخل مفتاح الإدارة.", false);
-            return;
-          }
-          if (!prompt || options.some(function (o) { return !o; })) {
-            setMsg("أكمل جميع الحقول المطلوبة.", false);
-            return;
-          }
-
+          var study = document.getElementById("study-body").value.trim();
+          if (!secret) return setMsg("أدخل مفتاح الإدارة.", false);
+          if (!body.prompt || body.options.some(function (o) { return !o; })) return setMsg("أكمل الحقول المطلوبة.", false);
+          if (diff) body.difficulty = diff;
+          if (study) body.studyBody = study;
           btn.disabled = true;
           try {
-            var body = {
-              prompt: prompt,
-              options: options,
-              correctIndex: correctIndex,
-            };
-            if (diff) body.difficulty = diff;
-            if (studyBody.trim()) body.studyBody = studyBody.trim();
-
-            var res = await fetch("/api/admin/questions", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Admin-Secret": secret,
-              },
-              body: JSON.stringify(body),
-            });
-            var data = await res.json().catch(function () {
-              return {};
-            });
-
+            var res = await fetch("/api/admin/questions", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": secret }, body: JSON.stringify(body) });
+            var data = await res.json().catch(function () { return {}; });
             if (res.ok && data.ok) {
               setMsg("تم حفظ السؤال بنجاح.", true);
-              if (typeof data.totalQuestions === "number") {
-                totalEl.textContent = String(data.totalQuestions);
-              } else {
-                await refreshCount();
-              }
-              document.getElementById("prompt").value = "";
-              document.getElementById("opt0").value = "";
-              document.getElementById("opt1").value = "";
-              document.getElementById("opt2").value = "";
-              document.getElementById("opt3").value = "";
+              if (typeof data.totalQuestions === "number") totalEl.textContent = String(data.totalQuestions); else await refreshCount();
+              form.reset();
               document.getElementById("correct").value = "0";
-              document.getElementById("difficulty").value = "";
-              document.getElementById("study-body").value = "";
-            } else if (data.error === "forbidden") {
-              setMsg("مفتاح الإدارة غير صحيح.", false);
-            } else if (data.error === "admin_secret_not_configured") {
-              setMsg("لم يُضبط ADMIN_SECRET على الخادم.", false);
-            } else if (data.error === "invalid_body") {
-              setMsg("البيانات غير صالحة. تحقق من الطول والخيارات الأربعة.", false);
-            } else {
-              setMsg("تعذر الحفظ. حاول لاحقاً.", false);
-            }
+            } else setMsg("تعذر الحفظ.", false);
           } catch (e) {
             setMsg("خطأ في الاتصال.", false);
           } finally {
@@ -667,233 +563,155 @@
           }
         });
       })();
+
       (function () {
         var jsonBtn = document.getElementById("json-import-btn");
-        var jsonInput = document.getElementById("json-input");
         var jsonMsg = document.getElementById("json-msg");
         var totalEl = document.getElementById("total-display");
-
-        function setJsonMsg(text, ok) {
-          jsonMsg.textContent = text || "";
-          jsonMsg.className = "msg " + (ok ? "ok" : "err");
-        }
-
+        function setJsonMsg(text, ok) { jsonMsg.textContent = text || ""; jsonMsg.className = "msg " + (ok ? "ok" : "err"); }
         jsonBtn.addEventListener("click", async function () {
-          setJsonMsg("", true);
           var secret = document.getElementById("admin-secret").value.trim();
-          if (!secret) {
-            setJsonMsg("أدخل مفتاح الإدارة في النموذج أعلاه.", false);
-            return;
-          }
-          var text = jsonInput.value.trim();
-          if (!text) {
-            setJsonMsg("الصق JSON أولاً.", false);
-            return;
-          }
+          if (!secret) return setJsonMsg("أدخل مفتاح الإدارة.", false);
+          var text = document.getElementById("json-input").value.trim();
+          if (!text) return setJsonMsg("الصق JSON أولاً.", false);
           var body;
-          try {
-            body = JSON.parse(text);
-          } catch (e) {
-            setJsonMsg("JSON غير صالح: تحقق من الفواصل والاقتباس.", false);
-            return;
-          }
-
+          try { body = JSON.parse(text); } catch (e) { return setJsonMsg("JSON غير صالح.", false); }
           jsonBtn.disabled = true;
           try {
             var res = await fetch("/api/admin/questions/import", {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Admin-Secret": secret,
-              },
-              body: JSON.stringify(body),
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": secret },
+              body: JSON.stringify(body)
             });
-            var data = await res.json().catch(function () {
-              return {};
-            });
-
+            var data = await res.json().catch(function () { return {}; });
             if (res.ok && data.ok) {
-              setJsonMsg(
-                "تم استيراد " +
-                  data.inserted +
-                  " سؤالاً بنجاح.",
-                true
-              );
-              if (typeof data.totalQuestions === "number") {
-                totalEl.textContent = String(data.totalQuestions);
-              }
-            } else if (data.error === "forbidden") {
-              setJsonMsg("مفتاح الإدارة غير صحيح.", false);
-            } else if (data.error === "admin_secret_not_configured") {
-              setJsonMsg("لم يُضبط ADMIN_SECRET على الخادم.", false);
-            } else if (data.error === "invalid_shape") {
-              setJsonMsg(
-                data.message ||
-                  "الشكل غير مدعوم: مصفوفة أو questions أو items.",
-                false
-              );
-            } else if (data.error === "invalid_questions" && data.issues) {
-              setJsonMsg(
-                "تحقق من البيانات: " +
-                  data.issues
-                    .map(function (i) {
-                      return i.path + ": " + i.message;
-                    })
-                    .join(" | "),
-                false
-              );
-            } else {
-              setJsonMsg("تعذر الاستيراد.", false);
-            }
-          } catch (e) {
-            setJsonMsg("خطأ في الاتصال.", false);
-          } finally {
-            jsonBtn.disabled = false;
-          }
+              setJsonMsg("تم استيراد " + data.inserted + " سؤالاً.", true);
+              if (typeof data.totalQuestions === "number") totalEl.textContent = String(data.totalQuestions);
+            } else setJsonMsg("تعذر الاستيراد.", false);
+          } catch (e) { setJsonMsg("خطأ في الاتصال.", false); }
+          finally { jsonBtn.disabled = false; }
         });
       })();
+
+      (function () {
+        var aiMsg = document.getElementById("ai-msg");
+        var loadBtn = document.getElementById("ai-load-btn");
+        var saveBtn = document.getElementById("ai-save-btn");
+        var copyDirect = document.getElementById("copy-direct-btn");
+        var copyStudy = document.getElementById("copy-study-btn");
+        var direct = document.getElementById("ai-prompt-direct");
+        var study = document.getElementById("ai-prompt-study");
+        function setAiMsg(text, ok) { aiMsg.textContent = text || ""; aiMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        async function copyText(v) {
+          try { await navigator.clipboard.writeText(v); setAiMsg("تم النسخ.", true); }
+          catch (e) { setAiMsg("تعذر النسخ. المتصفح منع العملية.", false); }
+        }
+        copyDirect.addEventListener("click", function () { copyText(direct.value || ""); });
+        copyStudy.addEventListener("click", function () { copyText(study.value || ""); });
+        loadBtn.addEventListener("click", async function () {
+          var s = secret(); if (!s) return setAiMsg("أدخل مفتاح الإدارة.", false);
+          loadBtn.disabled = true;
+          try {
+            var r = await fetch("/api/admin/ai-prompts", { headers: { "X-Admin-Secret": s } });
+            var j = await r.json();
+            if (r.ok && j.ok) {
+              direct.value = j.promptDirect || "";
+              study.value = j.promptStudy || "";
+              setAiMsg("تم تحميل البرومبتات.", true);
+            } else setAiMsg("تعذر التحميل.", false);
+          } catch (e) { setAiMsg("خطأ في الاتصال.", false); }
+          finally { loadBtn.disabled = false; }
+        });
+        saveBtn.addEventListener("click", async function () {
+          var s = secret(); if (!s) return setAiMsg("أدخل مفتاح الإدارة.", false);
+          var body = { promptDirect: direct.value.trim(), promptStudy: study.value.trim() };
+          if (!body.promptDirect || !body.promptStudy) return setAiMsg("الحقول مطلوبة.", false);
+          saveBtn.disabled = true;
+          try {
+            var r = await fetch("/api/admin/ai-prompts", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s },
+              body: JSON.stringify(body)
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) setAiMsg("تم حفظ البرومبتات.", true);
+            else if (j.error === "invalid_body") setAiMsg("تحقق من طول النص (20-12000).", false);
+            else setAiMsg("تعذر الحفظ.", false);
+          } catch (e) { setAiMsg("خطأ في الاتصال.", false); }
+          finally { saveBtn.disabled = false; }
+        });
+      })();
+
       (function () {
         var rmLoad = document.getElementById("rm-load-btn");
         var rmSave = document.getElementById("rm-save-btn");
         var rmMsg = document.getElementById("rm-msg");
-        function setRmMsg(t, ok) {
-          rmMsg.textContent = t || "";
-          rmMsg.className = "msg " + (ok ? "ok" : "err");
-        }
-        function secret() {
-          return document.getElementById("admin-secret").value.trim();
-        }
+        function setRmMsg(t, ok) { rmMsg.textContent = t || ""; rmMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
         rmLoad.addEventListener("click", async function () {
-          setRmMsg("", true);
-          var s = secret();
-          if (!s) {
-            setRmMsg("أدخل مفتاح الإدارة.", false);
-            return;
-          }
+          var s = secret(); if (!s) return setRmMsg("أدخل مفتاح الإدارة.", false);
           rmLoad.disabled = true;
           try {
-            var r = await fetch("/api/admin/result-messages", {
-              headers: { "X-Admin-Secret": s },
-            });
+            var r = await fetch("/api/admin/result-messages", { headers: { "X-Admin-Secret": s } });
             var j = await r.json();
             if (r.ok && j.ok) {
               document.getElementById("rm-winner").value = j.winnerText || "";
               document.getElementById("rm-loser").value = j.loserText || "";
               document.getElementById("rm-tie").value = j.tieText || "";
               setRmMsg("تم التحميل.", true);
-            } else if (j.error === "forbidden") {
-              setRmMsg("مفتاح غير صحيح.", false);
-            } else {
-              setRmMsg("تعذر التحميل.", false);
-            }
-          } catch (e) {
-            setRmMsg("خطأ في الاتصال.", false);
-          } finally {
-            rmLoad.disabled = false;
-          }
+            } else setRmMsg("تعذر التحميل.", false);
+          } catch (e) { setRmMsg("خطأ في الاتصال.", false); }
+          finally { rmLoad.disabled = false; }
         });
         rmSave.addEventListener("click", async function () {
-          setRmMsg("", true);
-          var s = secret();
-          if (!s) {
-            setRmMsg("أدخل مفتاح الإدارة.", false);
-            return;
-          }
+          var s = secret(); if (!s) return setRmMsg("أدخل مفتاح الإدارة.", false);
           var body = {
             winnerText: document.getElementById("rm-winner").value.trim(),
             loserText: document.getElementById("rm-loser").value.trim(),
-            tieText: document.getElementById("rm-tie").value.trim(),
+            tieText: document.getElementById("rm-tie").value.trim()
           };
-          if (!body.winnerText || !body.loserText || !body.tieText) {
-            setRmMsg("املأ الحقول الثلاثة (حرف واحد على الأقل لكل حقل).", false);
-            return;
-          }
           rmSave.disabled = true;
           try {
             var r = await fetch("/api/admin/result-messages", {
               method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Admin-Secret": s,
-              },
-              body: JSON.stringify(body),
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s },
+              body: JSON.stringify(body)
             });
-            var j = await r.json().catch(function () {
-              return {};
-            });
-            if (r.ok && j.ok) setRmMsg("تم الحفظ.", true);
-            else if (j.error === "forbidden") setRmMsg("مفتاح غير صحيح.", false);
-            else if (j.error === "invalid_body") setRmMsg("تحقق من الطول (٥٠٠ حرف كحد أقصى).", false);
-            else setRmMsg("تعذر الحفظ.", false);
-          } catch (e) {
-            setRmMsg("خطأ في الاتصال.", false);
-          } finally {
-            rmSave.disabled = false;
-          }
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) setRmMsg("تم الحفظ.", true); else setRmMsg("تعذر الحفظ.", false);
+          } catch (e) { setRmMsg("خطأ في الاتصال.", false); }
+          finally { rmSave.disabled = false; }
         });
       })();
+
       (function () {
         var bankState = { offset: 0, limit: 20, q: "", selected: {} };
         var tbody = document.getElementById("bank-tbody");
         var bankMsg = document.getElementById("bank-msg");
         var totalEl = document.getElementById("total-display");
-        function setBankMsg(t, ok) {
-          bankMsg.textContent = t || "";
-          bankMsg.className = "msg " + (ok ? "ok" : "err");
-        }
-        function secret() {
-          return document.getElementById("admin-secret").value.trim();
-        }
-        function hdr() {
-          return {
-            "Content-Type": "application/json",
-            "X-Admin-Secret": secret(),
-          };
-        }
+        function setBankMsg(t, ok) { bankMsg.textContent = t || ""; bankMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        function hdr() { return { "Content-Type": "application/json", "X-Admin-Secret": secret() }; }
         async function loadStats() {
-          var s = secret();
-          if (!s) return;
+          var s = secret(); if (!s) return;
           try {
-            var r = await fetch("/api/admin/questions/stats", {
-              headers: { "X-Admin-Secret": s },
-            });
+            var r = await fetch("/api/admin/questions/stats", { headers: { "X-Admin-Secret": s } });
             var j = await r.json();
             if (r.ok && j.ok) {
-              document.getElementById("st-total").textContent = String(
-                j.totalQuestions
-              );
-              document.getElementById("st-study").textContent = String(
-                j.withStudyCards
-              );
-              document.getElementById("st-nostudy").textContent = String(
-                j.withoutStudyCards
-              );
+              document.getElementById("st-total").textContent = String(j.totalQuestions);
+              document.getElementById("st-study").textContent = String(j.withStudyCards);
+              document.getElementById("st-nostudy").textContent = String(j.withoutStudyCards);
             }
           } catch (e) {}
         }
         async function loadList() {
-          var s = secret();
-          if (!s) {
-            setBankMsg("أدخل مفتاح الإدارة للبحث في البنك.", false);
-            return;
-          }
-          setBankMsg("", true);
-          var qs =
-            "?offset=" +
-            bankState.offset +
-            "&limit=" +
-            bankState.limit +
-            (bankState.q ? "&q=" + encodeURIComponent(bankState.q) : "");
+          var s = secret(); if (!s) return setBankMsg("أدخل مفتاح الإدارة.", false);
+          var qs = "?offset=" + bankState.offset + "&limit=" + bankState.limit + (bankState.q ? "&q=" + encodeURIComponent(bankState.q) : "");
           try {
-            var r = await fetch("/api/admin/questions" + qs, {
-              headers: { "X-Admin-Secret": s },
-            });
+            var r = await fetch("/api/admin/questions" + qs, { headers: { "X-Admin-Secret": s } });
             var j = await r.json();
-            if (!r.ok || !j.ok) {
-              if (j.error === "forbidden") setBankMsg("مفتاح غير صحيح.", false);
-              else setBankMsg("تعذر جلب القائمة.", false);
-              return;
-            }
+            if (!r.ok || !j.ok) return setBankMsg("تعذر جلب القائمة.", false);
             tbody.innerHTML = "";
             bankState.selected = {};
             document.getElementById("bank-check-all").checked = false;
@@ -902,175 +720,77 @@
               var ck = document.createElement("input");
               ck.type = "checkbox";
               ck.dataset.id = String(row.id);
-              ck.addEventListener("change", function () {
-                if (ck.checked) bankState.selected[row.id] = true;
-                else delete bankState.selected[row.id];
-              });
-              var td0 = document.createElement("td");
-              td0.appendChild(ck);
-              var td1 = document.createElement("td");
-              td1.textContent = String(row.id);
-              var td2 = document.createElement("td");
-              td2.textContent = row.promptPreview || "";
-              var td3 = document.createElement("td");
-              td3.textContent = row.hasStudyCards ? "نعم" : "لا";
-              var td4 = document.createElement("td");
-              td4.className = "bank-actions";
-              var bEdit = document.createElement("button");
-              bEdit.type = "button";
-              bEdit.textContent = "تعديل";
-              bEdit.addEventListener("click", function () {
-                openEditModal(row.id);
-              });
-              var bDel = document.createElement("button");
-              bDel.type = "button";
-              bDel.textContent = "حذف";
-              bDel.addEventListener("click", function () {
-                if (!confirm("حذف السؤال #" + row.id + "؟")) return;
-                deleteOne(row.id);
-              });
-              td4.appendChild(bEdit);
-              td4.appendChild(bDel);
-              tr.appendChild(td0);
-              tr.appendChild(td1);
-              tr.appendChild(td2);
-              tr.appendChild(td3);
-              tr.appendChild(td4);
+              ck.addEventListener("change", function () { if (ck.checked) bankState.selected[row.id] = true; else delete bankState.selected[row.id]; });
+              var td0 = document.createElement("td"); td0.appendChild(ck);
+              var td1 = document.createElement("td"); td1.textContent = String(row.id);
+              var td2 = document.createElement("td"); td2.textContent = row.promptPreview || "";
+              var td3 = document.createElement("td"); td3.textContent = row.hasStudyCards ? "نعم" : "لا";
+              var td4 = document.createElement("td"); td4.className = "bank-actions";
+              var bEdit = document.createElement("button"); bEdit.type = "button"; bEdit.textContent = "تعديل"; bEdit.onclick = function () { openEditModal(row.id); };
+              var bDel = document.createElement("button"); bDel.type = "button"; bDel.textContent = "حذف"; bDel.onclick = function () { if (confirm("حذف السؤال #" + row.id + "؟")) deleteOne(row.id); };
+              td4.appendChild(bEdit); td4.appendChild(bDel);
+              tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4);
               tbody.appendChild(tr);
             });
             var from = j.total === 0 ? 0 : bankState.offset + 1;
             var to = Math.min(bankState.offset + j.items.length, j.total);
-            document.getElementById("bank-pager-info").textContent =
-              j.total === 0
-                ? "لا نتائج"
-                : "عرض " + from + "–" + to + " من " + j.total;
-            document.getElementById("bank-prev").disabled =
-              bankState.offset <= 0;
-            document.getElementById("bank-next").disabled =
-              bankState.offset + bankState.limit >= j.total;
+            document.getElementById("bank-pager-info").textContent = j.total === 0 ? "لا نتائج" : "عرض " + from + "–" + to + " من " + j.total;
+            document.getElementById("bank-prev").disabled = bankState.offset <= 0;
+            document.getElementById("bank-next").disabled = bankState.offset + bankState.limit >= j.total;
             await loadStats();
-          } catch (e) {
-            setBankMsg("خطأ في الاتصال.", false);
-          }
+          } catch (e) { setBankMsg("خطأ في الاتصال.", false); }
         }
         async function deleteOne(id) {
           var s = secret();
           try {
-            var r = await fetch("/api/admin/questions/" + id, {
-              method: "DELETE",
-              headers: { "X-Admin-Secret": s },
-            });
+            var r = await fetch("/api/admin/questions/" + id, { method: "DELETE", headers: { "X-Admin-Secret": s } });
             var j = await r.json();
             if (r.ok && j.ok) {
-              if (typeof j.totalQuestions === "number")
-                totalEl.textContent = String(j.totalQuestions);
+              if (typeof j.totalQuestions === "number") totalEl.textContent = String(j.totalQuestions);
               setBankMsg("تم الحذف.", true);
               await loadList();
             } else setBankMsg("تعذر الحذف.", false);
-          } catch (e) {
-            setBankMsg("خطأ في الاتصال.", false);
-          }
+          } catch (e) { setBankMsg("خطأ في الاتصال.", false); }
         }
-        document
-          .getElementById("bank-search-btn")
-          .addEventListener("click", function () {
-            bankState.q = document.getElementById("bank-q").value.trim();
-            bankState.offset = 0;
-            loadList();
-          });
-        document
-          .getElementById("bank-refresh-btn")
-          .addEventListener("click", function () {
-            loadList();
-          });
-        document.getElementById("bank-prev").addEventListener("click", function () {
-          bankState.offset = Math.max(0, bankState.offset - bankState.limit);
-          loadList();
+        document.getElementById("bank-search-btn").onclick = function () { bankState.q = document.getElementById("bank-q").value.trim(); bankState.offset = 0; loadList(); };
+        document.getElementById("bank-refresh-btn").onclick = function () { loadList(); };
+        document.getElementById("bank-prev").onclick = function () { bankState.offset = Math.max(0, bankState.offset - bankState.limit); loadList(); };
+        document.getElementById("bank-next").onclick = function () { bankState.offset += bankState.limit; loadList(); };
+        document.getElementById("bank-select-page").onclick = function () {
+          tbody.querySelectorAll('input[type="checkbox"]').forEach(function (c) { c.checked = true; var id = parseInt(c.dataset.id, 10); if (id) bankState.selected[id] = true; });
+          document.getElementById("bank-check-all").checked = true;
+        };
+        document.getElementById("bank-check-all").addEventListener("change", function (ev) {
+          var on = ev.target.checked;
+          tbody.querySelectorAll('input[type="checkbox"]').forEach(function (c) { c.checked = on; var id = parseInt(c.dataset.id, 10); if (on && id) bankState.selected[id] = true; else if (id) delete bankState.selected[id]; });
         });
-        document.getElementById("bank-next").addEventListener("click", function () {
-          bankState.offset += bankState.limit;
-          loadList();
-        });
-        document
-          .getElementById("bank-select-page")
-          .addEventListener("click", function () {
-            tbody.querySelectorAll('input[type="checkbox"]').forEach(function (c) {
-              c.checked = true;
-              var id = parseInt(c.dataset.id, 10);
-              if (id) bankState.selected[id] = true;
-            });
-            document.getElementById("bank-check-all").checked = true;
-          });
-        document
-          .getElementById("bank-check-all")
-          .addEventListener("change", function (ev) {
-            var on = ev.target.checked;
-            tbody.querySelectorAll('input[type="checkbox"]').forEach(function (c) {
-              c.checked = on;
-              var id = parseInt(c.dataset.id, 10);
-              if (on && id) bankState.selected[id] = true;
-              else if (id) delete bankState.selected[id];
-            });
-          });
-        document
-          .getElementById("bank-bulk-del")
-          .addEventListener("click", async function () {
-            var ids = Object.keys(bankState.selected).map(function (x) {
-              return parseInt(x, 10);
-            });
-            if (!ids.length) {
-              setBankMsg("حدد صفاً واحداً على الأقل.", false);
-              return;
-            }
-            if (!confirm("حذف " + ids.length + " سؤال؟ لا يمكن التراجع."))
-              return;
-            var s = secret();
-            try {
-              var r = await fetch("/api/admin/questions/bulk-delete", {
-                method: "POST",
-                headers: hdr(),
-                body: JSON.stringify({ ids: ids }),
-              });
-              var j = await r.json();
-              if (r.ok && j.ok) {
-                if (typeof j.totalQuestions === "number")
-                  totalEl.textContent = String(j.totalQuestions);
-                setBankMsg("تم حذف " + j.deleted + " سؤالاً.", true);
-                bankState.offset = 0;
-                await loadList();
-              } else setBankMsg("تعذر الحذف الجماعي.", false);
-            } catch (e) {
-              setBankMsg("خطأ في الاتصال.", false);
-            }
-          });
-
+        document.getElementById("bank-bulk-del").onclick = async function () {
+          var ids = Object.keys(bankState.selected).map(function (x) { return parseInt(x, 10); });
+          if (!ids.length) return setBankMsg("حدد صفاً واحداً على الأقل.", false);
+          if (!confirm("حذف " + ids.length + " سؤال؟")) return;
+          try {
+            var r = await fetch("/api/admin/questions/bulk-delete", { method: "POST", headers: hdr(), body: JSON.stringify({ ids: ids }) });
+            var j = await r.json();
+            if (r.ok && j.ok) {
+              if (typeof j.totalQuestions === "number") totalEl.textContent = String(j.totalQuestions);
+              setBankMsg("تم الحذف الجماعي.", true);
+              bankState.offset = 0;
+              await loadList();
+            } else setBankMsg("تعذر الحذف الجماعي.", false);
+          } catch (e) { setBankMsg("خطأ في الاتصال.", false); }
+        };
         var modal = document.getElementById("edit-modal");
-        function closeModal() {
-          modal.hidden = true;
-        }
-        document.getElementById("edit-close").addEventListener("click", closeModal);
-        document
-          .getElementById("edit-cancel-btn")
-          .addEventListener("click", closeModal);
-        modal.addEventListener("click", function (e) {
-          if (e.target === modal) closeModal();
-        });
+        function closeModal() { modal.hidden = true; }
+        document.getElementById("edit-close").onclick = closeModal;
+        document.getElementById("edit-cancel-btn").onclick = closeModal;
+        modal.addEventListener("click", function (e) { if (e.target === modal) closeModal(); });
         async function openEditModal(id) {
           var s = secret();
-          if (!s) {
-            setBankMsg("أدخل مفتاح الإدارة.", false);
-            return;
-          }
-          document.getElementById("edit-msg").textContent = "";
+          if (!s) return setBankMsg("أدخل مفتاح الإدارة.", false);
           try {
-            var r = await fetch("/api/admin/questions/" + id, {
-              headers: { "X-Admin-Secret": s },
-            });
+            var r = await fetch("/api/admin/questions/" + id, { headers: { "X-Admin-Secret": s } });
             var j = await r.json();
-            if (!r.ok || !j.ok || !j.question) {
-              setBankMsg("تعذر فتح السؤال.", false);
-              return;
-            }
+            if (!r.ok || !j.ok || !j.question) return setBankMsg("تعذر فتح السؤال.", false);
             var q = j.question;
             document.getElementById("edit-id").value = String(q.id);
             document.getElementById("edit-prompt").value = q.prompt;
@@ -1078,66 +798,47 @@
             document.getElementById("edit-opt1").value = q.options[1] || "";
             document.getElementById("edit-opt2").value = q.options[2] || "";
             document.getElementById("edit-opt3").value = q.options[3] || "";
-            document.getElementById("edit-correct").value = String(
-              q.correctIndex
-            );
-            document.getElementById("edit-difficulty").value =
-              q.difficulty || "";
+            document.getElementById("edit-correct").value = String(q.correctIndex);
+            document.getElementById("edit-difficulty").value = q.difficulty || "";
             document.getElementById("edit-study").value = q.studyBody || "";
             modal.hidden = false;
-          } catch (e) {
-            setBankMsg("خطأ في الاتصال.", false);
-          }
+          } catch (e) { setBankMsg("خطأ في الاتصال.", false); }
         }
-        document
-          .getElementById("edit-save-btn")
-          .addEventListener("click", async function () {
-            var em = document.getElementById("edit-msg");
-            em.textContent = "";
-            em.className = "msg";
-            var id = parseInt(document.getElementById("edit-id").value, 10);
-            var body = {
-              prompt: document.getElementById("edit-prompt").value.trim(),
-              options: [
-                document.getElementById("edit-opt0").value.trim(),
-                document.getElementById("edit-opt1").value.trim(),
-                document.getElementById("edit-opt2").value.trim(),
-                document.getElementById("edit-opt3").value.trim(),
-              ],
-              correctIndex: parseInt(
-                document.getElementById("edit-correct").value,
-                10
-              ),
-              studyBody: document.getElementById("edit-study").value,
-            };
-            var d = document.getElementById("edit-difficulty").value.trim();
-            body.difficulty = d || null;
-            if (!body.prompt || body.options.some(function (o) { return !o; })) {
-              em.textContent = "أكمل الحقول.";
-              em.className = "msg err";
-              return;
-            }
-            try {
-              var r = await fetch("/api/admin/questions/" + id, {
-                method: "PATCH",
-                headers: hdr(),
-                body: JSON.stringify(body),
-              });
-              var j = await r.json();
-              if (r.ok && j.ok) {
-                em.textContent = "تم الحفظ.";
-                em.className = "msg ok";
-                await loadList();
-                setTimeout(closeModal, 600);
-              } else {
-                em.textContent = "تعذر الحفظ.";
-                em.className = "msg err";
-              }
-            } catch (e) {
-              em.textContent = "خطأ في الاتصال.";
+        document.getElementById("edit-save-btn").onclick = async function () {
+          var em = document.getElementById("edit-msg");
+          var id = parseInt(document.getElementById("edit-id").value, 10);
+          var body = {
+            prompt: document.getElementById("edit-prompt").value.trim(),
+            options: [
+              document.getElementById("edit-opt0").value.trim(),
+              document.getElementById("edit-opt1").value.trim(),
+              document.getElementById("edit-opt2").value.trim(),
+              document.getElementById("edit-opt3").value.trim()
+            ],
+            correctIndex: parseInt(document.getElementById("edit-correct").value, 10),
+            studyBody: document.getElementById("edit-study").value,
+            difficulty: document.getElementById("edit-difficulty").value.trim() || null
+          };
+          if (!body.prompt || body.options.some(function (o) { return !o; })) {
+            em.textContent = "أكمل الحقول.";
+            em.className = "msg err";
+            return;
+          }
+          try {
+            var r = await fetch("/api/admin/questions/" + id, { method: "PATCH", headers: hdr(), body: JSON.stringify(body) });
+            var j = await r.json();
+            if (r.ok && j.ok) {
+              em.textContent = "تم الحفظ.";
+              em.className = "msg ok";
+              await loadList();
+              setTimeout(closeModal, 600);
+            } else {
+              em.textContent = "تعذر الحفظ.";
               em.className = "msg err";
             }
-          });
+          } catch (e) { em.textContent = "خطأ في الاتصال."; em.className = "msg err"; }
+        };
+        window.openEditModal = openEditModal;
       })();
     </script>
   </body>
