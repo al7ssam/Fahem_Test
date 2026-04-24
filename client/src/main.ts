@@ -176,6 +176,7 @@ function render(): void {
     app.append(
       el(`
         <div class="min-h-screen bg-gradient-to-b from-slate-950 to-slate-900 text-white p-6 flex flex-col items-center justify-center text-center gap-6 max-w-md mx-auto">
+          <p id="res-emoji" class="text-7xl leading-none min-h-[4.5rem] flex items-center justify-center" aria-hidden="true"></p>
           <h2 id="res-title" class="text-3xl font-extrabold"></h2>
           <p id="res-body" class="text-slate-300 text-lg"></p>
           <button id="again" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950">العب مجدداً</button>
@@ -444,21 +445,26 @@ function connectSocket(name: string, mode: GameMode): void {
       phase = "result";
       render();
       const me = payload.players.find((p) => p.socketId === mySocketId);
+      const emojiEl = app.querySelector<HTMLParagraphElement>("#res-emoji");
       const title = app.querySelector<HTMLHeadingElement>("#res-title");
       const body = app.querySelector<HTMLParagraphElement>("#res-body");
       if (!title || !body) return;
       if (payload.reason === "no_questions") {
+        if (emojiEl) emojiEl.textContent = "";
         title.textContent = "لا توجد أسئلة";
         body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
         return;
       }
       if (payload.winner && payload.winner.socketId === mySocketId) {
+        if (emojiEl) emojiEl.textContent = "😍";
         title.textContent = "فزت!";
         body.textContent = "أحسنت — بقيت حتى النهاية.";
       } else if (payload.winner) {
+        if (emojiEl) emojiEl.textContent = "😭";
         title.textContent = "انتهت الجولة";
         body.textContent = `الفائز: ${payload.winner.name}`;
       } else {
+        if (emojiEl) emojiEl.textContent = "😭";
         title.textContent = "تعادل أو لا فائز";
         body.textContent = "حاول مرة أخرى!";
       }
