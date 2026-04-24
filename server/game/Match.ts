@@ -13,6 +13,7 @@ const MAX_ROUNDS = 50;
 const DEFAULT_MAX_STUDY_ROUNDS = 3;
 const DEFAULT_STUDY_ROUND_SIZE = 8;
 const DEFAULT_STUDY_PHASE_MS = 60_000;
+const DEFAULT_ROUND_READY_MS = 12_000;
 
 export type GameMode = "direct" | "study_then_quiz";
 
@@ -200,15 +201,19 @@ export class Match {
 
   private async runStudyPhase(
     cards: Array<{ id: number; questionId: number; body: string; order: number }>,
-    endsAt: number,
   ): Promise<void> {
     this.roundReady.clear();
+    const readyWindowMs = Math.min(
+      20_000,
+      Math.max(3_000, Math.floor(this.studyPhaseMs * 0.2)),
+    );
+    const readyEndsAt = Date.now() + (readyWindowMs || DEFAULT_ROUND_READY_MS);
     this.io.to(this.room).emit("round_ready_window", {
-      endsAt,
+      endsAt: readyEndsAt,
       macroRound: this.macroRound,
     });
     this.emitRoundReadyState();
-    const ms = Math.max(0, endsAt - Date.now());
+    const ms = Math.max(0, readyEndsAt - Date.now());
     await new Promise<void>((resolve) => {
       this.roundReadyResolve = resolve;
       this.roundReadyTimer = setTimeout(() => {
@@ -218,13 +223,14 @@ export class Match {
       }, ms);
     });
 
+    const studyEndsAt = Date.now() + this.studyPhaseMs;
     this.io.to(this.room).emit("study_phase", {
       cards,
-      endsAt,
+      endsAt: studyEndsAt,
       macroRound: this.macroRound,
       scope: "match_start",
     });
-    const studyEndsAt = Date.now() + this.studyPhaseMs;
+
     await new Promise<void>((resolve) => {
       this.studyPhaseResolve = resolve;
       this.studyWaitTimer = setTimeout(() => {
@@ -341,8 +347,7 @@ export class Match {
         this.emitNoQuestions();
         return;
       }
-      const endsAt = Date.now() + this.studyPhaseMs;
-      await this.runStudyPhase(cards, endsAt);
+      await this.runStudyPhase(cards);
       if (this.finished) return;
 
       for (const q of block) {

@@ -607,12 +607,33 @@ function connectSocket(name: string, mode: GameMode): void {
       if (payload.gameMode === "study_then_quiz") {
         phase = "studying";
         studyCards = [];
-        studyEndsAt = Date.now() + 60_000;
+        studyEndsAt = Date.now();
         render();
       } else {
         phase = "playing";
         render();
       }
+    },
+  );
+
+  s.on(
+    "round_ready_window",
+    (payload: { endsAt: number; macroRound?: number }) => {
+      phase = "studying";
+      studyCards = [];
+      studyEndsAt = payload.endsAt;
+      if (!app.querySelector("#study-cards")) render();
+      const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
+      if (hint) {
+        hint.textContent =
+          "جاري انتظار جاهزية اللاعبين للجولة — يمكن تخطي العداد إذا ضغط الجميع جاهز.";
+      }
+      const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
+      if (readyBtn) {
+        readyBtn.disabled = false;
+        readyBtn.textContent = "جاهز للجولة (تخطي العداد عند جاهزية الجميع)";
+      }
+      startStudyTimer();
     },
   );
 
@@ -638,6 +659,11 @@ function connectSocket(name: string, mode: GameMode): void {
         hint.textContent =
           studyCards.length > 0 ? full : "جاري تجهيز الجولة…";
       }
+      const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
+      if (readyBtn) {
+        readyBtn.disabled = true;
+        readyBtn.textContent = "بدأت المراجعة";
+      }
       if (container) {
         container.innerHTML = "";
         studyCards.forEach((c, i) => {
@@ -658,6 +684,7 @@ function connectSocket(name: string, mode: GameMode): void {
     if (hint && phase === "studying") {
       hint.textContent = "انتهت المراجعة — تبدأ الأسئلة الآن.";
     }
+    clearTimer();
   });
 
   s.on(
