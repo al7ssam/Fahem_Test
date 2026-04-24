@@ -1,5 +1,4 @@
 ﻿import type { Server } from "socket.io";
-import { config } from "../config";
 import { getPool } from "../db/pool";
 import {
   getRandomQuestion,
@@ -55,8 +54,6 @@ export class Match {
   private studyWaitTimer: ReturnType<typeof setTimeout> | null = null;
   private macroRound = 0;
   private activeRoundToken = "";
-  private questionQueue: QuestionRow[] = [];
-  private queueIndex = 0;
   private resultMessages: ResultMessages | null = null;
   private maxStudyRounds = DEFAULT_MAX_STUDY_ROUNDS;
   private studyRoundSize = DEFAULT_STUDY_ROUND_SIZE;
@@ -332,48 +329,34 @@ export class Match {
   }
 
   private async runStudyThenQuizLoop(pool: ReturnType<typeof getPool>): Promise<void> {
-    const prefetch = Math.min(MAX_ROUNDS, config.studyMatchPrefetch);
     const blockSize = this.studyRoundSize;
     const maxCardsPerBlock = this.studyRoundSize;
-
-    this.questionQueue = [];
-    this.queueIndex = 0;
-    await this.fillQuestionQueue(pool, prefetch);
-    if (this.questionQueue.length === 0) {
-      this.emitNoQuestions();
-      return;
-    }
 
     while (
       !this.finished &&
       this.countActive() > 1 &&
       this.macroRound < this.maxStudyRounds
     ) {
-      const remaining = this.questionQueue.length - this.queueIndex;
-      if (remaining < blockSize) {
-        await this.fillQuestionQueue(pool, blockSize - remaining);
-      }
-      if (this.questionQueue.length - this.queueIndex < blockSize) {
-        this.emitNoQuestions();
-        return;
-      }
-      if (this.queueIndex >= this.questionQueue.length) {
-        this.emitNoQuestions();
-        return;
+      const block: QuestionRow[] = [];
+      const exclude = new Set<number>(this.usedQuestionIds);
+      for (let i = 0; i < blockSize; i++) {
+        const q = await getRandomQuestion(pool, [...exclude], true);
+        if (!q) {
+          this.emitNoQuestions();
+          return;
+        }
+        exclude.add(q.id);
+        block.push(q);
       }
 
       this.macroRound += 1;
-      const block = this.questionQueue.slice(
-        this.queueIndex,
-        Math.min(this.questionQueue.length, this.queueIndex + blockSize),
-      );
       const blockIds = block.map((q) => q.id);
       const cards = await getStudyPhaseCardsFromQuestionIds(
         pool,
         blockIds,
         Math.min(maxCardsPerBlock, blockIds.length),
       );
-      if (cards.length !== blockSize) {
+      if (cards.length !== block.length) {
         this.emitNoQuestions();
         return;
       }
@@ -384,27 +367,8 @@ export class Match {
         if (this.finished || this.countActive() <= 1 || this.round >= MAX_ROUNDS) {
           return;
         }
-        this.queueIndex += 1;
         await this.playOneQuestion(pool, q);
       }
-    }
-  }
-
-  private async fillQuestionQueue(
-    pool: ReturnType<typeof getPool>,
-    targetMore: number,
-  ): Promise<void> {
-    const exclude = new Set<number>(this.usedQuestionIds);
-    for (const q of this.questionQueue) {
-      exclude.add(q.id);
-    }
-    let added = 0;
-    while (added < targetMore) {
-      const q = await getRandomQuestion(pool, [...exclude], true);
-      if (!q) break;
-      exclude.add(q.id);
-      this.questionQueue.push(q);
-      added += 1;
     }
   }
 
