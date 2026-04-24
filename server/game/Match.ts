@@ -1,9 +1,13 @@
-import type { Server } from "socket.io";
+﻿import type { Server } from "socket.io";
+import { config } from "../config";
 import { getPool } from "../db/pool";
-import { getRandomQuestion } from "../db/questions";
+import { getRandomQuestion, getRandomQuestionBlock, type QuestionRow } from "../db/questions";
+import { getStudyCardsForQuestions } from "../db/studyCards";
 
 const QUESTION_MS = 15_000;
 const MAX_ROUNDS = 50;
+
+export type GameMode = "direct" | "study_then_quiz";
 
 export type MatchPlayerPublic = {
   socketId: string;
@@ -28,11 +32,15 @@ export class Match {
   private roundClosed = false;
   private resolveRound: (() => void) | null = null;
   private finished = false;
+  private studyPhaseResolve: (() => void) | null = null;
+  private studyWaitTimer: ReturnType<typeof setTimeout> | null = null;
+  private macroRound = 0;
 
   constructor(
     private readonly io: Server,
     readonly matchId: string,
     entries: Array<{ socketId: string; name: string }>,
+    readonly gameMode: GameMode,
   ) {
     this.room = `match_${matchId}`;
     for (const e of entries) {
@@ -69,6 +77,15 @@ export class Match {
     return true;
   }
 
+  private clearStudyWait(): void {
+    if (this.studyWaitTimer) {
+      clearTimeout(this.studyWaitTimer);
+      this.studyWaitTimer = null;
+    }
+    this.studyPhaseResolve?.();
+    this.studyPhaseResolve = null;
+  }
+
   recordAnswer(socketId: string, questionId: number, choiceIndex: number): void {
     if (this.finished || this.roundClosed) return;
     if (this.currentQuestionId !== questionId) return;
@@ -101,6 +118,7 @@ export class Match {
         clearTimeout(this.questionTimer);
         this.questionTimer = null;
       }
+      this.clearStudyWait();
       this.roundClosed = true;
       this.currentQuestionId = null;
       this.currentCorrectIndex = null;
@@ -110,50 +128,131 @@ export class Match {
     }
   }
 
+  private async runStudyPhase(
+    cards: Array<{ id: number; body: string; order: number }>,
+    endsAt: number,
+  ): Promise<void> {
+    this.io.to(this.room).emit("study_phase", {
+      cards,
+      endsAt,
+      macroRound: this.macroRound,
+    });
+    const ms = Math.max(0, endsAt - Date.now());
+    await new Promise<void>((resolve) => {
+      this.studyPhaseResolve = resolve;
+      this.studyWaitTimer = setTimeout(() => {
+        this.studyWaitTimer = null;
+        this.studyPhaseResolve = null;
+        resolve();
+      }, ms);
+    });
+    this.io.to(this.room).emit("study_phase_end", {
+      macroRound: this.macroRound,
+    });
+  }
+
   async run(): Promise<void> {
     this.io.to(this.room).emit("game_started", {
       matchId: this.matchId,
+      gameMode: this.gameMode,
       players: this.snapshotPlayers(),
     });
 
     const pool = getPool();
 
-    while (!this.finished && this.countActive() > 1 && this.round < MAX_ROUNDS) {
-      const q = await getRandomQuestion(pool, this.usedQuestionIds);
-      if (!q) {
-        this.io.to(this.room).emit("game_over", {
-          reason: "no_questions",
-          winner: null,
-          players: this.snapshotPlayers(),
-        });
-        this.finished = true;
-        return;
-      }
-      this.usedQuestionIds.push(q.id);
-      this.round++;
-      this.roundClosed = false;
-      this.currentQuestionId = q.id;
-      this.currentCorrectIndex = q.correct_index;
-      this.answerDeadline = Date.now() + QUESTION_MS;
-      this.pendingAnswers.clear();
-
-      const waitRound = new Promise<void>((resolve) => {
-        this.resolveRound = resolve;
-      });
-
-      this.io.to(this.room).emit("question", {
-        questionId: q.id,
-        prompt: q.prompt,
-        options: q.options,
-        endsAt: this.answerDeadline,
-        round: this.round,
-      });
-
-      this.questionTimer = setTimeout(() => this.finishRound(), QUESTION_MS);
-      await waitRound;
+    if (this.gameMode === "direct") {
+      await this.runDirectQuestionLoop(pool);
+    } else {
+      await this.runStudyThenQuizLoop(pool);
     }
 
     if (!this.finished) {
+      this.declareWinner();
+    }
+  }
+
+  private async runDirectQuestionLoop(pool: ReturnType<typeof getPool>): Promise<void> {
+    while (!this.finished && this.countActive() > 1 && this.round < MAX_ROUNDS) {
+      const q = await getRandomQuestion(pool, this.usedQuestionIds);
+      if (!q) {
+        this.emitNoQuestions();
+        return;
+      }
+      await this.playOneQuestion(pool, q);
+      if (this.finished) return;
+    }
+  }
+
+  private async runStudyThenQuizLoop(pool: ReturnType<typeof getPool>): Promise<void> {
+    const blockSize = config.studyQuizBlockSize;
+    const maxCards = config.maxStudyCardsDisplay;
+
+    while (!this.finished && this.countActive() > 1) {
+      const block = await getRandomQuestionBlock(
+        pool,
+        this.usedQuestionIds,
+        blockSize,
+      );
+      if (block.length === 0) {
+        this.emitNoQuestions();
+        return;
+      }
+      this.macroRound++;
+      const ids = block.map((q) => q.id);
+      const cards = await getStudyCardsForQuestions(pool, ids, maxCards);
+      const endsAt = Date.now() + config.studyPhaseMs;
+      if (cards.length > 0) {
+        await this.runStudyPhase(cards, endsAt);
+      }
+      if (this.finished) return;
+
+      for (const q of block) {
+        if (this.finished || this.countActive() <= 1) return;
+        if (this.round >= MAX_ROUNDS) return;
+        await this.playOneQuestion(pool, q);
+        if (this.finished) return;
+      }
+    }
+  }
+
+  private emitNoQuestions(): void {
+    this.io.to(this.room).emit("game_over", {
+      reason: "no_questions",
+      winner: null,
+      players: this.snapshotPlayers(),
+    });
+    this.finished = true;
+  }
+
+  private async playOneQuestion(
+    pool: ReturnType<typeof getPool>,
+    q: QuestionRow,
+  ): Promise<void> {
+    void pool;
+    this.usedQuestionIds.push(q.id);
+    this.round++;
+    this.roundClosed = false;
+    this.currentQuestionId = q.id;
+    this.currentCorrectIndex = q.correct_index;
+    this.answerDeadline = Date.now() + QUESTION_MS;
+    this.pendingAnswers.clear();
+
+    const waitRound = new Promise<void>((resolve) => {
+      this.resolveRound = resolve;
+    });
+
+    this.io.to(this.room).emit("question", {
+      questionId: q.id,
+      prompt: q.prompt,
+      options: q.options,
+      endsAt: this.answerDeadline,
+      round: this.round,
+    });
+
+    this.questionTimer = setTimeout(() => this.finishRound(), QUESTION_MS);
+    await waitRound;
+
+    if (this.countActive() <= 1 && !this.finished) {
       this.declareWinner();
     }
   }
@@ -220,6 +319,7 @@ export class Match {
   private declareWinner(): void {
     if (this.finished) return;
     this.finished = true;
+    this.clearStudyWait();
     if (this.questionTimer) {
       clearTimeout(this.questionTimer);
       this.questionTimer = null;

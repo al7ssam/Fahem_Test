@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+﻿import type { Pool } from "pg";
 
 export type QuestionRow = {
   id: number;
@@ -41,4 +41,20 @@ export async function getRandomQuestion(
     options,
     correct_index: row.correct_index,
   };
+}
+
+export async function getRandomQuestionBlock(
+  pool: Pool,
+  excludeIds: number[],
+  count: number,
+): Promise<QuestionRow[]> {
+  const out: QuestionRow[] = [];
+  const exclude = [...excludeIds];
+  for (let i = 0; i < count; i++) {
+    const q = await getRandomQuestion(pool, exclude);
+    if (!q) break;
+    exclude.push(q.id);
+    out.push(q);
+  }
+  return out;
 }

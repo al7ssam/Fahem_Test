@@ -1,7 +1,8 @@
 import "./style.css";
 import { io, type Socket } from "socket.io-client";
 
-type Phase = "name" | "lobby" | "countdown" | "playing" | "result";
+type GameMode = "direct" | "study_then_quiz";
+type Phase = "name" | "lobby" | "countdown" | "studying" | "playing" | "result";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -11,6 +12,9 @@ let mySocketId: string | null = null;
 let currentQuestionId: number | null = null;
 let endsAt = 0;
 let timerHandle: number | null = null;
+let currentGameMode: GameMode | null = null;
+let studyCards: Array<{ id: number; body: string; order: number }> = [];
+let studyEndsAt = 0;
 
 function el(html: string): HTMLElement {
   const t = document.createElement("template");
@@ -39,6 +43,17 @@ function render(): void {
             <div class="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-xl backdrop-blur space-y-4">
               <label class="block text-right text-sm text-slate-400">اسمك في اللعبة</label>
               <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="w-full rounded-xl bg-slate-900/80 border border-white/10 px-4 py-3 text-right text-lg outline-none focus:ring-2 focus:ring-amber-400/60" />
+              <fieldset class="text-right space-y-2 border-0 p-0">
+                <legend class="text-sm text-slate-400 mb-2">نمط اللعب</legend>
+                <label class="flex items-center justify-end gap-2 cursor-pointer text-slate-200">
+                  <span>مباشر — أسئلة فورية</span>
+                  <input type="radio" name="game-mode" value="direct" checked class="accent-amber-500" />
+                </label>
+                <label class="flex items-center justify-end gap-2 cursor-pointer text-slate-200">
+                  <span>مراجعة ثم أسئلة (بطاقات ثم كتلة أسئلة)</span>
+                  <input type="radio" name="game-mode" value="study_then_quiz" class="accent-amber-500" />
+                </label>
+              </fieldset>
               <button id="join-btn" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950 shadow-lg active:scale-[0.98] transition">دخول اللوبي</button>
               <p id="join-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
             </div>
@@ -56,7 +71,12 @@ function render(): void {
         err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
         return;
       }
-      connectSocket(name);
+      const modeInput = app.querySelector<HTMLInputElement>(
+        'input[name="game-mode"]:checked',
+      );
+      const mode: GameMode =
+        modeInput?.value === "study_then_quiz" ? "study_then_quiz" : "direct";
+      connectSocket(name, mode);
     });
     return;
   }
@@ -69,6 +89,7 @@ function render(): void {
             <h1 class="text-2xl font-extrabold text-amber-300">فاهم</h1>
             <span id="conn" class="text-xs px-2 py-1 rounded-full bg-white/10">…</span>
           </header>
+          <p id="lobby-mode" class="text-right text-sm text-slate-400 mb-2"></p>
           <div class="flex-1 flex flex-col gap-4">
             <div class="rounded-2xl bg-white/5 border border-white/10 p-4">
               <h2 class="text-lg font-bold mb-2 text-right">اللاعبون</h2>
@@ -81,6 +102,7 @@ function render(): void {
       `),
     );
     updateConnectionBadge();
+    updateLobbyModeLabel();
     return;
   }
 
@@ -96,6 +118,39 @@ function render(): void {
     return;
   }
 
+  if (phase === "studying") {
+    const hasCards = studyCards.length > 0;
+    app.append(
+      el(`
+        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
+          <div class="flex items-center justify-between gap-2">
+            <h2 class="text-lg font-bold text-amber-300">مرحلة المراجعة</h2>
+            <div id="study-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums">—</div>
+          </div>
+          <p id="study-hint" class="text-right text-slate-400 text-sm min-h-[1.25rem]"></p>
+          <div id="study-cards" class="flex-1 space-y-3 overflow-y-auto max-h-[70vh]"></div>
+        </div>
+      `),
+    );
+    const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
+    if (hint) {
+      hint.textContent = hasCards
+        ? "اقرأ البطاقات قبل بدء أسئلة هذه الجولة."
+        : "جاري تجهيز الجولة…";
+    }
+    const container = app.querySelector<HTMLDivElement>("#study-cards");
+    if (container && hasCards) {
+      for (const c of studyCards) {
+        const card = document.createElement("div");
+        card.className =
+          "rounded-2xl bg-white/5 border border-white/10 p-4 text-right shadow-lg";
+        card.innerHTML = `<p class="text-slate-100 leading-relaxed whitespace-pre-wrap">${escapeHtml(c.body)}</p>`;
+        container.appendChild(card);
+      }
+    }
+    startStudyTimer();
+    return;
+  }
   if (phase === "playing") {
     app.append(
       el(`
@@ -133,9 +188,20 @@ function render(): void {
       socket?.disconnect();
       socket = null;
       mySocketId = null;
+      currentGameMode = null;
+      studyCards = [];
       render();
     });
   }
+}
+
+function updateLobbyModeLabel(): void {
+  const elMode = app.querySelector<HTMLParagraphElement>("#lobby-mode");
+  if (!elMode || !currentGameMode) return;
+  elMode.textContent =
+    currentGameMode === "direct"
+      ? "اللوبي: نمط مباشر"
+      : "اللوبي: مراجعة ثم أسئلة";
 }
 
 function updateConnectionBadge(): void {
@@ -150,7 +216,9 @@ function updateConnectionBadge(): void {
   }
 }
 
-function renderLobbyPlayers(list: { socketId: string; name: string; ready: boolean }[]): void {
+function renderLobbyPlayers(
+  list: { socketId: string; name: string; ready: boolean }[],
+): void {
   const ul = app.querySelector<HTMLUListElement>("#players");
   const readyBtn = app.querySelector<HTMLButtonElement>("#ready-btn");
   if (!ul || !readyBtn) return;
@@ -176,9 +244,11 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function connectSocket(name: string): void {
+function connectSocket(name: string, mode: GameMode): void {
   socket?.removeAllListeners();
   socket?.disconnect();
+
+  currentGameMode = mode;
 
   const s = io({
     path: "/socket.io",
@@ -190,12 +260,12 @@ function connectSocket(name: string): void {
 
   s.on("connect", () => {
     mySocketId = s.id ?? null;
-    s.emit("join_lobby", { name }, (ack: { ok?: boolean }) => {
+    s.emit("join_lobby", { name, mode }, (ack: { ok?: boolean }) => {
       if (!ack?.ok) {
         phase = "name";
         render();
-        const err = document.querySelector("#join-err");
-        if (err) err.textContent = "تعذر الدخول. حاول مرة أخرى.";
+        const errEl = document.querySelector("#join-err");
+        if (errEl) errEl.textContent = "تعذر الدخول. حاول مرة أخرى.";
         return;
       }
       phase = "lobby";
@@ -207,11 +277,19 @@ function connectSocket(name: string): void {
     updateConnectionBadge();
   });
 
-  s.on("lobby_state", (payload: { players: { socketId: string; name: string; ready: boolean }[] }) => {
-    if (phase !== "lobby") return;
-    renderLobbyPlayers(payload.players);
-    updateConnectionBadge();
-  });
+  s.on(
+    "lobby_state",
+    (payload: {
+      mode?: GameMode;
+      players: { socketId: string; name: string; ready: boolean }[];
+    }) => {
+      if (phase !== "lobby") return;
+      if (payload.mode) currentGameMode = payload.mode;
+      renderLobbyPlayers(payload.players);
+      updateConnectionBadge();
+      updateLobbyModeLabel();
+    },
+  );
 
   s.on("match_starting", (payload: { seconds: number }) => {
     if (phase !== "lobby") return;
@@ -233,13 +311,68 @@ function connectSocket(name: string): void {
     }, 1000);
   });
 
-  s.on("game_started", () => {
-    if (cdInterval) {
-      window.clearInterval(cdInterval);
-      cdInterval = null;
+  s.on(
+    "game_started",
+    (payload: {
+      matchId?: string;
+      gameMode?: GameMode;
+      players?: unknown;
+    }) => {
+      if (cdInterval) {
+        window.clearInterval(cdInterval);
+        cdInterval = null;
+      }
+      if (payload.gameMode) currentGameMode = payload.gameMode;
+      if (payload.gameMode === "study_then_quiz") {
+        phase = "studying";
+        studyCards = [];
+        studyEndsAt = Date.now() + 60_000;
+        render();
+      } else {
+        phase = "playing";
+        render();
+      }
+    },
+  );
+
+  s.on(
+    "study_phase",
+    (payload: {
+      cards: Array<{ id: number; body: string; order: number }>;
+      endsAt: number;
+      macroRound?: number;
+    }) => {
+      studyCards = payload.cards ?? [];
+      studyEndsAt = payload.endsAt;
+      phase = "studying";
+      if (!app.querySelector("#study-cards")) render();
+      const container = app.querySelector<HTMLDivElement>("#study-cards");
+      const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
+      if (hint) {
+        hint.textContent =
+          studyCards.length > 0
+            ? "اقرأ البطاقات قبل بدء أسئلة هذه الجولة."
+            : "جاري تجهيز الجولة…";
+      }
+      if (container) {
+        container.innerHTML = "";
+        for (const c of studyCards) {
+          const card = document.createElement("div");
+          card.className =
+            "rounded-2xl bg-white/5 border border-white/10 p-4 text-right shadow-lg";
+          card.innerHTML = `<p class="text-slate-100 leading-relaxed whitespace-pre-wrap">${escapeHtml(c.body)}</p>`;
+          container.appendChild(card);
+        }
+      }
+      startStudyTimer();
+    },
+  );
+
+  s.on("study_phase_end", () => {
+    const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
+    if (hint && phase === "studying") {
+      hint.textContent = "انتهت المراجعة — تبدأ الأسئلة الآن.";
     }
-    phase = "playing";
-    render();
   });
 
   s.on(
@@ -365,6 +498,17 @@ function startQuestionTimer(): void {
   if (!clock) return;
   timerHandle = window.setInterval(() => {
     const ms = Math.max(0, endsAt - Date.now());
+    const sec = Math.ceil(ms / 1000);
+    clock.textContent = `${sec}s`;
+  }, 200);
+}
+
+function startStudyTimer(): void {
+  clearTimer();
+  const clock = app.querySelector<HTMLDivElement>("#study-clock");
+  if (!clock) return;
+  timerHandle = window.setInterval(() => {
+    const ms = Math.max(0, studyEndsAt - Date.now());
     const sec = Math.ceil(ms / 1000);
     clock.textContent = `${sec}s`;
   }, 200);

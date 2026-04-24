@@ -1,4 +1,4 @@
-import fs from "fs";
+﻿import fs from "fs";
 import path from "path";
 import { getPool, closePool } from "../db/pool";
 import { config } from "../config";
@@ -9,15 +9,17 @@ async function main() {
     process.exit(1);
   }
   const pool = getPool();
-  const migrationPath = path.join(
-    process.cwd(),
-    "db",
-    "migrations",
-    "001_questions.sql",
-  );
-  const sql = fs.readFileSync(migrationPath, "utf8");
-  await pool.query(sql);
-  console.log("Migration applied:", migrationPath);
+  const migrationsDir = path.join(process.cwd(), "db", "migrations");
+  const files = fs
+    .readdirSync(migrationsDir)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
+  for (const file of files) {
+    const migrationPath = path.join(migrationsDir, file);
+    const sql = fs.readFileSync(migrationPath, "utf8");
+    await pool.query(sql);
+    console.log("Migration applied:", migrationPath);
+  }
   await closePool();
 }
 
