@@ -41,7 +41,7 @@
         -webkit-font-smoothing: antialiased;
       }
       .wrap {
-        max-width: 36rem;
+        max-width: 52rem;
         margin: 0 auto;
         padding: 1.5rem 1rem 3rem;
       }
@@ -111,12 +111,35 @@
         color: var(--amber);
         font-variant-numeric: tabular-nums;
       }
+      .stat-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+      }
+      .stat-mini {
+        padding: 0.65rem 0.85rem;
+        border-radius: 0.75rem;
+        background: rgba(15, 23, 42, 0.65);
+        border: 1px solid var(--border);
+        text-align: center;
+      }
+      .stat-mini .v {
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: var(--amber);
+      }
+      .stat-mini .l {
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
       .card {
         border-radius: 1rem;
         padding: 1.25rem;
         background: var(--card);
         border: 1px solid var(--border);
         box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+        margin-bottom: 1.25rem;
       }
       label {
         display: block;
@@ -127,6 +150,7 @@
       }
       input[type="text"],
       input[type="password"],
+      input[type="search"],
       textarea,
       select {
         width: 100%;
@@ -171,6 +195,27 @@
         opacity: 0.55;
         cursor: not-allowed;
       }
+      .btn-secondary {
+        background: rgba(148, 163, 184, 0.25);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn-danger {
+        background: rgba(248, 113, 113, 0.25);
+        color: #fecaca;
+        border: 1px solid rgba(248, 113, 113, 0.35);
+      }
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+      }
+      .btn-row .btn {
+        flex: 1;
+        min-width: 8rem;
+        margin-top: 0;
+      }
       .msg {
         min-height: 1.5rem;
         margin-top: 0.75rem;
@@ -190,12 +235,118 @@
         margin-top: 1.25rem;
         line-height: 1.5;
       }
+      .bank-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: flex-end;
+        margin-bottom: 0.75rem;
+      }
+      .bank-toolbar input[type="search"] {
+        flex: 1;
+        min-width: 10rem;
+        margin-bottom: 0;
+      }
+      .bank-toolbar .btn {
+        width: auto;
+        margin-top: 0;
+        padding: 0.6rem 1rem;
+        font-size: 0.9rem;
+      }
+      table.bank {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.88rem;
+      }
+      table.bank th,
+      table.bank td {
+        border-bottom: 1px solid var(--border);
+        padding: 0.5rem 0.35rem;
+        text-align: right;
+        vertical-align: middle;
+      }
+      table.bank th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      table.bank tr:hover td {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .bank-actions {
+        display: flex;
+        gap: 0.35rem;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+      .bank-actions button {
+        padding: 0.35rem 0.55rem;
+        font-size: 0.78rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
+        background: rgba(15, 23, 42, 0.6);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .bank-actions button:hover {
+        border-color: rgba(251, 191, 36, 0.4);
+      }
+      .pager {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 0.75rem;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(2, 6, 23, 0.75);
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 1rem;
+        overflow-y: auto;
+        z-index: 50;
+      }
+      .modal-overlay[hidden] {
+        display: none !important;
+      }
+      .modal-box {
+        width: 100%;
+        max-width: 32rem;
+        margin: 2vh auto;
+        background: linear-gradient(to bottom, #0f172a, #1e1b4b);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 1.25rem;
+        max-height: 92vh;
+        overflow-y: auto;
+      }
+      .modal-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+      }
+      .modal-head h3 {
+        margin: 0;
+        font-size: 1.1rem;
+      }
+      .close-x {
+        background: transparent;
+        border: none;
+        color: var(--muted);
+        font-size: 1.5rem;
+        cursor: pointer;
+        line-height: 1;
+      }
     </style>
   </head>
   <body>
     <div class="wrap">
       <h1>إدارة الأسئلة</h1>
-      <p class="subtitle">فاهم — إضافة سؤال جديد إلى قاعدة البيانات</p>
+      <p class="subtitle">فاهم — إضافة وتعديل الأسئلة ونص المذاكرة</p>
 
       <div class="stat">
         <span class="stat-label">إجمالي الأسئلة حالياً</span>
@@ -240,11 +391,12 @@
           placeholder="مثال: easy"
         />
 
+        <label for="study-body">نص المذاكرة (اختياري — بطاقة واحدة لكل سؤال)</label>
+        <textarea id="study-body" maxlength="50000" rows="4" placeholder="نص يظهر في مرحلة المراجعة قبل الأسئلة…"></textarea>
+
         <button type="submit" class="btn" id="submit-btn">حفظ السؤال</button>
         <div class="msg" id="msg" aria-live="polite"></div>
       </form>
-
-      <div class="spacer"></div>
 
       <div class="card">
         <h2 class="section-title">استيراد من JSON</h2>
@@ -253,14 +405,16 @@
           <code dir="ltr">questions</code> أو
           <code dir="ltr">items</code>، أو سؤالًا واحدًا ككائن. يُقبل
           <code dir="ltr">correctIndex</code> أو
-          <code dir="ltr">correct_index</code> (0–3).
+          <code dir="ltr">correct_index</code> (0–3). لنص المذاكرة استخدم
+          <code dir="ltr">studyBody</code> أو
+          <code dir="ltr">study_body</code> (نص واحد).
         </p>
         <label for="json-input">محتوى JSON</label>
         <textarea
           id="json-input"
           class="mono"
           spellcheck="false"
-          placeholder='[ { "prompt": "...", "options": ["أ","ب","ج","د"], "correctIndex": 0 } ]'
+          placeholder='[ { "prompt": "...", "options": ["أ","ب","ج","د"], "correctIndex": 0, "studyBody": "..." } ]'
         ></textarea>
         <p class="stat-label" style="margin-bottom: 0.35rem">مثال:</p>
         <pre class="example-pre" id="json-example"></pre>
@@ -270,17 +424,146 @@
         <div class="msg" id="json-msg" aria-live="polite"></div>
       </div>
 
+      <div class="card">
+        <h2 class="section-title">نصوص نتيجة اللعبة</h2>
+        <p class="subtitle" style="margin-top: 0; margin-bottom: 0.75rem">
+          تُعرض للاعبين مع انتهاء المباراة (فائز / خاسر / تعادل). الحد الأقصى
+          ٥٠٠ حرف لكل حقل.
+        </p>
+        <label for="rm-winner">نص الفائز</label>
+        <textarea id="rm-winner" maxlength="500" rows="2"></textarea>
+        <label for="rm-loser">نص الخاسر</label>
+        <textarea id="rm-loser" maxlength="500" rows="2"></textarea>
+        <label for="rm-tie">نص التعادل / لا فائز</label>
+        <textarea id="rm-tie" maxlength="500" rows="2"></textarea>
+        <div class="btn-row">
+          <button type="button" class="btn btn-secondary" id="rm-load-btn">
+            تحميل من الخادم
+          </button>
+          <button type="button" class="btn" id="rm-save-btn">حفظ النصوص</button>
+        </div>
+        <div class="msg" id="rm-msg" aria-live="polite"></div>
+      </div>
+
+      <div class="card" id="bank-section">
+        <h2 class="section-title">بنك الأسئلة</h2>
+        <p class="subtitle" style="margin-top: 0; margin-bottom: 0.75rem">
+          بحث، تعديل، حذف، وحذف جماعي. يتطلب مفتاح الإدارة أعلاه.
+        </p>
+        <div class="stat-row" id="bank-stats">
+          <div class="stat-mini">
+            <div class="v" id="st-total">—</div>
+            <div class="l">إجمالي</div>
+          </div>
+          <div class="stat-mini">
+            <div class="v" id="st-study">—</div>
+            <div class="l">مع مذاكرة</div>
+          </div>
+          <div class="stat-mini">
+            <div class="v" id="st-nostudy">—</div>
+            <div class="l">بدون مذاكرة</div>
+          </div>
+        </div>
+        <div class="bank-toolbar">
+          <input
+            type="search"
+            id="bank-q"
+            placeholder="بحث في نص السؤال…"
+            dir="rtl"
+          />
+          <button type="button" class="btn btn-secondary" id="bank-search-btn">
+            بحث
+          </button>
+          <button type="button" class="btn btn-secondary" id="bank-refresh-btn">
+            تحديث القائمة
+          </button>
+        </div>
+        <div class="btn-row" style="margin-bottom: 0.5rem">
+          <button type="button" class="btn btn-secondary" id="bank-select-page">
+            تحديد الصفحة
+          </button>
+          <button type="button" class="btn btn-danger" id="bank-bulk-del">
+            حذف المحدد
+          </button>
+        </div>
+        <div style="overflow-x: auto">
+          <table class="bank">
+            <thead>
+              <tr>
+                <th style="width: 2rem">
+                  <input type="checkbox" id="bank-check-all" title="تحديد الكل" />
+                </th>
+                <th style="width: 3rem">#</th>
+                <th>معاينة</th>
+                <th style="width: 4rem">مذاكرة</th>
+                <th style="width: 7rem">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="bank-tbody"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="bank-pager-info"></span>
+          <span>
+            <button type="button" class="btn btn-secondary" id="bank-prev" style="width: auto; display: inline-block; padding: 0.4rem 0.8rem; margin: 0 0.25rem">السابق</button>
+            <button type="button" class="btn btn-secondary" id="bank-next" style="width: auto; display: inline-block; padding: 0.4rem 0.8rem; margin: 0">التالي</button>
+          </span>
+        </div>
+        <div class="msg" id="bank-msg" aria-live="polite"></div>
+      </div>
+
       <p class="hint">
         يُرسل المفتاح في رأس الطلب فقط ولا يُخزَّن في المتصفح. استخدم HTTPS
         (مثل Render) في الإنتاج.
       </p>
     </div>
+
+    <div class="modal-overlay" id="edit-modal" hidden>
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3>تعديل السؤال</h3>
+          <button type="button" class="close-x" id="edit-close" aria-label="إغلاق">
+            ×
+          </button>
+        </div>
+        <input type="hidden" id="edit-id" />
+        <label for="edit-prompt">نص السؤال</label>
+        <textarea id="edit-prompt" maxlength="2000" rows="3"></textarea>
+        <label for="edit-opt0">الخيار ١</label>
+        <input id="edit-opt0" type="text" maxlength="500" />
+        <label for="edit-opt1">الخيار ٢</label>
+        <input id="edit-opt1" type="text" maxlength="500" />
+        <label for="edit-opt2">الخيار ٣</label>
+        <input id="edit-opt2" type="text" maxlength="500" />
+        <label for="edit-opt3">الخيار ٤</label>
+        <input id="edit-opt3" type="text" maxlength="500" />
+        <label for="edit-correct">الإجابة الصحيحة</label>
+        <select id="edit-correct">
+          <option value="0">الخيار ١</option>
+          <option value="1">الخيار ٢</option>
+          <option value="2">الخيار ٣</option>
+          <option value="3">الخيار ٤</option>
+        </select>
+        <label for="edit-difficulty">الصعوبة</label>
+        <input id="edit-difficulty" type="text" maxlength="32" />
+        <label for="edit-study">نص المذاكرة</label>
+        <textarea id="edit-study" maxlength="50000" rows="5"></textarea>
+        <div class="btn-row">
+          <button type="button" class="btn" id="edit-save-btn">حفظ التعديل</button>
+          <button type="button" class="btn btn-secondary" id="edit-cancel-btn">
+            إلغاء
+          </button>
+        </div>
+        <div class="msg" id="edit-msg" aria-live="polite"></div>
+      </div>
+    </div>
+
     <script>
       (function () {
         var exampleEl = document.getElementById("json-example");
         if (exampleEl) {
           exampleEl.textContent =
-            '[\n  {\n    "prompt": "ما عاصمة فرنسا؟",\n    "options": ["باريس", "لندن", "برلين", "مدريد"],\n    "correctIndex": 0,\n    "difficulty": "easy"\n  },\n  {\n    "prompt": "٢ + ٢؟",\n    "options": ["3", "4", "5", "6"],\n    "correct_index": 1\n  }\n]';
+            '[\n  {\n    "prompt": "ما عاصمة فرنسا؟",\n    "options": ["باريس", "لندن", "برلين", "مدريد"],\n    "correctIndex": 0,\n    "difficulty": "easy",\n    "studyBody": "باريس عاصمة فرنسا."\n  }\n]';
         }
       })();
       (function () {
@@ -320,6 +603,7 @@
             10
           );
           var diff = document.getElementById("difficulty").value.trim();
+          var studyBody = document.getElementById("study-body").value;
 
           if (!secret) {
             setMsg("أدخل مفتاح الإدارة.", false);
@@ -338,6 +622,7 @@
               correctIndex: correctIndex,
             };
             if (diff) body.difficulty = diff;
+            if (studyBody.trim()) body.studyBody = studyBody.trim();
 
             var res = await fetch("/api/admin/questions", {
               method: "POST",
@@ -365,6 +650,7 @@
               document.getElementById("opt3").value = "";
               document.getElementById("correct").value = "0";
               document.getElementById("difficulty").value = "";
+              document.getElementById("study-body").value = "";
             } else if (data.error === "forbidden") {
               setMsg("مفتاح الإدارة غير صحيح.", false);
             } else if (data.error === "admin_secret_not_configured") {
@@ -465,6 +751,393 @@
             jsonBtn.disabled = false;
           }
         });
+      })();
+      (function () {
+        var rmLoad = document.getElementById("rm-load-btn");
+        var rmSave = document.getElementById("rm-save-btn");
+        var rmMsg = document.getElementById("rm-msg");
+        function setRmMsg(t, ok) {
+          rmMsg.textContent = t || "";
+          rmMsg.className = "msg " + (ok ? "ok" : "err");
+        }
+        function secret() {
+          return document.getElementById("admin-secret").value.trim();
+        }
+        rmLoad.addEventListener("click", async function () {
+          setRmMsg("", true);
+          var s = secret();
+          if (!s) {
+            setRmMsg("أدخل مفتاح الإدارة.", false);
+            return;
+          }
+          rmLoad.disabled = true;
+          try {
+            var r = await fetch("/api/admin/result-messages", {
+              headers: { "X-Admin-Secret": s },
+            });
+            var j = await r.json();
+            if (r.ok && j.ok) {
+              document.getElementById("rm-winner").value = j.winnerText || "";
+              document.getElementById("rm-loser").value = j.loserText || "";
+              document.getElementById("rm-tie").value = j.tieText || "";
+              setRmMsg("تم التحميل.", true);
+            } else if (j.error === "forbidden") {
+              setRmMsg("مفتاح غير صحيح.", false);
+            } else {
+              setRmMsg("تعذر التحميل.", false);
+            }
+          } catch (e) {
+            setRmMsg("خطأ في الاتصال.", false);
+          } finally {
+            rmLoad.disabled = false;
+          }
+        });
+        rmSave.addEventListener("click", async function () {
+          setRmMsg("", true);
+          var s = secret();
+          if (!s) {
+            setRmMsg("أدخل مفتاح الإدارة.", false);
+            return;
+          }
+          var body = {
+            winnerText: document.getElementById("rm-winner").value.trim(),
+            loserText: document.getElementById("rm-loser").value.trim(),
+            tieText: document.getElementById("rm-tie").value.trim(),
+          };
+          if (!body.winnerText || !body.loserText || !body.tieText) {
+            setRmMsg("املأ الحقول الثلاثة (حرف واحد على الأقل لكل حقل).", false);
+            return;
+          }
+          rmSave.disabled = true;
+          try {
+            var r = await fetch("/api/admin/result-messages", {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Admin-Secret": s,
+              },
+              body: JSON.stringify(body),
+            });
+            var j = await r.json().catch(function () {
+              return {};
+            });
+            if (r.ok && j.ok) setRmMsg("تم الحفظ.", true);
+            else if (j.error === "forbidden") setRmMsg("مفتاح غير صحيح.", false);
+            else if (j.error === "invalid_body") setRmMsg("تحقق من الطول (٥٠٠ حرف كحد أقصى).", false);
+            else setRmMsg("تعذر الحفظ.", false);
+          } catch (e) {
+            setRmMsg("خطأ في الاتصال.", false);
+          } finally {
+            rmSave.disabled = false;
+          }
+        });
+      })();
+      (function () {
+        var bankState = { offset: 0, limit: 20, q: "", selected: {} };
+        var tbody = document.getElementById("bank-tbody");
+        var bankMsg = document.getElementById("bank-msg");
+        var totalEl = document.getElementById("total-display");
+        function setBankMsg(t, ok) {
+          bankMsg.textContent = t || "";
+          bankMsg.className = "msg " + (ok ? "ok" : "err");
+        }
+        function secret() {
+          return document.getElementById("admin-secret").value.trim();
+        }
+        function hdr() {
+          return {
+            "Content-Type": "application/json",
+            "X-Admin-Secret": secret(),
+          };
+        }
+        async function loadStats() {
+          var s = secret();
+          if (!s) return;
+          try {
+            var r = await fetch("/api/admin/questions/stats", {
+              headers: { "X-Admin-Secret": s },
+            });
+            var j = await r.json();
+            if (r.ok && j.ok) {
+              document.getElementById("st-total").textContent = String(
+                j.totalQuestions
+              );
+              document.getElementById("st-study").textContent = String(
+                j.withStudyCards
+              );
+              document.getElementById("st-nostudy").textContent = String(
+                j.withoutStudyCards
+              );
+            }
+          } catch (e) {}
+        }
+        async function loadList() {
+          var s = secret();
+          if (!s) {
+            setBankMsg("أدخل مفتاح الإدارة للبحث في البنك.", false);
+            return;
+          }
+          setBankMsg("", true);
+          var qs =
+            "?offset=" +
+            bankState.offset +
+            "&limit=" +
+            bankState.limit +
+            (bankState.q ? "&q=" + encodeURIComponent(bankState.q) : "");
+          try {
+            var r = await fetch("/api/admin/questions" + qs, {
+              headers: { "X-Admin-Secret": s },
+            });
+            var j = await r.json();
+            if (!r.ok || !j.ok) {
+              if (j.error === "forbidden") setBankMsg("مفتاح غير صحيح.", false);
+              else setBankMsg("تعذر جلب القائمة.", false);
+              return;
+            }
+            tbody.innerHTML = "";
+            bankState.selected = {};
+            document.getElementById("bank-check-all").checked = false;
+            j.items.forEach(function (row) {
+              var tr = document.createElement("tr");
+              var ck = document.createElement("input");
+              ck.type = "checkbox";
+              ck.dataset.id = String(row.id);
+              ck.addEventListener("change", function () {
+                if (ck.checked) bankState.selected[row.id] = true;
+                else delete bankState.selected[row.id];
+              });
+              var td0 = document.createElement("td");
+              td0.appendChild(ck);
+              var td1 = document.createElement("td");
+              td1.textContent = String(row.id);
+              var td2 = document.createElement("td");
+              td2.textContent = row.promptPreview || "";
+              var td3 = document.createElement("td");
+              td3.textContent = row.hasStudyCards ? "نعم" : "لا";
+              var td4 = document.createElement("td");
+              td4.className = "bank-actions";
+              var bEdit = document.createElement("button");
+              bEdit.type = "button";
+              bEdit.textContent = "تعديل";
+              bEdit.addEventListener("click", function () {
+                openEditModal(row.id);
+              });
+              var bDel = document.createElement("button");
+              bDel.type = "button";
+              bDel.textContent = "حذف";
+              bDel.addEventListener("click", function () {
+                if (!confirm("حذف السؤال #" + row.id + "؟")) return;
+                deleteOne(row.id);
+              });
+              td4.appendChild(bEdit);
+              td4.appendChild(bDel);
+              tr.appendChild(td0);
+              tr.appendChild(td1);
+              tr.appendChild(td2);
+              tr.appendChild(td3);
+              tr.appendChild(td4);
+              tbody.appendChild(tr);
+            });
+            var from = j.total === 0 ? 0 : bankState.offset + 1;
+            var to = Math.min(bankState.offset + j.items.length, j.total);
+            document.getElementById("bank-pager-info").textContent =
+              j.total === 0
+                ? "لا نتائج"
+                : "عرض " + from + "–" + to + " من " + j.total;
+            document.getElementById("bank-prev").disabled =
+              bankState.offset <= 0;
+            document.getElementById("bank-next").disabled =
+              bankState.offset + bankState.limit >= j.total;
+            await loadStats();
+          } catch (e) {
+            setBankMsg("خطأ في الاتصال.", false);
+          }
+        }
+        async function deleteOne(id) {
+          var s = secret();
+          try {
+            var r = await fetch("/api/admin/questions/" + id, {
+              method: "DELETE",
+              headers: { "X-Admin-Secret": s },
+            });
+            var j = await r.json();
+            if (r.ok && j.ok) {
+              if (typeof j.totalQuestions === "number")
+                totalEl.textContent = String(j.totalQuestions);
+              setBankMsg("تم الحذف.", true);
+              await loadList();
+            } else setBankMsg("تعذر الحذف.", false);
+          } catch (e) {
+            setBankMsg("خطأ في الاتصال.", false);
+          }
+        }
+        document
+          .getElementById("bank-search-btn")
+          .addEventListener("click", function () {
+            bankState.q = document.getElementById("bank-q").value.trim();
+            bankState.offset = 0;
+            loadList();
+          });
+        document
+          .getElementById("bank-refresh-btn")
+          .addEventListener("click", function () {
+            loadList();
+          });
+        document.getElementById("bank-prev").addEventListener("click", function () {
+          bankState.offset = Math.max(0, bankState.offset - bankState.limit);
+          loadList();
+        });
+        document.getElementById("bank-next").addEventListener("click", function () {
+          bankState.offset += bankState.limit;
+          loadList();
+        });
+        document
+          .getElementById("bank-select-page")
+          .addEventListener("click", function () {
+            tbody.querySelectorAll('input[type="checkbox"]').forEach(function (c) {
+              c.checked = true;
+              var id = parseInt(c.dataset.id, 10);
+              if (id) bankState.selected[id] = true;
+            });
+            document.getElementById("bank-check-all").checked = true;
+          });
+        document
+          .getElementById("bank-check-all")
+          .addEventListener("change", function (ev) {
+            var on = ev.target.checked;
+            tbody.querySelectorAll('input[type="checkbox"]').forEach(function (c) {
+              c.checked = on;
+              var id = parseInt(c.dataset.id, 10);
+              if (on && id) bankState.selected[id] = true;
+              else if (id) delete bankState.selected[id];
+            });
+          });
+        document
+          .getElementById("bank-bulk-del")
+          .addEventListener("click", async function () {
+            var ids = Object.keys(bankState.selected).map(function (x) {
+              return parseInt(x, 10);
+            });
+            if (!ids.length) {
+              setBankMsg("حدد صفاً واحداً على الأقل.", false);
+              return;
+            }
+            if (!confirm("حذف " + ids.length + " سؤال؟ لا يمكن التراجع."))
+              return;
+            var s = secret();
+            try {
+              var r = await fetch("/api/admin/questions/bulk-delete", {
+                method: "POST",
+                headers: hdr(),
+                body: JSON.stringify({ ids: ids }),
+              });
+              var j = await r.json();
+              if (r.ok && j.ok) {
+                if (typeof j.totalQuestions === "number")
+                  totalEl.textContent = String(j.totalQuestions);
+                setBankMsg("تم حذف " + j.deleted + " سؤالاً.", true);
+                bankState.offset = 0;
+                await loadList();
+              } else setBankMsg("تعذر الحذف الجماعي.", false);
+            } catch (e) {
+              setBankMsg("خطأ في الاتصال.", false);
+            }
+          });
+
+        var modal = document.getElementById("edit-modal");
+        function closeModal() {
+          modal.hidden = true;
+        }
+        document.getElementById("edit-close").addEventListener("click", closeModal);
+        document
+          .getElementById("edit-cancel-btn")
+          .addEventListener("click", closeModal);
+        modal.addEventListener("click", function (e) {
+          if (e.target === modal) closeModal();
+        });
+        async function openEditModal(id) {
+          var s = secret();
+          if (!s) {
+            setBankMsg("أدخل مفتاح الإدارة.", false);
+            return;
+          }
+          document.getElementById("edit-msg").textContent = "";
+          try {
+            var r = await fetch("/api/admin/questions/" + id, {
+              headers: { "X-Admin-Secret": s },
+            });
+            var j = await r.json();
+            if (!r.ok || !j.ok || !j.question) {
+              setBankMsg("تعذر فتح السؤال.", false);
+              return;
+            }
+            var q = j.question;
+            document.getElementById("edit-id").value = String(q.id);
+            document.getElementById("edit-prompt").value = q.prompt;
+            document.getElementById("edit-opt0").value = q.options[0] || "";
+            document.getElementById("edit-opt1").value = q.options[1] || "";
+            document.getElementById("edit-opt2").value = q.options[2] || "";
+            document.getElementById("edit-opt3").value = q.options[3] || "";
+            document.getElementById("edit-correct").value = String(
+              q.correctIndex
+            );
+            document.getElementById("edit-difficulty").value =
+              q.difficulty || "";
+            document.getElementById("edit-study").value = q.studyBody || "";
+            modal.hidden = false;
+          } catch (e) {
+            setBankMsg("خطأ في الاتصال.", false);
+          }
+        }
+        document
+          .getElementById("edit-save-btn")
+          .addEventListener("click", async function () {
+            var em = document.getElementById("edit-msg");
+            em.textContent = "";
+            em.className = "msg";
+            var id = parseInt(document.getElementById("edit-id").value, 10);
+            var body = {
+              prompt: document.getElementById("edit-prompt").value.trim(),
+              options: [
+                document.getElementById("edit-opt0").value.trim(),
+                document.getElementById("edit-opt1").value.trim(),
+                document.getElementById("edit-opt2").value.trim(),
+                document.getElementById("edit-opt3").value.trim(),
+              ],
+              correctIndex: parseInt(
+                document.getElementById("edit-correct").value,
+                10
+              ),
+              studyBody: document.getElementById("edit-study").value,
+            };
+            var d = document.getElementById("edit-difficulty").value.trim();
+            body.difficulty = d || null;
+            if (!body.prompt || body.options.some(function (o) { return !o; })) {
+              em.textContent = "أكمل الحقول.";
+              em.className = "msg err";
+              return;
+            }
+            try {
+              var r = await fetch("/api/admin/questions/" + id, {
+                method: "PATCH",
+                headers: hdr(),
+                body: JSON.stringify(body),
+              });
+              var j = await r.json();
+              if (r.ok && j.ok) {
+                em.textContent = "تم الحفظ.";
+                em.className = "msg ok";
+                await loadList();
+                setTimeout(closeModal, 600);
+              } else {
+                em.textContent = "تعذر الحفظ.";
+                em.className = "msg err";
+              }
+            } catch (e) {
+              em.textContent = "خطأ في الاتصال.";
+              em.className = "msg err";
+            }
+          });
       })();
     </script>
   </body>

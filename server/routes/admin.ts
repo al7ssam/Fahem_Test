@@ -2,29 +2,18 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import type { Express, Request, Response } from "express";
-import type { PoolClient } from "pg";
 import { z } from "zod";
 import { config } from "../config";
 import { getPool } from "../db/pool";
-
-const studyCardBodySchema = z.object({
-  body: z.string().trim().min(1).max(50_000),
-  sortOrder: z.number().int().min(0).max(10_000).optional(),
-  sort_order: z.number().int().min(0).max(10_000).optional(),
-});
+import { getResultMessages } from "../db/resultCopy";
 
 const questionBodySchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
   options: z.array(z.string().trim().min(1).max(500)).length(4),
   correctIndex: z.number().int().min(0).max(3),
   difficulty: z.string().trim().max(32).optional(),
-  studyCards: z.array(studyCardBodySchema).max(100).optional(),
-});
-
-const studyCardImportRowSchema = z.object({
-  body: z.string().trim().min(1).max(50_000),
-  sort_order: z.number().int().min(0).max(10_000).optional(),
-  sortOrder: z.number().int().min(0).max(10_000).optional(),
+  studyBody: z.string().max(50_000).optional(),
+  study_body: z.string().max(50_000).optional(),
 });
 
 const importItemSchema = z
@@ -34,7 +23,8 @@ const importItemSchema = z
     correctIndex: z.number().int().min(0).max(3).optional(),
     correct_index: z.number().int().min(0).max(3).optional(),
     difficulty: z.string().trim().max(32).optional(),
-    studyCards: z.array(studyCardImportRowSchema).max(100).optional(),
+    studyBody: z.string().max(50_000).optional(),
+    study_body: z.string().max(50_000).optional(),
   })
   .refine((d) => d.correctIndex !== undefined || d.correct_index !== undefined, {
     message: "correctIndex or correct_index required",
@@ -44,27 +34,30 @@ const importItemSchema = z
     options: d.options,
     correctIndex: (d.correctIndex ?? d.correct_index) as number,
     difficulty: d.difficulty,
-    studyCards: (d.studyCards ?? []).map((c, idx) => ({
-      body: c.body,
-      sortOrder: c.sort_order ?? c.sortOrder ?? idx,
-    })),
+    studyBody: (d.studyBody ?? d.study_body)?.trim() || null,
   }));
 
 const importArraySchema = z.array(importItemSchema).min(1).max(200);
 
-async function insertStudyCardsForQuestion(
-  client: PoolClient,
-  questionId: number,
-  cards: Array<{ body: string; sortOrder: number }>,
-): Promise<void> {
-  for (const c of cards) {
-    await client.query(
-      `INSERT INTO question_study_cards (question_id, body, sort_order)
-       VALUES ($1, $2, $3)`,
-      [questionId, c.body, c.sortOrder],
-    );
-  }
-}
+const resultMessagesPatchSchema = z.object({
+  winnerText: z.string().trim().min(1).max(500),
+  loserText: z.string().trim().min(1).max(500),
+  tieText: z.string().trim().min(1).max(500),
+});
+
+const questionPatchSchema = z.object({
+  prompt: z.string().trim().min(1).max(2000).optional(),
+  options: z.array(z.string().trim().min(1).max(500)).length(4).optional(),
+  correctIndex: z.number().int().min(0).max(3).optional(),
+  correct_index: z.number().int().min(0).max(3).optional(),
+  difficulty: z.string().trim().max(32).nullable().optional(),
+  studyBody: z.string().max(50_000).nullable().optional(),
+  study_body: z.string().max(50_000).nullable().optional(),
+});
+
+const bulkDeleteSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(500),
+});
 
 function timingSafeEqualString(a: string, b: string): boolean {
   try {
@@ -134,6 +127,16 @@ function zodIssuesSummary(err: z.ZodError, limit = 5): Array<{ path: string; mes
   }));
 }
 
+function mergedStudyBody(data: {
+  studyBody?: string | null;
+  study_body?: string | null;
+}): string | null {
+  const v = data.studyBody ?? data.study_body;
+  if (v === null || v === undefined) return null;
+  const t = String(v).trim();
+  return t.length === 0 ? null : t;
+}
+
 export function registerAdminRoutes(app: Express): void {
   app.get("/admin", async (_req: Request, res: Response) => {
     try {
@@ -154,6 +157,310 @@ export function registerAdminRoutes(app: Express): void {
     res.json({ ok: true, totalQuestions: total });
   });
 
+  app.get("/api/admin/questions/stats", async (_req: Request, res: Response) => {
+    if (!verifyAdmin(_req, res)) return;
+    try {
+      const pool = getPool();
+      const r = await pool.query<{
+        total: string;
+        with_study: string;
+      }>(
+        `SELECT
+           (SELECT COUNT(*)::text FROM questions) AS total,
+           (SELECT COUNT(*)::text FROM questions
+            WHERE study_body IS NOT NULL AND btrim(study_body) <> '') AS with_study`,
+      );
+      const total = Number(r.rows[0]?.total ?? 0);
+      const withStudy = Number(r.rows[0]?.with_study ?? 0);
+      res.json({
+        ok: true,
+        totalQuestions: total,
+        withStudyCards: withStudy,
+        withoutStudyCards: Math.max(0, total - withStudy),
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "stats_failed" });
+    }
+  });
+
+  app.get("/api/admin/result-messages", async (_req: Request, res: Response) => {
+    if (!verifyAdmin(_req, res)) return;
+    try {
+      const pool = getPool();
+      const m = await getResultMessages(pool);
+      res.json({
+        ok: true,
+        winnerText: m.winner,
+        loserText: m.loser,
+        tieText: m.tie,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/result-messages", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = resultMessagesPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    const { winnerText, loserText, tieText } = parsed.data;
+    try {
+      const pool = getPool();
+      await pool.query(
+        `UPDATE game_result_copy
+         SET winner_text = $1, loser_text = $2, tie_text = $3
+         WHERE id = 1`,
+        [winnerText, loserText, tieText],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.get("/api/admin/questions", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    try {
+      const pool = getPool();
+      const params: unknown[] = [];
+      let where = "";
+      if (q.length > 0) {
+        params.push(`%${q}%`);
+        where = `WHERE prompt ILIKE $${params.length}`;
+      }
+      params.push(limit, offset);
+      const limIdx = params.length - 1;
+      const offIdx = params.length;
+      const listSql = `
+        SELECT id,
+               LEFT(prompt, 160) AS prompt_preview,
+               (study_body IS NOT NULL AND btrim(study_body) <> '') AS has_study
+        FROM questions
+        ${where}
+        ORDER BY id DESC
+        LIMIT $${limIdx} OFFSET $${offIdx}
+      `;
+      const list = await pool.query<{
+        id: number;
+        prompt_preview: string;
+        has_study: boolean;
+      }>(listSql, params);
+
+      const countSql = `SELECT COUNT(*)::text AS c FROM questions ${where}`;
+      const countParams = q.length > 0 ? [`%${q}%`] : [];
+      const c = await pool.query<{ c: string }>(countSql, countParams);
+      const total = Number(c.rows[0]?.c ?? 0);
+
+      res.json({
+        ok: true,
+        items: list.rows.map((row) => ({
+          id: row.id,
+          promptPreview: row.prompt_preview,
+          hasStudyCards: row.has_study,
+        })),
+        total,
+        offset,
+        limit,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "list_failed" });
+    }
+  });
+
+  app.post("/api/admin/questions/bulk-delete", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = bulkDeleteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`DELETE FROM questions WHERE id = ANY($1::int[])`, [
+        parsed.data.ids,
+      ]);
+      await client.query("COMMIT");
+    } catch {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      res.status(500).json({ ok: false, error: "bulk_delete_failed" });
+      return;
+    } finally {
+      client.release();
+    }
+    const total = await countQuestions();
+    res.json({ ok: true, deleted: parsed.data.ids.length, totalQuestions: total ?? undefined });
+  });
+
+  app.get("/api/admin/questions/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const pool = getPool();
+      const r = await pool.query<{
+        id: number;
+        prompt: string;
+        options: unknown;
+        correct_index: number;
+        difficulty: string | null;
+        study_body: string | null;
+      }>(
+        `SELECT id, prompt, options, correct_index, difficulty, study_body
+         FROM questions WHERE id = $1`,
+        [id],
+      );
+      const row = r.rows[0];
+      if (!row) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      const options = Array.isArray(row.options)
+        ? (row.options as string[])
+        : (JSON.parse(String(row.options)) as string[]);
+      res.json({
+        ok: true,
+        question: {
+          id: row.id,
+          prompt: row.prompt,
+          options,
+          correctIndex: row.correct_index,
+          difficulty: row.difficulty,
+          studyBody: row.study_body ?? "",
+        },
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/questions/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const parsed = questionPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    const d = parsed.data;
+    const correctIdx = d.correctIndex ?? d.correct_index;
+    try {
+      const pool = getPool();
+      const cur = await pool.query<{
+        prompt: string;
+        options: unknown;
+        correct_index: number;
+        difficulty: string | null;
+        study_body: string | null;
+      }>(
+        `SELECT prompt, options, correct_index, difficulty, study_body FROM questions WHERE id = $1`,
+        [id],
+      );
+      const row = cur.rows[0];
+      if (!row) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      const nextPrompt = d.prompt ?? row.prompt;
+      let nextOptions: string[];
+      if (d.options) {
+        nextOptions = d.options;
+      } else {
+        nextOptions = Array.isArray(row.options)
+          ? (row.options as string[])
+          : (JSON.parse(String(row.options)) as string[]);
+      }
+      const nextCorrect =
+        correctIdx !== undefined ? correctIdx : row.correct_index;
+      const nextDiff =
+        d.difficulty !== undefined ? d.difficulty : row.difficulty;
+
+      const rawBody = req.body as Record<string, unknown>;
+      const studyPatchProvided =
+        Object.prototype.hasOwnProperty.call(rawBody, "studyBody") ||
+        Object.prototype.hasOwnProperty.call(rawBody, "study_body");
+      let nextStudy = row.study_body;
+      if (studyPatchProvided) {
+        const raw = d.studyBody !== undefined ? d.studyBody : d.study_body;
+        if (raw === null || raw === undefined) {
+          nextStudy = null;
+        } else {
+          const t = String(raw).trim();
+          nextStudy = t.length === 0 ? null : t;
+        }
+      }
+
+      await pool.query(
+        `UPDATE questions
+         SET prompt = $1, options = $2::jsonb, correct_index = $3,
+             difficulty = $4, study_body = $5
+         WHERE id = $6`,
+        [
+          nextPrompt,
+          JSON.stringify(nextOptions),
+          nextCorrect,
+          nextDiff,
+          nextStudy,
+          id,
+        ],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.delete("/api/admin/questions/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const pool = getPool();
+      const r = await pool.query(`DELETE FROM questions WHERE id = $1`, [id]);
+      if (r.rowCount === 0) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      const total = await countQuestions();
+      res.json({ ok: true, totalQuestions: total ?? undefined });
+    } catch {
+      res.status(500).json({ ok: false, error: "delete_failed" });
+    }
+  });
+
   app.post("/api/admin/questions", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
 
@@ -167,32 +474,27 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
 
-    const { prompt, options, correctIndex, difficulty, studyCards } = parsed.data;
+    const { prompt, options, correctIndex, difficulty } = parsed.data;
+    const studyBody = mergedStudyBody(parsed.data as {
+      studyBody?: string | null;
+      study_body?: string | null;
+    });
 
-    const pool = getPool();
-    const client = await pool.connect();
     try {
-      await client.query("BEGIN");
-      const ins = await client.query<{ id: number }>(
-        `INSERT INTO questions (prompt, options, correct_index, difficulty)
-         VALUES ($1, $2::jsonb, $3, $4)
+      const pool = getPool();
+      const ins = await pool.query<{ id: number }>(
+        `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body)
+         VALUES ($1, $2::jsonb, $3, $4, $5)
          RETURNING id`,
         [
           prompt,
           JSON.stringify(options),
           correctIndex,
           difficulty ?? null,
+          studyBody,
         ],
       );
       const id = ins.rows[0]?.id;
-      if (id != null && studyCards && studyCards.length > 0) {
-        const normalized = studyCards.map((c, idx) => ({
-          body: c.body,
-          sortOrder: c.sortOrder ?? c.sort_order ?? idx,
-        }));
-        await insertStudyCardsForQuestion(client, id, normalized);
-      }
-      await client.query("COMMIT");
       const total = await countQuestions();
       res.status(201).json({
         ok: true,
@@ -200,14 +502,7 @@ export function registerAdminRoutes(app: Express): void {
         totalQuestions: total ?? undefined,
       });
     } catch {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        /* ignore */
-      }
       res.status(500).json({ ok: false, error: "insert_failed" });
-    } finally {
-      client.release();
     }
   });
 
@@ -241,21 +536,17 @@ export function registerAdminRoutes(app: Express): void {
     try {
       await client.query("BEGIN");
       for (const row of rows) {
-        const ins = await client.query<{ id: number }>(
-          `INSERT INTO questions (prompt, options, correct_index, difficulty)
-           VALUES ($1, $2::jsonb, $3, $4)
-           RETURNING id`,
+        await client.query(
+          `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body)
+           VALUES ($1, $2::jsonb, $3, $4, $5)`,
           [
             row.prompt,
             JSON.stringify(row.options),
             row.correctIndex,
             row.difficulty ?? null,
+            row.studyBody,
           ],
         );
-        const qid = ins.rows[0]?.id;
-        if (qid != null && row.studyCards.length > 0) {
-          await insertStudyCardsForQuestion(client, qid, row.studyCards);
-        }
       }
       await client.query("COMMIT");
     } catch {

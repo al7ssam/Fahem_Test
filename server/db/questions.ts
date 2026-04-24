@@ -5,6 +5,7 @@ export type QuestionRow = {
   prompt: string;
   options: string[];
   correct_index: number;
+  study_body?: string | null;
 };
 
 export async function getRandomQuestion(
@@ -18,7 +19,7 @@ export async function getRandomQuestion(
     where = `WHERE id != ALL($1::int[])`;
   }
   const sql = `
-    SELECT id, prompt, options, correct_index
+    SELECT id, prompt, options, correct_index, study_body
     FROM questions
     ${where}
     ORDER BY RANDOM()
@@ -29,6 +30,7 @@ export async function getRandomQuestion(
     prompt: string;
     options: unknown;
     correct_index: number;
+    study_body: string | null;
   }>(sql, params);
   const row = res.rows[0];
   if (!row) return null;
@@ -40,7 +42,42 @@ export async function getRandomQuestion(
     prompt: row.prompt,
     options,
     correct_index: row.correct_index,
+    study_body: row.study_body,
   };
+}
+
+/** بطاقة مراجعة واحدة لكل سؤال من عمود study_body (لحدث study_phase) */
+export type StudyPhaseCardPayload = {
+  id: number;
+  questionId: number;
+  body: string;
+  order: number;
+};
+
+export async function getStudyPhaseCardsFromQuestionIds(
+  pool: Pool,
+  questionIdsOrdered: number[],
+  maxCards: number,
+): Promise<StudyPhaseCardPayload[]> {
+  if (questionIdsOrdered.length === 0 || maxCards <= 0) return [];
+  const out: StudyPhaseCardPayload[] = [];
+  let order = 0;
+  for (const qid of questionIdsOrdered) {
+    if (out.length >= maxCards) break;
+    const res = await pool.query<{ study_body: string | null }>(
+      `SELECT study_body FROM questions WHERE id = $1`,
+      [qid],
+    );
+    const body = res.rows[0]?.study_body?.trim();
+    if (!body) continue;
+    out.push({
+      id: qid,
+      questionId: qid,
+      body,
+      order: order++,
+    });
+  }
+  return out;
 }
 
 export async function getRandomQuestionBlock(

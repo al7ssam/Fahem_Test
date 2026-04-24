@@ -13,7 +13,18 @@ let currentQuestionId: number | null = null;
 let endsAt = 0;
 let timerHandle: number | null = null;
 let currentGameMode: GameMode | null = null;
-let studyCards: Array<{ id: number; body: string; order: number }> = [];
+let studyCards: Array<{
+  id: number;
+  questionId?: number;
+  body: string;
+  order: number;
+}> = [];
+
+const DEFAULT_RESULT_MESSAGES = {
+  winner: "أحسنت — بقيت حتى النهاية.",
+  loser: "انتهت الجولة لصالح لاعب آخر.",
+  tie: "تعادل أو لا فائز — حاول مرة أخرى!",
+} as const;
 let studyEndsAt = 0;
 
 function el(html: string): HTMLElement {
@@ -34,26 +45,29 @@ function render(): void {
   app.innerHTML = "";
 
   if (phase === "name") {
+    let selectedMode: GameMode = "direct";
     app.append(
       el(`
         <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white flex flex-col items-center justify-center p-4">
-          <div class="max-w-md w-full space-y-6 text-center">
+          <div class="max-w-lg w-full space-y-6 text-center">
             <h1 class="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-l from-amber-300 to-orange-400">فاهم</h1>
-            <p class="text-slate-300 text-lg">تحدٍّ سريع — من يبقى آخر من يفوز؟</p>
-            <div class="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-xl backdrop-blur space-y-4">
+            <p class="text-slate-300 text-lg">تحدٍّ سريع — من يبقى آخر يفوز؟</p>
+            <div class="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-xl backdrop-blur space-y-5">
               <label class="block text-right text-sm text-slate-400">اسمك في اللعبة</label>
               <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="w-full rounded-xl bg-slate-900/80 border border-white/10 px-4 py-3 text-right text-lg outline-none focus:ring-2 focus:ring-amber-400/60" />
-              <fieldset class="text-right space-y-2 border-0 p-0">
-                <legend class="text-sm text-slate-400 mb-2">نمط اللعب</legend>
-                <label class="flex items-center justify-end gap-2 cursor-pointer text-slate-200">
-                  <span>مباشر — أسئلة فورية</span>
-                  <input type="radio" name="game-mode" value="direct" checked class="accent-amber-500" />
-                </label>
-                <label class="flex items-center justify-end gap-2 cursor-pointer text-slate-200">
-                  <span>مراجعة ثم أسئلة (بطاقات ثم كتلة أسئلة)</span>
-                  <input type="radio" name="game-mode" value="study_then_quiz" class="accent-amber-500" />
-                </label>
-              </fieldset>
+              <p class="text-sm text-slate-400 text-right m-0">اختر نمط اللعب</p>
+              <div class="mode-picker-grid" role="group" aria-label="نمط اللعب">
+                <button type="button" class="mode-option-btn mode-option-btn--selected" data-mode="direct" aria-pressed="true">
+                  <span class="mode-option-icon" aria-hidden="true">⚡</span>
+                  <span class="mode-option-title">نمط مباشر</span>
+                  <span class="mode-option-desc">أسئلة فورية متتالية بدون مراجعة مسبقة</span>
+                </button>
+                <button type="button" class="mode-option-btn" data-mode="study_then_quiz" aria-pressed="false">
+                  <span class="mode-option-icon" aria-hidden="true">📚</span>
+                  <span class="mode-option-title">مذاكرة ثم أسئلة</span>
+                  <span class="mode-option-desc">بطاقة مراجعة لكل سؤال ثم كتلة أسئلة في الجولة</span>
+                </button>
+              </div>
               <button id="join-btn" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950 shadow-lg active:scale-[0.98] transition">دخول اللوبي</button>
               <p id="join-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
             </div>
@@ -64,6 +78,18 @@ function render(): void {
     const input = app.querySelector<HTMLInputElement>("#name-input")!;
     const btn = app.querySelector<HTMLButtonElement>("#join-btn")!;
     const err = app.querySelector<HTMLParagraphElement>("#join-err")!;
+    const modeBtns = app.querySelectorAll<HTMLButtonElement>(".mode-option-btn");
+    modeBtns.forEach((b) => {
+      b.addEventListener("click", () => {
+        selectedMode =
+          b.dataset.mode === "study_then_quiz" ? "study_then_quiz" : "direct";
+        modeBtns.forEach((x) => {
+          const on = x === b;
+          x.classList.toggle("mode-option-btn--selected", on);
+          x.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+      });
+    });
     btn.addEventListener("click", () => {
       err.textContent = "";
       const name = input.value.trim();
@@ -71,12 +97,7 @@ function render(): void {
         err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
         return;
       }
-      const modeInput = app.querySelector<HTMLInputElement>(
-        'input[name="game-mode"]:checked',
-      );
-      const mode: GameMode =
-        modeInput?.value === "study_then_quiz" ? "study_then_quiz" : "direct";
-      connectSocket(name, mode);
+      connectSocket(name, selectedMode);
     });
     return;
   }
@@ -122,31 +143,32 @@ function render(): void {
     const hasCards = studyCards.length > 0;
     app.append(
       el(`
-        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
-          <div class="flex items-center justify-between gap-2">
-            <h2 class="text-lg font-bold text-amber-300">مراجعة شاملة</h2>
-            <div id="study-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums">—</div>
+        <div class="study-shell min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
+          <div class="flex items-center justify-between gap-2 pt-1">
+            <h2 class="text-lg font-bold text-amber-200 drop-shadow-sm">مراجعة قبل الأسئلة</h2>
+            <div id="study-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums drop-shadow-sm">—</div>
           </div>
-          <p id="study-hint" class="text-right text-slate-400 text-sm min-h-[1.25rem]"></p>
-          <div id="study-cards" class="flex-1 space-y-3 overflow-y-auto max-h-[70vh]"></div>
+          <p id="study-hint" class="text-right text-slate-300/90 text-sm min-h-[1.25rem] leading-relaxed"></p>
+          <div id="study-cards" class="flex-1 space-y-4 overflow-y-auto max-h-[72vh] pb-4"></div>
         </div>
       `),
     );
     const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
     if (hint) {
       hint.textContent = hasCards
-        ? "مراجعة شاملة — اقرأ البطاقات قبل أول سؤال."
+        ? "اقرأ نص المذاكرة لكل سؤال — البطاقات تختفي عند انتهاء الوقت."
         : "جاري تجهيز الجولة…";
     }
     const container = app.querySelector<HTMLDivElement>("#study-cards");
     if (container && hasCards) {
-      for (const c of studyCards) {
+      studyCards.forEach((c, i) => {
         const card = document.createElement("div");
-        card.className =
-          "rounded-2xl bg-white/5 border border-white/10 p-4 text-right shadow-lg";
-        card.innerHTML = `<p class="text-slate-100 leading-relaxed whitespace-pre-wrap">${escapeHtml(c.body)}</p>`;
+        const variant = Math.abs(c.order) % 6;
+        card.className = `study-card study-card--${variant}`;
+        card.style.animationDelay = `${i * 0.08}s`;
+        card.innerHTML = `<p class="study-card__body font-medium">${escapeHtml(c.body)}</p>`;
         container.appendChild(card);
-      }
+      });
     }
     startStudyTimer();
     return;
@@ -339,7 +361,7 @@ function connectSocket(name: string, mode: GameMode): void {
   s.on(
     "study_phase",
     (payload: {
-      cards: Array<{ id: number; body: string; order: number }>;
+      cards: Array<{ id: number; questionId?: number; body: string; order: number }>;
       endsAt: number;
       macroRound?: number;
       scope?: string;
@@ -353,20 +375,21 @@ function connectSocket(name: string, mode: GameMode): void {
       if (hint) {
         const full =
           payload.scope === "match_start"
-            ? "مراجعة شاملة لدفعة الأسئلة في المباراة — اقرأ كل البطاقات قبل أول سؤال."
-            : "اقرأ البطاقات قبل متابعة الأسئلة.";
+            ? "مراجعة لدفعة الأسئلة في المباراة — اقرأ كل نصوص المذاكرة قبل أول سؤال."
+            : "اقرأ نصوص المذاكرة قبل متابعة الأسئلة.";
         hint.textContent =
           studyCards.length > 0 ? full : "جاري تجهيز الجولة…";
       }
       if (container) {
         container.innerHTML = "";
-        for (const c of studyCards) {
+        studyCards.forEach((c, i) => {
           const card = document.createElement("div");
-          card.className =
-            "rounded-2xl bg-white/5 border border-white/10 p-4 text-right shadow-lg";
-          card.innerHTML = `<p class="text-slate-100 leading-relaxed whitespace-pre-wrap">${escapeHtml(c.body)}</p>`;
+          const variant = Math.abs(c.order) % 6;
+          card.className = `study-card study-card--${variant}`;
+          card.style.animationDelay = `${i * 0.08}s`;
+          card.innerHTML = `<p class="study-card__body font-medium">${escapeHtml(c.body)}</p>`;
           container.appendChild(card);
-        }
+        });
       }
       startStudyTimer();
     },
@@ -439,6 +462,7 @@ function connectSocket(name: string, mode: GameMode): void {
       winner: { socketId: string; name: string } | null;
       players: { socketId: string; name: string; hearts: number; eliminated: boolean }[];
       reason?: string;
+      resultMessages?: { winner: string; loser: string; tie: string };
     }) => {
       if (cdInterval) {
         window.clearInterval(cdInterval);
@@ -452,6 +476,10 @@ function connectSocket(name: string, mode: GameMode): void {
       const title = app.querySelector<HTMLHeadingElement>("#res-title");
       const body = app.querySelector<HTMLParagraphElement>("#res-body");
       if (!title || !body) return;
+      const rm = payload.resultMessages;
+      const winCopy = rm?.winner?.trim() || DEFAULT_RESULT_MESSAGES.winner;
+      const loseCopy = rm?.loser?.trim() || DEFAULT_RESULT_MESSAGES.loser;
+      const tieCopy = rm?.tie?.trim() || DEFAULT_RESULT_MESSAGES.tie;
       if (payload.reason === "no_questions") {
         if (emojiEl) emojiEl.textContent = "";
         title.textContent = "لا توجد أسئلة";
@@ -459,17 +487,17 @@ function connectSocket(name: string, mode: GameMode): void {
         return;
       }
       if (payload.winner && payload.winner.socketId === mySocketId) {
-        if (emojiEl) emojiEl.textContent = "😍";
+        if (emojiEl) emojiEl.textContent = "🎉";
         title.textContent = "فزت!";
-        body.textContent = "أحسنت — بقيت حتى النهاية.";
+        body.textContent = winCopy;
       } else if (payload.winner) {
-        if (emojiEl) emojiEl.textContent = "😭";
+        if (emojiEl) emojiEl.textContent = "💔";
         title.textContent = "انتهت الجولة";
-        body.textContent = `الفائز: ${payload.winner.name}`;
+        body.textContent = `${loseCopy} (الفائز: ${payload.winner.name})`;
       } else {
-        if (emojiEl) emojiEl.textContent = "😭";
+        if (emojiEl) emojiEl.textContent = "🤝";
         title.textContent = "تعادل أو لا فائز";
-        body.textContent = "حاول مرة أخرى!";
+        body.textContent = tieCopy;
       }
       if (me) {
         body.textContent += ` — قلوبك المتبقية: ${me.hearts}`;

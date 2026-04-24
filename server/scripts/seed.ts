@@ -6,12 +6,14 @@ const samples: Array<{
   options: string[];
   correct_index: number;
   difficulty?: string;
+  study_body?: string;
 }> = [
   {
     prompt: "ما عاصمة المملكة العربية السعودية؟",
     options: ["الرياض", "جدة", "مكة المكرمة", "الدمام"],
     correct_index: 0,
     difficulty: "easy",
+    study_body: "الرياض هي عاصمة المملكة العربية السعودية.",
   },
   {
     prompt: "كم ناتج ٧ × ٨؟",
@@ -53,9 +55,15 @@ async function main() {
   }
   for (const q of samples) {
     await pool.query(
-      `INSERT INTO questions (prompt, options, correct_index, difficulty)
-       VALUES ($1, $2::jsonb, $3, $4)`,
-      [q.prompt, JSON.stringify(q.options), q.correct_index, q.difficulty ?? null],
+      `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body)
+       VALUES ($1, $2::jsonb, $3, $4, $5)`,
+      [
+        q.prompt,
+        JSON.stringify(q.options),
+        q.correct_index,
+        q.difficulty ?? null,
+        q.study_body ?? null,
+      ],
     );
   }
   console.log(`Seeded ${samples.length} questions.`);

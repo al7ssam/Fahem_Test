@@ -1,8 +1,12 @@
 ﻿import type { Server } from "socket.io";
 import { config } from "../config";
 import { getPool } from "../db/pool";
-import { getRandomQuestion, type QuestionRow } from "../db/questions";
-import { getStudyCardsForQuestions } from "../db/studyCards";
+import {
+  getRandomQuestion,
+  getStudyPhaseCardsFromQuestionIds,
+  type QuestionRow,
+} from "../db/questions";
+import { getResultMessages, type ResultMessages } from "../db/resultCopy";
 
 const QUESTION_MS = 15_000;
 const MAX_ROUNDS = 50;
@@ -37,6 +41,7 @@ export class Match {
   private macroRound = 0;
   private questionQueue: QuestionRow[] = [];
   private queueIndex = 0;
+  private resultMessages: ResultMessages | null = null;
 
   constructor(
     private readonly io: Server,
@@ -131,7 +136,7 @@ export class Match {
   }
 
   private async runStudyPhase(
-    cards: Array<{ id: number; body: string; order: number }>,
+    cards: Array<{ id: number; questionId: number; body: string; order: number }>,
     endsAt: number,
   ): Promise<void> {
     this.io.to(this.room).emit("study_phase", {
@@ -162,6 +167,7 @@ export class Match {
     });
 
     const pool = getPool();
+    this.resultMessages = await getResultMessages(pool);
 
     if (this.gameMode === "direct") {
       await this.runDirectQuestionLoop(pool);
@@ -201,7 +207,11 @@ export class Match {
 
     this.macroRound = 1;
     const ids = this.questionQueue.map((q) => q.id);
-    const cards = await getStudyCardsForQuestions(pool, ids, maxCardsFull);
+    const cards = await getStudyPhaseCardsFromQuestionIds(
+      pool,
+      ids,
+      maxCardsFull,
+    );
     const endsAt = Date.now() + config.studyPhaseMs;
     if (cards.length > 0) {
       await this.runStudyPhase(cards, endsAt);
@@ -246,10 +256,16 @@ export class Match {
   }
 
   private emitNoQuestions(): void {
+    const rm = this.resultMessages ?? {
+      winner: "",
+      loser: "",
+      tie: "",
+    };
     this.io.to(this.room).emit("game_over", {
       reason: "no_questions",
       winner: null,
       players: this.snapshotPlayers(),
+      resultMessages: rm,
     });
     this.finished = true;
   }
@@ -364,10 +380,16 @@ export class Match {
       winner = { socketId, name: p.name };
     }
 
+    const rm = this.resultMessages ?? {
+      winner: "",
+      loser: "",
+      tie: "",
+    };
     this.io.to(this.room).emit("game_over", {
       reason: "finished",
       winner,
       players: this.snapshotPlayers(),
+      resultMessages: rm,
     });
   }
 }
