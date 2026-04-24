@@ -210,10 +210,8 @@ export class Match {
     this.roundReady.clear();
     this.clearRoundReadyWait();
     const now = Date.now();
-    const readyWindowMs = Math.min(
-      20_000,
-      Math.max(3_000, Math.floor(this.studyPhaseMs * 0.2)),
-    );
+    // نافذة الجاهزية يجب أن تبقى متاحة حتى نهاية وقت المذاكرة الكامل.
+    const readyWindowMs = this.studyPhaseMs;
     const readyStartsAt = now;
     const studyStartsAt = now;
     const readyEndsAt = readyStartsAt + (readyWindowMs || DEFAULT_ROUND_READY_MS);
