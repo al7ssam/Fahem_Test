@@ -31,6 +31,83 @@ const DEFAULT_RESULT_MESSAGES = {
   loser: "انتهت الجولة لصالح لاعب آخر.",
   tie: "تعادل أو لا فائز — حاول مرة أخرى!",
 } as const;
+
+const RESULT_VIDEO_SRC = {
+  win: "/videos/win.mp4",
+  lose: "/videos/lose.mp4",
+  tie: "/videos/tie.mp4",
+} as const;
+
+type ResultScreenKind = "win" | "lose" | "tie" | "empty";
+
+function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): void {
+  const root = app.querySelector<HTMLDivElement>("#result-screen");
+  const video = app.querySelector<HTMLVideoElement>("#res-video");
+  const emojiEl = app.querySelector<HTMLParagraphElement>("#res-emoji");
+  if (!root || !video || !emojiEl) return;
+
+  root.classList.remove(
+    "result-screen--win",
+    "result-screen--lose",
+    "result-screen--tie",
+    "result-screen--empty",
+    "result-screen--emoji-fallback",
+  );
+  root.classList.add(`result-screen--${kind}`);
+
+  emojiEl.textContent = emoji;
+  emojiEl.classList.remove("result-screen__emoji--visible");
+
+  const prefersReduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  video.onerror = null;
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+
+  if (kind === "empty") {
+    return;
+  }
+
+  if (prefersReduced) {
+    root.classList.add("result-screen--emoji-fallback");
+    emojiEl.classList.add("result-screen__emoji--visible");
+    return;
+  }
+
+  if (kind === "win" || kind === "lose" || kind === "tie") {
+    const src = RESULT_VIDEO_SRC[kind];
+    const aria =
+      kind === "win"
+        ? "فيديو قصير احتفالي للفوز"
+        : kind === "lose"
+          ? "فيديو قصير يعبّر عن الخسارة"
+          : "فيديو قصير للتعادل";
+    video.setAttribute("aria-label", aria);
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.loop = true;
+    video.setAttribute("src", src);
+    video.load();
+
+    const showEmojiFallback = (): void => {
+      root.classList.add("result-screen--emoji-fallback");
+      emojiEl.classList.add("result-screen__emoji--visible");
+    };
+
+    video.onerror = () => {
+      showEmojiFallback();
+    };
+
+    void video.play().catch(() => {
+      showEmojiFallback();
+    });
+  }
+}
+
 let studyEndsAt = 0;
 
 function el(html: string): HTMLElement {
@@ -205,11 +282,24 @@ function render(): void {
   if (phase === "result") {
     app.append(
       el(`
-        <div class="min-h-screen bg-gradient-to-b from-slate-950 to-slate-900 text-white p-6 flex flex-col items-center justify-center text-center gap-6 max-w-md mx-auto">
-          <p id="res-emoji" class="text-7xl leading-none min-h-[4.5rem] flex items-center justify-center" aria-hidden="true"></p>
-          <h2 id="res-title" class="text-3xl font-extrabold"></h2>
-          <p id="res-body" class="text-slate-300 text-lg"></p>
-          <button id="again" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950">العب مجدداً</button>
+        <div id="result-screen" class="result-screen result-screen--empty min-h-screen text-white p-6 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full gap-5">
+          <div class="result-screen__hero w-full">
+            <div class="result-screen__video-shell">
+              <video
+                id="res-video"
+                class="result-screen__video"
+                playsinline
+                muted
+                loop
+                preload="metadata"
+              ></video>
+              <p id="res-emoji" class="result-screen__emoji" aria-hidden="true"></p>
+            </div>
+          </div>
+          <h2 id="res-title" class="result-screen__title text-3xl font-extrabold tracking-tight"></h2>
+          <p id="res-kicker" class="result-screen__kicker text-sm font-semibold min-h-[1.25rem]"></p>
+          <p id="res-body" class="result-screen__body text-lg leading-relaxed"></p>
+          <button id="again" type="button" class="result-screen__again w-full rounded-xl py-3 text-lg font-bold shadow-lg active:scale-[0.98] transition">العب مجدداً</button>
         </div>
       `),
     );
@@ -519,36 +609,46 @@ function connectSocket(name: string, mode: GameMode): void {
       render();
       const me = payload.players.find((p) => p.socketId === mySocketId);
       currentMatchPlayers = payload.players.map((p) => ({ ...p }));
-      const emojiEl = app.querySelector<HTMLParagraphElement>("#res-emoji");
       const title = app.querySelector<HTMLHeadingElement>("#res-title");
       const body = app.querySelector<HTMLParagraphElement>("#res-body");
+      const kicker = app.querySelector<HTMLParagraphElement>("#res-kicker");
       if (!title || !body) return;
       const rm = payload.resultMessages;
       const winCopy = rm?.winner?.trim() || DEFAULT_RESULT_MESSAGES.winner;
       const loseCopy = rm?.loser?.trim() || DEFAULT_RESULT_MESSAGES.loser;
       const tieCopy = rm?.tie?.trim() || DEFAULT_RESULT_MESSAGES.tie;
       if (payload.reason === "no_questions") {
-        if (emojiEl) emojiEl.textContent = "";
+        if (kicker) kicker.textContent = "";
         title.textContent = "لا توجد أسئلة";
         body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
+        applyResultScreenPresentation("empty", "");
         return;
       }
+      let kind: ResultScreenKind = "tie";
+      let emojiForFallback = "🤝";
       if (payload.winner && payload.winner.socketId === mySocketId) {
-        if (emojiEl) emojiEl.textContent = "🎉";
+        kind = "win";
+        emojiForFallback = "🎉";
+        if (kicker) kicker.textContent = "مبروك — أداء يستحق الاحتفال";
         title.textContent = "فزت!";
         body.textContent = winCopy;
       } else if (payload.winner) {
-        if (emojiEl) emojiEl.textContent = "💔";
+        kind = "lose";
+        emojiForFallback = "💔";
+        if (kicker) kicker.textContent = "نهاية الجولة";
         title.textContent = "انتهت الجولة";
         body.textContent = `${loseCopy} (الفائز: ${payload.winner.name})`;
       } else {
-        if (emojiEl) emojiEl.textContent = "🤝";
+        kind = "tie";
+        emojiForFallback = "🤝";
+        if (kicker) kicker.textContent = "لا غالب ولا مغلوب";
         title.textContent = "تعادل أو لا فائز";
         body.textContent = tieCopy;
       }
       if (me) {
         body.textContent += ` — قلوبك المتبقية: ${me.hearts}`;
       }
+      applyResultScreenPresentation(kind, emojiForFallback);
     },
   );
 

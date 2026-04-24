@@ -189,3 +189,288 @@ body {
   border: 1px solid rgba(251, 191, 36, 0.45);
   color: #fde68a;
 }
+
+/* شاشة نهاية الجولة — فوز / خسارة / تعادل */
+@keyframes result-screen-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes result-title-pop {
+  from {
+    opacity: 0.88;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.result-screen {
+  position: relative;
+  overflow: hidden;
+  animation: result-screen-enter 0.45s ease-out both;
+}
+
+.result-screen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  transition: opacity 0.35s ease;
+}
+
+.result-screen > * {
+  position: relative;
+  z-index: 1;
+}
+
+.result-screen--win {
+  background: radial-gradient(
+      ellipse 120% 80% at 50% 0%,
+      rgba(251, 191, 36, 0.22) 0%,
+      transparent 55%
+    ),
+    linear-gradient(165deg, #0f172a 0%, #422006 45%, #1c1917 100%);
+}
+
+.result-screen--win::before {
+  background: radial-gradient(
+    circle at 50% 18%,
+    rgba(253, 224, 71, 0.35) 0%,
+    transparent 42%
+  );
+}
+
+.result-screen--lose {
+  background: radial-gradient(
+      ellipse 100% 70% at 50% 0%,
+      rgba(220, 38, 38, 0.2) 0%,
+      transparent 50%
+    ),
+    linear-gradient(165deg, #0f172a 0%, #3b0764 38%, #1e1b4b 100%);
+}
+
+.result-screen--lose::before {
+  background: radial-gradient(
+    circle at 30% 12%,
+    rgba(127, 29, 29, 0.45) 0%,
+    transparent 50%
+  );
+}
+
+.result-screen--tie {
+  background: radial-gradient(
+      ellipse 110% 75% at 50% 0%,
+      rgba(99, 102, 241, 0.2) 0%,
+      transparent 52%
+    ),
+    linear-gradient(165deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+}
+
+.result-screen--tie::before {
+  background: radial-gradient(
+    circle at 70% 15%,
+    rgba(129, 140, 248, 0.25) 0%,
+    transparent 48%
+  );
+}
+
+.result-screen--empty {
+  background: linear-gradient(165deg, #0f172a 0%, #1e293b 100%);
+}
+
+.result-screen--empty::before {
+  opacity: 0.25;
+  background: radial-gradient(
+    circle at 50% 20%,
+    rgba(148, 163, 184, 0.2) 0%,
+    transparent 45%
+  );
+}
+
+.result-screen--empty .result-screen__hero {
+  display: none;
+}
+
+.result-screen__hero {
+  width: 100%;
+  max-width: 20rem;
+  margin-inline: auto;
+}
+
+.result-screen__video-shell {
+  position: relative;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  box-shadow:
+    0 24px 48px -12px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.result-screen--win .result-screen__video-shell {
+  box-shadow:
+    0 24px 56px -10px rgba(245, 158, 11, 0.35),
+    0 0 0 1px rgba(253, 224, 71, 0.35) inset;
+}
+
+.result-screen--lose .result-screen__video-shell {
+  box-shadow:
+    0 24px 48px -8px rgba(185, 28, 28, 0.4),
+    0 0 0 1px rgba(248, 113, 113, 0.2) inset;
+}
+
+.result-screen--tie .result-screen__video-shell {
+  box-shadow:
+    0 24px 48px -10px rgba(99, 102, 241, 0.35),
+    0 0 0 1px rgba(165, 180, 252, 0.25) inset;
+}
+
+.result-screen__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.result-screen__emoji {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(3rem, 14vw, 4.5rem);
+  line-height: 1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  text-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+
+.result-screen__emoji--visible,
+.result-screen--emoji-fallback .result-screen__emoji {
+  opacity: 1;
+}
+
+.result-screen--emoji-fallback .result-screen__video {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.result-screen__title {
+  color: #f8fafc;
+}
+
+.result-screen--win .result-screen__title {
+  color: #fef3c7;
+  text-shadow: 0 0 40px rgba(251, 191, 36, 0.35);
+  animation: result-title-pop 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.result-screen--lose .result-screen__title {
+  color: #fecaca;
+  text-shadow: 0 0 28px rgba(220, 38, 38, 0.25);
+}
+
+.result-screen--tie .result-screen__title {
+  color: #e0e7ff;
+}
+
+.result-screen--empty .result-screen__title {
+  color: #e2e8f0;
+}
+
+.result-screen__kicker {
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.result-screen--win .result-screen__kicker {
+  color: rgba(254, 243, 199, 0.95);
+}
+
+.result-screen--lose .result-screen__kicker {
+  color: #fca5a5;
+  letter-spacing: 0.02em;
+}
+
+.result-screen--tie .result-screen__kicker {
+  color: #c7d2fe;
+}
+
+.result-screen__body {
+  color: rgba(203, 213, 225, 0.95);
+}
+
+.result-screen--win .result-screen__body {
+  color: rgba(254, 243, 199, 0.9);
+}
+
+.result-screen--lose .result-screen__body {
+  color: rgba(252, 211, 211, 0.92);
+}
+
+.result-screen--tie .result-screen__body {
+  color: rgba(199, 210, 254, 0.9);
+}
+
+.result-screen__again {
+  background: linear-gradient(to left, #f59e0b, #ea580c);
+  color: #0f172a;
+  border: none;
+  cursor: pointer;
+}
+
+.result-screen--lose .result-screen__again {
+  background: linear-gradient(to left, #64748b, #475569);
+  color: #f8fafc;
+}
+
+.result-screen--tie .result-screen__again {
+  background: linear-gradient(to left, #6366f1, #4f46e5);
+  color: #f8fafc;
+}
+
+.result-screen--empty .result-screen__again {
+  background: linear-gradient(to left, #f59e0b, #ea580c);
+  color: #0f172a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .result-screen {
+    animation: none;
+  }
+
+  .result-screen--win .result-screen__title {
+    animation: none;
+  }
+
+  .result-screen:not(.result-screen--empty) .result-screen__video {
+    display: none !important;
+  }
+
+  .result-screen:not(.result-screen--empty) .result-screen__emoji {
+    opacity: 1;
+    position: relative;
+    inset: auto;
+    min-height: 5rem;
+    padding: 1rem 0;
+  }
+
+  .result-screen:not(.result-screen--empty) .result-screen__video-shell {
+    aspect-ratio: auto;
+    min-height: auto;
+    box-shadow: none;
+    background: transparent;
+  }
+}
