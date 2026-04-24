@@ -16,7 +16,9 @@ async function main() {
     .sort();
   for (const file of files) {
     const migrationPath = path.join(migrationsDir, file);
-    const sql = fs.readFileSync(migrationPath, "utf8");
+    const raw = fs.readFileSync(migrationPath, "utf8");
+    // UTF-8 BOM breaks PostgreSQL (error: syntax error at or near "﻿CREATE")
+    const sql = raw.replace(/^\uFEFF/, "");
     await pool.query(sql);
     console.log("Migration applied:", migrationPath);
   }
