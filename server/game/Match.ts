@@ -232,7 +232,11 @@ export class Match {
       this.roundReadyTimer = setTimeout(() => {
         this.roundReadyTimer = null;
         this.roundReadyResolve = null;
-        resolve();
+        this.io.to(this.room).emit("round_ready_closed", {
+          endsAt: readyEndsAt,
+          serverNow: Date.now(),
+          macroRound: this.macroRound,
+        });
       }, Math.max(0, readyEndsAt - Date.now()));
     });
 
@@ -245,6 +249,8 @@ export class Match {
       }, Math.max(0, studyEndsAt - Date.now()));
     });
 
+    // نهاية المذاكرة لا تتبع انتهاء نافذة الجاهزية.
+    // الانتقال المبكر يحدث فقط إذا أصبح كل اللاعبين النشطين "جاهزين".
     await Promise.race([waitReady, waitStudy]);
     this.clearRoundReadyWait();
     this.clearStudyWait();

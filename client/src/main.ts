@@ -752,6 +752,26 @@ function connectSocket(name: string, mode: GameMode): void {
     clearTimer();
   });
 
+  s.on("round_ready_closed", (payload: { serverNow?: number; macroRound?: number }) => {
+    syncClock(payload.serverNow);
+    if (phase !== "studying") return;
+    if (readyBtnState !== "submitted") {
+      readyBtnState = "closed";
+    }
+    const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
+    const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
+    if (readyBtn) {
+      readyBtn.disabled = true;
+      readyBtn.textContent = "أُغلقت نافذة الجاهزية";
+    }
+    if (readyStateEl) {
+      readyStateEl.textContent =
+        readyBtnState === "submitted"
+          ? "تم تسجيل جاهزيتك. المذاكرة مستمرة حتى انتهاء وقت البطاقات."
+          : "أُغلقت نافذة الجاهزية. المذاكرة مستمرة حتى انتهاء وقت البطاقات.";
+    }
+  });
+
   s.on(
     "question",
     (q: {
