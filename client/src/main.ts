@@ -14,6 +14,12 @@ let endsAt = 0;
 let timerHandle: number | null = null;
 let currentGameMode: GameMode | null = null;
 let lobbyNotice = "";
+const LOBBY_MSG_WAIT_NEXT =
+  "مباراة جارية الآن بين مجموعة أخرى. أنت في قائمة انتظار الجولة التالية.";
+const LOBBY_MSG_CANCELLED =
+  "تم إلغاء بدء المباراة — لا يوجد الآن عدد كافٍ من اللاعبين الجاهزين.";
+let lobbyPlayersList: Array<{ socketId: string; name: string; ready: boolean }> = [];
+let lobbyReadySubmitting = false;
 let currentMatchPlayers: Array<{
   socketId: string;
   name: string;
@@ -307,6 +313,7 @@ function render(): void {
     updateLobbyModeLabel();
     const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
     if (noticeEl) noticeEl.textContent = lobbyNotice;
+    renderLobbyPlayers(lobbyPlayersList);
     return;
   }
 
@@ -350,7 +357,7 @@ function render(): void {
     const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
     const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
     if (readyBtn) {
-      readyBtn.disabled = readyBtnState === "submitted" || readyBtnState === "closed";
+      readyBtn.disabled = readyBtnState !== "window_open";
       if (readyBtnState === "submitted") {
         readyBtn.textContent = "تم تسجيل جاهزيتك";
       } else if (readyBtnState === "closed") {
@@ -462,6 +469,8 @@ function render(): void {
       mySocketId = null;
       currentGameMode = null;
       studyCards = [];
+      lobbyPlayersList = [];
+      lobbyReadySubmitting = false;
       render();
     });
   }
@@ -491,6 +500,7 @@ function updateConnectionBadge(): void {
 function renderLobbyPlayers(
   list: { socketId: string; name: string; ready: boolean }[],
 ): void {
+  lobbyPlayersList = list;
   const ul = app.querySelector<HTMLUListElement>("#players");
   const readyBtn = app.querySelector<HTMLButtonElement>("#ready-btn");
   if (!ul || !readyBtn) return;
@@ -503,8 +513,32 @@ function renderLobbyPlayers(
     li.innerHTML = `<span class="font-medium">${escapeHtml(p.name)}${you}</span><span class="text-sm ${p.ready ? "text-emerald-400" : "text-slate-500"}">${p.ready ? "جاهز" : "ينتظر"}</span>`;
     ul.appendChild(li);
   }
+  const me = lobbyPlayersList.find((p) => p.socketId === mySocketId);
+  if (me?.ready) {
+    lobbyReadySubmitting = false;
+  }
+  const showPending = lobbyReadySubmitting && !me?.ready;
+  readyBtn.classList.toggle("btn-pending", showPending);
+  readyBtn.setAttribute("aria-busy", showPending ? "true" : "false");
+  readyBtn.disabled = showPending || Boolean(me?.ready);
+  readyBtn.textContent = me?.ready ? "أنت جاهز" : showPending ? "جارٍ التسجيل…" : "جاهز للعب";
   readyBtn.onclick = () => {
-    socket?.emit("player_ready", {}, () => undefined);
+    const cur = lobbyPlayersList.find((p) => p.socketId === mySocketId);
+    if (lobbyReadySubmitting || cur?.ready) return;
+    lobbyReadySubmitting = true;
+    readyBtn.disabled = true;
+    readyBtn.classList.add("btn-pending");
+    readyBtn.setAttribute("aria-busy", "true");
+    readyBtn.textContent = "جارٍ التسجيل…";
+    socket?.emit("player_ready", {}, (ack: { ok?: boolean }) => {
+      if (!ack?.ok) {
+        lobbyReadySubmitting = false;
+        readyBtn.classList.remove("btn-pending");
+        readyBtn.setAttribute("aria-busy", "false");
+        readyBtn.disabled = false;
+        readyBtn.textContent = "جاهز للعب";
+      }
+    });
   };
 }
 
@@ -574,7 +608,33 @@ function connectSocket(name: string, mode: GameMode): void {
   });
   socket = s;
 
+  lobbyPlayersList = [];
+  lobbyReadySubmitting = false;
+
   let cdInterval: number | null = null;
+
+  const DEFAULT_LOBBY_COUNTDOWN_SEC = 5;
+
+  function startCountdownTicks(initialLeft: number): void {
+    if (cdInterval) {
+      window.clearInterval(cdInterval);
+      cdInterval = null;
+    }
+    let left = Math.max(1, Math.floor(initialLeft));
+    const cd = app.querySelector<HTMLDivElement>("#cd");
+    const arabic = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"];
+    const show = (): void => {
+      if (cd) cd.textContent = left <= 9 ? arabic[left] ?? String(left) : String(left);
+    };
+    show();
+    cdInterval = window.setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        if (cdInterval) window.clearInterval(cdInterval);
+        cdInterval = null;
+      } else show();
+    }, 1000);
+  }
 
   s.on("connect", () => {
     mySocketId = s.id ?? null;
@@ -603,6 +663,7 @@ function connectSocket(name: string, mode: GameMode): void {
       isStarting?: boolean;
       participantSocketIds?: string[];
       maxPlayersPerMatch?: number;
+      countdownSecondsRemaining?: number;
     }) => {
       if (phase !== "lobby" && phase !== "countdown") return;
       if (payload.mode) currentGameMode = payload.mode;
@@ -612,63 +673,90 @@ function connectSocket(name: string, mode: GameMode): void {
         hearts: 3,
         eliminated: false,
       }));
+      const participants = payload.participantSocketIds ?? [];
+      const isSelected =
+        participants.length === 0 || (mySocketId ? participants.includes(mySocketId) : false);
+
       if (phase === "countdown") {
-        const participants = payload.participantSocketIds ?? [];
-        const isSelected =
-          participants.length === 0 || (mySocketId ? participants.includes(mySocketId) : false);
         if (!isSelected) {
           if (cdInterval) {
             window.clearInterval(cdInterval);
             cdInterval = null;
           }
-          lobbyNotice = "بدأت المباراة الحالية بين لاعبين/مجموعة أخرى. أنت في قائمة الانتظار للجولة القادمة.";
+          lobbyNotice = LOBBY_MSG_WAIT_NEXT;
+          lobbyPlayersList = payload.players;
           phase = "lobby";
           render();
+          return;
+        }
+        if (payload.isStarting && typeof payload.countdownSecondsRemaining === "number") {
+          startCountdownTicks(payload.countdownSecondsRemaining);
         }
       }
+
       if (
         phase === "lobby" &&
         payload.isStarting &&
         mySocketId &&
-        Array.isArray(payload.participantSocketIds) &&
-        payload.participantSocketIds.length > 0 &&
-        !payload.participantSocketIds.includes(mySocketId)
+        participants.length > 0 &&
+        isSelected
       ) {
-        lobbyNotice = "بدأت المباراة الحالية بين أول الجاهزين. أنت في الانتظار للجولة التالية.";
+        lobbyNotice = "";
+        lobbyReadySubmitting = false;
+        lobbyPlayersList = payload.players;
+        phase = "countdown";
+        render();
+        startCountdownTicks(
+          Math.max(1, payload.countdownSecondsRemaining ?? DEFAULT_LOBBY_COUNTDOWN_SEC),
+        );
+      } else if (
+        phase === "lobby" &&
+        payload.isStarting &&
+        mySocketId &&
+        participants.length > 0 &&
+        !isSelected
+      ) {
+        lobbyNotice = LOBBY_MSG_WAIT_NEXT;
       }
-      renderLobbyPlayers(payload.players);
+
+      if (phase === "lobby") {
+        renderLobbyPlayers(payload.players);
+      } else {
+        lobbyPlayersList = payload.players;
+      }
       updateConnectionBadge();
       updateLobbyModeLabel();
     },
   );
 
   s.on("match_starting", (payload: { seconds: number; participantSocketIds?: string[] }) => {
-    if (phase !== "lobby") return;
     const participants = payload.participantSocketIds ?? [];
     const isSelected =
       participants.length === 0 || (mySocketId ? participants.includes(mySocketId) : false);
     if (!isSelected) {
-      lobbyNotice = "بدأت المباراة الحالية بين أول الجاهزين. أنت في الانتظار للجولة التالية.";
-      render();
+      lobbyNotice = LOBBY_MSG_WAIT_NEXT;
+      if (phase === "countdown") {
+        if (cdInterval) {
+          window.clearInterval(cdInterval);
+          cdInterval = null;
+        }
+        phase = "lobby";
+        render();
+      } else if (phase === "lobby") {
+        render();
+      }
       return;
     }
+    if (phase === "countdown") {
+      startCountdownTicks(Math.max(1, payload.seconds));
+      return;
+    }
+    if (phase !== "lobby") return;
     lobbyNotice = "";
+    lobbyReadySubmitting = false;
     phase = "countdown";
     render();
-    let left = payload.seconds;
-    const cd = app.querySelector<HTMLDivElement>("#cd");
-    const arabic = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"];
-    const show = () => {
-      if (cd) cd.textContent = left <= 9 ? arabic[left] ?? String(left) : String(left);
-    };
-    show();
-    cdInterval = window.setInterval(() => {
-      left -= 1;
-      if (left <= 0) {
-        if (cdInterval) window.clearInterval(cdInterval);
-        cdInterval = null;
-      } else show();
-    }, 1000);
+    startCountdownTicks(Math.max(1, payload.seconds));
   });
 
   s.on("match_start_cancelled", () => {
@@ -679,7 +767,7 @@ function connectSocket(name: string, mode: GameMode): void {
     if (phase === "countdown") {
       phase = "lobby";
     }
-    lobbyNotice = "تم إلغاء بدء المباراة لعدم كفاية اللاعبين الجاهزين.";
+    lobbyNotice = LOBBY_MSG_CANCELLED;
     if (phase === "lobby") render();
   });
 
@@ -701,6 +789,7 @@ function connectSocket(name: string, mode: GameMode): void {
       }
       if (payload.gameMode) currentGameMode = payload.gameMode;
       lobbyNotice = "";
+      lobbyReadySubmitting = false;
       if (payload.players) {
         currentMatchPlayers = payload.players.map((p) => ({ ...p }));
       }
@@ -737,6 +826,7 @@ function connectSocket(name: string, mode: GameMode): void {
       activeStudyMacroRound = payload.macroRound ?? activeStudyMacroRound;
       studyPhaseState = "ready_window";
       readyBtnState = "window_open";
+      studyEndsAt = payload.endsAt;
       if (!app.querySelector("#study-cards")) render();
       const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
       if (hint) {
@@ -1091,7 +1181,11 @@ function connectSocket(name: string, mode: GameMode): void {
       if (!isCurrentStudyRound(p.roundToken, p.macroRound)) return;
       const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
       if (hint && phase === "studying") {
-        hint.textContent = `المذاكرة جارية — جاهزون للجولة: ${p.readySocketIds.length}/${p.totalActive}`;
+        const prefix =
+          studyPhaseState === "study_content"
+            ? "المذاكرة جارية"
+            : "انتظار جاهزية اللاعبين للجولة";
+        hint.textContent = `${prefix} — جاهزون: ${p.readySocketIds.length}/${p.totalActive}`;
       }
       const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyStateEl && phase === "studying") {

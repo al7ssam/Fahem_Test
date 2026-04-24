@@ -295,7 +295,11 @@ export function registerAdminRoutes(app: Express): void {
       const maxStudyRounds = Number(map.get("game_max_study_rounds") ?? "3");
       const studyRoundQuestionCount = Number(map.get("game_study_round_size") ?? "8");
       const studyPhaseMs = Number(map.get("game_study_phase_ms") ?? "60000");
-      const maxPlayersPerMatch = Number(map.get("max_players_per_match") ?? "10");
+      const maxPlayersRaw = Number(map.get("max_players_per_match") ?? "10");
+      const maxPlayersPerMatch = Math.min(
+        100,
+        Math.max(2, Number.isFinite(maxPlayersRaw) ? maxPlayersRaw : 10),
+      );
       res.json({
         ok: true,
         maxStudyRounds,
