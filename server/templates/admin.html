@@ -12,16 +12,18 @@
     />
     <style>
       :root {
-        --bg-from: #020617;
-        --bg-mid: #1e1b4b;
-        --bg-to: #0f172a;
-        --card: rgba(255, 255, 255, 0.05);
-        --card-2: rgba(255, 255, 255, 0.07);
-        --border: rgba(255, 255, 255, 0.1);
-        --text: #f8fafc;
-        --muted: #94a3b8;
-        --amber: #fbbf24;
-        --amber2: #ea580c;
+        --bg-from: #020309;
+        --bg-mid: #090d1f;
+        --bg-to: #121529;
+        --card: rgba(10, 13, 28, 0.78);
+        --card-2: rgba(15, 20, 40, 0.95);
+        --card-3: rgba(20, 26, 48, 0.94);
+        --border: rgba(223, 187, 106, 0.18);
+        --text: #f8f4ea;
+        --muted: #b7ac90;
+        --amber: #e8be66;
+        --amber2: #a8792f;
+        --focus: rgba(232, 190, 102, 0.4);
         --emerald: #10b981;
         --danger: #f87171;
       }
@@ -34,45 +36,50 @@
         font-family: "Tajawal", system-ui, sans-serif;
         background: linear-gradient(to bottom, var(--bg-from), var(--bg-mid), var(--bg-to));
         color: var(--text);
+        line-height: 1.5;
       }
       .wrap {
         max-width: 56rem;
         margin: 0 auto;
-        padding: 1.5rem 1rem 3rem;
+        padding: 2rem 1.1rem 3.25rem;
       }
       h1 {
-        margin: 0 0 0.25rem;
-        font-size: 1.75rem;
+        margin: 0 0 0.4rem;
+        font-size: 2rem;
         font-weight: 800;
         background: linear-gradient(to left, var(--amber), var(--amber2));
         -webkit-background-clip: text;
         background-clip: text;
         color: transparent;
+        letter-spacing: 0.2px;
       }
       .subtitle {
         color: var(--muted);
-        margin: 0 0 1rem;
+        margin: 0 0 1.2rem;
+        font-size: 0.95rem;
       }
       .stat {
         display: flex;
         justify-content: space-between;
-        padding: 0.85rem 1rem;
-        margin-bottom: 1rem;
+        padding: 1rem 1.15rem;
+        margin-bottom: 1.15rem;
         border-radius: 1rem;
         background: var(--card);
         border: 1px solid var(--border);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32);
       }
       .stat-value {
         color: var(--amber);
         font-weight: 800;
-        font-size: 1.35rem;
+        font-size: 1.45rem;
       }
       .accordion-item {
         border: 1px solid var(--border);
-        border-radius: 1rem;
+        border-radius: 1.1rem;
         background: var(--card);
-        margin-bottom: 0.9rem;
+        margin-bottom: 0.95rem;
         overflow: hidden;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
       }
       .accordion-trigger {
         width: 100%;
@@ -82,22 +89,30 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 1rem 1.1rem;
+        padding: 1.05rem 1.15rem;
         cursor: pointer;
+        font-family: inherit;
       }
       .accordion-trigger:hover {
-        background: var(--card-2);
+        background: var(--card-3);
+      }
+      .accordion-trigger:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: -2px;
       }
       .accordion-title {
-        font-size: 1.2rem;
+        font-size: 1.22rem;
         font-weight: 800;
+        color: #f4ddaa;
       }
       .accordion-icon {
-        transition: transform 0.2s ease;
+        transition: transform 0.2s ease, color 0.2s ease;
         color: var(--amber);
+        font-size: 1.1rem;
       }
       .accordion-item.open .accordion-icon {
         transform: rotate(180deg);
+        color: #f4ddaa;
       }
       .accordion-content {
         display: none;
@@ -107,17 +122,18 @@
         display: block;
       }
       .card {
-        border-radius: 0.85rem;
-        padding: 1rem;
-        background: rgba(15, 23, 42, 0.42);
-        border: 1px solid var(--border);
+        border-radius: 0.95rem;
+        padding: 1.05rem;
+        background: rgba(7, 11, 23, 0.84);
+        border: 1px solid rgba(223, 187, 106, 0.14);
       }
       label {
         display: block;
         text-align: right;
-        font-size: 0.85rem;
+        font-size: 0.9rem;
+        font-weight: 600;
         color: var(--muted);
-        margin-bottom: 0.3rem;
+        margin-bottom: 0.35rem;
       }
       input[type="text"],
       input[type="password"],
@@ -126,18 +142,27 @@
       select {
         width: 100%;
         border-radius: 0.75rem;
-        border: 1px solid var(--border);
-        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid rgba(223, 187, 106, 0.2);
+        background: rgba(8, 12, 24, 0.94);
         color: var(--text);
-        padding: 0.65rem 0.85rem;
+        padding: 0.68rem 0.9rem;
         font-family: inherit;
-        font-size: 1rem;
-        margin-bottom: 0.8rem;
+        font-size: 0.98rem;
+        margin-bottom: 0.85rem;
         text-align: right;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
       }
       textarea {
         resize: vertical;
         min-height: 5rem;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: none;
+        border-color: rgba(232, 190, 102, 0.55);
+        box-shadow: 0 0 0 2px rgba(232, 190, 102, 0.2);
+        background: rgba(10, 15, 30, 0.96);
       }
       .mono {
         direction: ltr;
@@ -148,12 +173,12 @@
         direction: ltr;
         text-align: left;
         white-space: pre-wrap;
-        background: rgba(15, 23, 42, 0.9);
-        border: 1px solid var(--border);
+        background: rgba(6, 10, 20, 0.95);
+        border: 1px solid rgba(223, 187, 106, 0.22);
         border-radius: 0.75rem;
         padding: 0.75rem;
         font-size: 0.74rem;
-        color: var(--muted);
+        color: #c9b995;
       }
       .btn {
         width: 100%;
@@ -166,11 +191,20 @@
         font-weight: 700;
         cursor: pointer;
         background: linear-gradient(to left, var(--amber), var(--amber2));
-        color: #0f172a;
+        color: #17120a;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+      }
+      .btn:hover {
+        filter: brightness(1.05);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+      }
+      .btn:active {
+        transform: translateY(1px);
       }
       .btn:disabled {
-        opacity: 0.6;
+        opacity: 0.52;
         cursor: not-allowed;
+        box-shadow: none;
       }
       .btn-row {
         display: flex;
@@ -182,33 +216,38 @@
         min-width: 8rem;
       }
       .btn-secondary {
-        background: rgba(148, 163, 184, 0.25);
-        color: var(--text);
-        border: 1px solid var(--border);
+        background: rgba(33, 40, 61, 0.9);
+        color: #e9dfca;
+        border: 1px solid rgba(223, 187, 106, 0.24);
       }
       .btn-danger {
-        background: rgba(248, 113, 113, 0.25);
-        color: #fecaca;
-        border: 1px solid rgba(248, 113, 113, 0.35);
+        background: rgba(101, 37, 37, 0.5);
+        color: #ffd3d3;
+        border: 1px solid rgba(248, 113, 113, 0.38);
       }
       .msg {
         min-height: 1.5rem;
-        margin-top: 0.6rem;
+        margin-top: 0.7rem;
         text-align: center;
+        padding: 0.35rem 0.45rem;
+        border-radius: 0.55rem;
+        font-weight: 600;
       }
       .ok {
-        color: var(--emerald);
+        color: #85e9bf;
+        background: rgba(16, 185, 129, 0.11);
       }
       .err {
-        color: var(--danger);
+        color: #ffadad;
+        background: rgba(248, 113, 113, 0.11);
       }
       .guide-block {
         margin-bottom: 1rem;
       }
       .guide-title {
         margin: 0 0 0.4rem;
-        font-weight: 700;
-        color: #fde68a;
+        font-weight: 800;
+        color: #f4ddaa;
       }
       .bank-toolbar {
         display: flex;
@@ -226,9 +265,16 @@
       }
       table.bank th,
       table.bank td {
-        border-bottom: 1px solid var(--border);
-        padding: 0.45rem 0.35rem;
+        border-bottom: 1px solid rgba(223, 187, 106, 0.13);
+        padding: 0.5rem 0.4rem;
         text-align: right;
+      }
+      table.bank th {
+        color: #e2cfab;
+        font-weight: 700;
+      }
+      table.bank tr:hover td {
+        background: rgba(232, 190, 102, 0.06);
       }
       .bank-actions {
         display: flex;
@@ -238,16 +284,21 @@
       .bank-actions button {
         padding: 0.35rem 0.55rem;
         border-radius: 0.5rem;
-        border: 1px solid var(--border);
-        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(223, 187, 106, 0.2);
+        background: rgba(15, 19, 34, 0.92);
         color: var(--text);
         cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      .bank-actions button:hover {
+        background: rgba(232, 190, 102, 0.08);
+        border-color: rgba(232, 190, 102, 0.42);
       }
       .pager {
         display: flex;
         justify-content: space-between;
         margin-top: 0.6rem;
-        color: var(--muted);
+        color: #c3b690;
       }
       .modal-overlay {
         position: fixed;
@@ -264,8 +315,8 @@
       .modal-box {
         width: 100%;
         max-width: 32rem;
-        background: linear-gradient(to bottom, #0f172a, #1e1b4b);
-        border: 1px solid var(--border);
+        background: linear-gradient(to bottom, #0b1021, #1a2142);
+        border: 1px solid rgba(223, 187, 106, 0.28);
         border-radius: 1rem;
         padding: 1.2rem;
         max-height: 92vh;
@@ -295,7 +346,7 @@
         <span class="stat-value" id="total-display">{{QUESTION_COUNT}}</span>
       </div>
 
-      <div class="accordion-item open">
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="add">
           <span class="accordion-title">إضافة سؤال يدويًا</span>
           <span class="accordion-icon">⌄</span>
@@ -327,7 +378,7 @@
         </div>
       </div>
 
-      <div class="accordion-item open">
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="json-guide">
           <span class="accordion-title">إرشادات JSON لكل نمط</span>
           <span class="accordion-icon">⌄</span>
