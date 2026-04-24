@@ -168,7 +168,6 @@ function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): v
 }
 
 let studyEndsAt = 0;
-let readyWindowEndsAt = 0;
 let spectatorEligible = false;
 let spectatorFollowing = false;
 let currentLeaderboard: Array<{
@@ -329,8 +328,6 @@ function render(): void {
             <div id="study-main-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums drop-shadow-sm">—</div>
           </div>
           <p id="study-main-clock-label" class="text-right text-slate-300 text-xs min-h-[1rem]">وقت المذاكرة</p>
-          <p id="study-ready-clock-label" class="text-right text-indigo-200 text-xs min-h-[1rem]">نافذة الجاهزية</p>
-          <div id="study-ready-clock" class="text-lg font-mono font-bold text-indigo-200 tabular-nums">—</div>
           <button id="round-ready-btn" type="button" class="w-full rounded-xl bg-indigo-600/80 hover:bg-indigo-500 py-2 text-sm font-bold">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
           <p id="study-hint" class="text-right text-slate-300/90 text-sm min-h-[1.25rem] leading-relaxed"></p>
           <p id="study-ready-state" class="text-right text-amber-200/90 text-xs min-h-[1.1rem] leading-relaxed"></p>
@@ -659,7 +656,6 @@ function connectSocket(name: string, mode: GameMode): void {
       if (payload.gameMode === "study_then_quiz") {
         phase = "studying";
         studyCards = [];
-        readyWindowEndsAt = 0;
         studyEndsAt = nowSynced();
         readyBtnState = "idle";
         studyPhaseState = "idle";
@@ -686,7 +682,6 @@ function connectSocket(name: string, mode: GameMode): void {
       phase = "studying";
       activeStudyRoundToken = payload.roundToken ?? null;
       activeStudyMacroRound = payload.macroRound ?? activeStudyMacroRound;
-      readyWindowEndsAt = payload.endsAt;
       studyPhaseState = "ready_window";
       readyBtnState = "window_open";
       if (!app.querySelector("#study-cards")) render();
@@ -786,7 +781,6 @@ function connectSocket(name: string, mode: GameMode): void {
       if (!isCurrentStudyRound(payload.roundToken, payload.macroRound)) return;
       studyPhaseState = "transition_to_question";
       readyBtnState = "closed";
-      readyWindowEndsAt = 0;
       const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
       if (hint && phase === "studying") {
         hint.textContent = "انتهت المراجعة — تبدأ الأسئلة الآن.";
@@ -813,7 +807,6 @@ function connectSocket(name: string, mode: GameMode): void {
       if (!isCurrentStudyRound(payload.roundToken, payload.macroRound)) return;
       if (studyPhaseState === "transition_to_question") return;
       studyPhaseState = "study_content";
-      readyWindowEndsAt = 0;
       if (readyBtnState !== "submitted") {
         readyBtnState = "closed";
       }
@@ -918,7 +911,9 @@ function connectSocket(name: string, mode: GameMode): void {
   s.on(
     "game_over",
     (payload: {
+      outcomeType?: "no_questions" | "single_winner" | "shared_winners" | "tie_all_zero";
       winner: { socketId: string; name: string } | null;
+      winners?: Array<{ socketId: string; name: string }>;
       players: {
         socketId: string;
         name: string;
@@ -955,32 +950,43 @@ function connectSocket(name: string, mode: GameMode): void {
       const winCopy = rm?.winner?.trim() || DEFAULT_RESULT_MESSAGES.winner;
       const loseCopy = rm?.loser?.trim() || DEFAULT_RESULT_MESSAGES.loser;
       const tieCopy = rm?.tie?.trim() || DEFAULT_RESULT_MESSAGES.tie;
-      if (payload.reason === "no_questions") {
+      if (payload.reason === "no_questions" || payload.outcomeType === "no_questions") {
         if (kicker) kicker.textContent = "";
         title.textContent = "لا توجد أسئلة";
         body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
         applyResultScreenPresentation("empty", "");
         return;
       }
+      const winners = payload.winners ?? (payload.winner ? [payload.winner] : []);
+      const iAmWinner = winners.some((w) => w.socketId === mySocketId);
       let kind: ResultScreenKind = "tie";
       let emojiForFallback = "🤝";
-      if (payload.winner && payload.winner.socketId === mySocketId) {
+      if (iAmWinner) {
         kind = "win";
         emojiForFallback = "🎉";
-        if (kicker) kicker.textContent = "مبروك — أداء يستحق الاحتفال";
-        title.textContent = "فزت!";
-        body.textContent = winCopy;
-      } else if (payload.winner) {
+        if (winners.length > 1) {
+          if (kicker) kicker.textContent = "فوز مشترك في الصدارة";
+          title.textContent = "فزت (تعادل صدارة)!";
+          body.textContent = `${winCopy} — فائزون معك: ${winners.map((w) => w.name).join("، ")}`;
+        } else {
+          if (kicker) kicker.textContent = "مبروك — أداء يستحق الاحتفال";
+          title.textContent = "فزت!";
+          body.textContent = winCopy;
+        }
+      } else if (winners.length > 0) {
         kind = "lose";
         emojiForFallback = "💔";
         if (kicker) kicker.textContent = "نهاية الجولة";
         title.textContent = "انتهت الجولة";
-        body.textContent = `${loseCopy} (الفائز: ${payload.winner.name})`;
+        body.textContent =
+          winners.length === 1
+            ? `${loseCopy} (الفائز: ${winners[0]?.name ?? "-"})`
+            : `${loseCopy} (فائزون مشتركون: ${winners.map((w) => w.name).join("، ")})`;
       } else {
         kind = "tie";
         emojiForFallback = "🤝";
         if (kicker) kicker.textContent = "لا غالب ولا مغلوب";
-        title.textContent = "تعادل أو لا فائز";
+        title.textContent = "تعادل كامل";
         body.textContent = tieCopy;
       }
       if (me) {
@@ -1069,29 +1075,18 @@ function startQuestionTimer(): void {
 function startStudyTimer(): void {
   clearTimer();
   const mainClock = app.querySelector<HTMLDivElement>("#study-main-clock");
-  const readyClock = app.querySelector<HTMLDivElement>("#study-ready-clock");
   const mainLabel = app.querySelector<HTMLParagraphElement>("#study-main-clock-label");
-  const readyLabel = app.querySelector<HTMLParagraphElement>("#study-ready-clock-label");
-  if (!mainClock && !readyClock) return;
+  if (!mainClock) return;
   timerHandle = window.setInterval(() => {
     const now = nowSynced();
     const studyMs = Math.max(0, studyEndsAt - now);
     const studySec = Math.max(0, Math.floor((studyMs + 250) / 1000));
-    const readyMs = Math.max(0, readyWindowEndsAt - now);
-    const readySec = Math.max(0, Math.floor((readyMs + 250) / 1000));
 
     if (mainClock) {
       mainClock.textContent = `${studySec}s`;
     }
-    if (readyClock) {
-      readyClock.textContent = readyWindowEndsAt > 0 ? `${readySec}s` : "—";
-    }
     if (mainLabel) {
       mainLabel.textContent = "وقت المذاكرة";
-    }
-    if (readyLabel) {
-      readyLabel.textContent =
-        readyWindowEndsAt > 0 ? "نافذة الجاهزية" : "نافذة الجاهزية (مغلقة)";
     }
   }, 200);
 }

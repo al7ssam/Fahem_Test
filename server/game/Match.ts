@@ -416,7 +416,9 @@ export class Match {
     };
     this.io.to(this.room).emit("game_over", {
       reason: "no_questions",
+      outcomeType: "no_questions",
       winner: null,
+      winners: [],
       players: this.snapshotPlayers(),
       resultMessages: rm,
     });
@@ -546,42 +548,51 @@ export class Match {
       this.questionTimer = null;
     }
 
-    const survivors = [...this.players.entries()].filter(
-      ([, p]) => !p.eliminated && p.hearts > 0,
-    );
-    let winnerId: string | null = null;
-    if (survivors.length === 1) {
-      winnerId = survivors[0][0];
-    } else {
-      const topBySkill = [...this.players.entries()].sort(
-        (a, b) => b[1].skillPoints - a[1].skillPoints,
-      )[0];
-      winnerId = topBySkill?.[0] ?? null;
-    }
-
-    let winner: { socketId: string; name: string } | null = null;
-    if (winnerId) {
-      const wp = this.players.get(winnerId);
-      if (wp) {
-        const bonus = Math.max(0, wp.hearts) * 100;
-        wp.skillPoints += bonus;
-        wp.lastAward = bonus;
-        winner = { socketId: winnerId, name: wp.name };
-      }
-    }
-
-    const leaderboard = [...this.players.entries()]
+    const bySkillDesc = [...this.players.entries()]
       .map(([socketId, p]) => ({
         socketId,
         name: p.name,
         skillPoints: p.skillPoints,
       }))
-      .sort((a, b) => b.skillPoints - a.skillPoints)
-      .map((row, idx) => ({
+      .sort((a, b) => b.skillPoints - a.skillPoints);
+
+    const topSkillPoints = bySkillDesc[0]?.skillPoints ?? 0;
+    const winners =
+      topSkillPoints > 0
+        ? bySkillDesc
+            .filter((row) => row.skillPoints === topSkillPoints)
+            .map((row) => ({ socketId: row.socketId, name: row.name }))
+        : [];
+
+    const winner = winners.length === 1 ? winners[0] : null;
+    const outcomeType: "single_winner" | "shared_winners" | "tie_all_zero" =
+      winners.length === 0
+        ? "tie_all_zero"
+        : winners.length === 1
+          ? "single_winner"
+          : "shared_winners";
+
+    let lastScore: number | null = null;
+    let lastRank = 0;
+    const leaderboard = bySkillDesc.map((row, idx) => {
+      if (lastScore === null || row.skillPoints !== lastScore) {
+        lastRank = idx + 1;
+        lastScore = row.skillPoints;
+      }
+      const medal =
+        lastRank === 1
+          ? "gold"
+          : lastRank === 2
+            ? "silver"
+            : lastRank === 3
+              ? "bronze"
+              : null;
+      return {
         ...row,
-        rank: idx + 1,
-        medal: idx === 0 ? "gold" : idx === 1 ? "silver" : idx === 2 ? "bronze" : null,
-      }));
+        rank: lastRank,
+        medal,
+      };
+    });
 
     const rm = this.resultMessages ?? {
       winner: "",
@@ -590,7 +601,9 @@ export class Match {
     };
     this.io.to(this.room).emit("game_over", {
       reason: "finished",
+      outcomeType,
       winner,
+      winners,
       players: this.snapshotPlayers(),
       resultMessages: rm,
       leaderboard,
