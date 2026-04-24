@@ -54,6 +54,7 @@ const gameSettingsPatchSchema = z.object({
   maxStudyRounds: z.number().int().min(1).max(10),
   studyRoundQuestionCount: z.number().int().min(1).max(30),
   studyPhaseMs: z.number().int().min(5000).max(300000),
+  maxPlayersPerMatch: z.number().int().min(2).max(100),
 });
 
 const questionPatchSchema = z.object({
@@ -288,17 +289,19 @@ export function registerAdminRoutes(app: Express): void {
       const rows = await pool.query<{ key: string; value: string }>(
         `SELECT key, value
          FROM app_settings
-         WHERE key IN ('game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms')`,
+         WHERE key IN ('game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms', 'max_players_per_match')`,
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
       const maxStudyRounds = Number(map.get("game_max_study_rounds") ?? "3");
       const studyRoundQuestionCount = Number(map.get("game_study_round_size") ?? "8");
       const studyPhaseMs = Number(map.get("game_study_phase_ms") ?? "60000");
+      const maxPlayersPerMatch = Number(map.get("max_players_per_match") ?? "10");
       res.json({
         ok: true,
         maxStudyRounds,
         studyRoundQuestionCount,
         studyPhaseMs,
+        maxPlayersPerMatch,
       });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
@@ -323,12 +326,14 @@ export function registerAdminRoutes(app: Express): void {
          VALUES
            ('game_max_study_rounds', $1),
            ('game_study_round_size', $2),
-           ('game_study_phase_ms', $3)
+           ('game_study_phase_ms', $3),
+           ('max_players_per_match', $4)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [
           String(parsed.data.maxStudyRounds),
           String(parsed.data.studyRoundQuestionCount),
           String(parsed.data.studyPhaseMs),
+          String(parsed.data.maxPlayersPerMatch),
         ],
       );
       res.json({ ok: true });

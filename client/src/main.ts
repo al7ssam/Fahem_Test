@@ -13,6 +13,7 @@ let currentQuestionId: number | null = null;
 let endsAt = 0;
 let timerHandle: number | null = null;
 let currentGameMode: GameMode | null = null;
+let lobbyNotice = "";
 let currentMatchPlayers: Array<{
   socketId: string;
   name: string;
@@ -296,13 +297,16 @@ function render(): void {
               <ul id="players" class="space-y-2 text-right"></ul>
             </div>
             <button id="ready-btn" class="w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 py-4 text-lg font-bold shadow-lg active:scale-[0.98] transition">جاهز للعب</button>
-            <p class="text-center text-slate-400 text-sm">يُشترط لاعبان جاهزان على الأقل لبدء التحدي خلال ٣ ثوانٍ.</p>
+            <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem]"></p>
+            <p class="text-center text-slate-400 text-sm">يُشترط لاعبان جاهزان على الأقل لبدء التحدي خلال ٥ ثوانٍ.</p>
           </div>
         </div>
       `),
     );
     updateConnectionBadge();
     updateLobbyModeLabel();
+    const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+    if (noticeEl) noticeEl.textContent = lobbyNotice;
     return;
   }
 
@@ -596,8 +600,11 @@ function connectSocket(name: string, mode: GameMode): void {
     (payload: {
       mode?: GameMode;
       players: { socketId: string; name: string; ready: boolean }[];
+      isStarting?: boolean;
+      participantSocketIds?: string[];
+      maxPlayersPerMatch?: number;
     }) => {
-      if (phase !== "lobby") return;
+      if (phase !== "lobby" && phase !== "countdown") return;
       if (payload.mode) currentGameMode = payload.mode;
       currentMatchPlayers = payload.players.map((p) => ({
         socketId: p.socketId,
@@ -605,14 +612,47 @@ function connectSocket(name: string, mode: GameMode): void {
         hearts: 3,
         eliminated: false,
       }));
+      if (phase === "countdown") {
+        const participants = payload.participantSocketIds ?? [];
+        const isSelected =
+          participants.length === 0 || (mySocketId ? participants.includes(mySocketId) : false);
+        if (!isSelected) {
+          if (cdInterval) {
+            window.clearInterval(cdInterval);
+            cdInterval = null;
+          }
+          lobbyNotice = "بدأت المباراة الحالية بين لاعبين/مجموعة أخرى. أنت في قائمة الانتظار للجولة القادمة.";
+          phase = "lobby";
+          render();
+        }
+      }
+      if (
+        phase === "lobby" &&
+        payload.isStarting &&
+        mySocketId &&
+        Array.isArray(payload.participantSocketIds) &&
+        payload.participantSocketIds.length > 0 &&
+        !payload.participantSocketIds.includes(mySocketId)
+      ) {
+        lobbyNotice = "بدأت المباراة الحالية بين أول الجاهزين. أنت في الانتظار للجولة التالية.";
+      }
       renderLobbyPlayers(payload.players);
       updateConnectionBadge();
       updateLobbyModeLabel();
     },
   );
 
-  s.on("match_starting", (payload: { seconds: number }) => {
+  s.on("match_starting", (payload: { seconds: number; participantSocketIds?: string[] }) => {
     if (phase !== "lobby") return;
+    const participants = payload.participantSocketIds ?? [];
+    const isSelected =
+      participants.length === 0 || (mySocketId ? participants.includes(mySocketId) : false);
+    if (!isSelected) {
+      lobbyNotice = "بدأت المباراة الحالية بين أول الجاهزين. أنت في الانتظار للجولة التالية.";
+      render();
+      return;
+    }
+    lobbyNotice = "";
     phase = "countdown";
     render();
     let left = payload.seconds;
@@ -629,6 +669,18 @@ function connectSocket(name: string, mode: GameMode): void {
         cdInterval = null;
       } else show();
     }, 1000);
+  });
+
+  s.on("match_start_cancelled", () => {
+    if (cdInterval) {
+      window.clearInterval(cdInterval);
+      cdInterval = null;
+    }
+    if (phase === "countdown") {
+      phase = "lobby";
+    }
+    lobbyNotice = "تم إلغاء بدء المباراة لعدم كفاية اللاعبين الجاهزين.";
+    if (phase === "lobby") render();
   });
 
   s.on(
@@ -648,6 +700,7 @@ function connectSocket(name: string, mode: GameMode): void {
         cdInterval = null;
       }
       if (payload.gameMode) currentGameMode = payload.gameMode;
+      lobbyNotice = "";
       if (payload.players) {
         currentMatchPlayers = payload.players.map((p) => ({ ...p }));
       }

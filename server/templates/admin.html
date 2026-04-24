@@ -493,6 +493,8 @@
             <input id="gs-round-size" type="text" inputmode="numeric" value="8" />
             <label for="gs-study-ms">توقيت عرض بطاقات المذاكرة (مللي ثانية)</label>
             <input id="gs-study-ms" type="text" inputmode="numeric" value="60000" />
+            <label for="gs-max-players">الحد الأقصى للاعبين في المباراة</label>
+            <input id="gs-max-players" type="text" inputmode="numeric" value="10" />
             <div class="btn-row">
               <button type="button" class="btn btn-secondary" id="gs-load-btn">تحميل</button>
               <button type="button" class="btn" id="gs-save-btn">حفظ</button>
@@ -779,6 +781,7 @@
               document.getElementById("gs-max-rounds").value = String(j.maxStudyRounds ?? 3);
               document.getElementById("gs-round-size").value = String(j.studyRoundQuestionCount ?? 8);
               document.getElementById("gs-study-ms").value = String(j.studyPhaseMs ?? 60000);
+              document.getElementById("gs-max-players").value = String(j.maxPlayersPerMatch ?? 10);
               setGsMsg("تم التحميل.", true);
             } else setGsMsg("تعذر التحميل.", false);
           } catch (e) { setGsMsg("خطأ في الاتصال.", false); }
@@ -789,9 +792,10 @@
           var body = {
             maxStudyRounds: parseInt(document.getElementById("gs-max-rounds").value, 10),
             studyRoundQuestionCount: parseInt(document.getElementById("gs-round-size").value, 10),
-            studyPhaseMs: parseInt(document.getElementById("gs-study-ms").value, 10)
+            studyPhaseMs: parseInt(document.getElementById("gs-study-ms").value, 10),
+            maxPlayersPerMatch: parseInt(document.getElementById("gs-max-players").value, 10)
           };
-          if (!body.maxStudyRounds || !body.studyRoundQuestionCount || !body.studyPhaseMs) {
+          if (!body.maxStudyRounds || !body.studyRoundQuestionCount || !body.studyPhaseMs || !body.maxPlayersPerMatch) {
             return setGsMsg("تحقق من القيم الرقمية.", false);
           }
           gsSave.disabled = true;
