@@ -489,6 +489,11 @@
           <div class="card" id="bank-section">
             <div class="bank-toolbar">
               <input type="search" id="bank-q" placeholder="بحث في نص السؤال…" />
+              <select id="bank-mode">
+                <option value="all">كل الأنماط</option>
+                <option value="study">مذاكرة فقط</option>
+                <option value="direct">مباشر فقط</option>
+              </select>
               <button type="button" class="btn btn-secondary" id="bank-search-btn">بحث</button>
               <button type="button" class="btn btn-secondary" id="bank-refresh-btn">تحديث</button>
             </div>
@@ -737,7 +742,7 @@
       })();
 
       (function () {
-        var bankState = { offset: 0, limit: 20, q: "", selected: {} };
+        var bankState = { offset: 0, limit: 20, q: "", mode: "all", selected: {} };
         var tbody = document.getElementById("bank-tbody");
         var bankMsg = document.getElementById("bank-msg");
         var totalEl = document.getElementById("total-display");
@@ -758,7 +763,11 @@
         }
         async function loadList() {
           var s = secret(); if (!s) return setBankMsg("أدخل مفتاح الإدارة.", false);
-          var qs = "?offset=" + bankState.offset + "&limit=" + bankState.limit + (bankState.q ? "&q=" + encodeURIComponent(bankState.q) : "");
+          var qs =
+            "?offset=" + bankState.offset +
+            "&limit=" + bankState.limit +
+            (bankState.q ? "&q=" + encodeURIComponent(bankState.q) : "") +
+            (bankState.mode && bankState.mode !== "all" ? "&mode=" + encodeURIComponent(bankState.mode) : "");
           try {
             var r = await fetch("/api/admin/questions" + qs, { headers: { "X-Admin-Secret": s } });
             var j = await r.json();
@@ -803,8 +812,18 @@
             } else setBankMsg("تعذر الحذف.", false);
           } catch (e) { setBankMsg("خطأ في الاتصال.", false); }
         }
-        document.getElementById("bank-search-btn").onclick = function () { bankState.q = document.getElementById("bank-q").value.trim(); bankState.offset = 0; loadList(); };
+        document.getElementById("bank-search-btn").onclick = function () {
+          bankState.q = document.getElementById("bank-q").value.trim();
+          bankState.mode = document.getElementById("bank-mode").value || "all";
+          bankState.offset = 0;
+          loadList();
+        };
         document.getElementById("bank-refresh-btn").onclick = function () { loadList(); };
+        document.getElementById("bank-mode").addEventListener("change", function (ev) {
+          bankState.mode = ev.target.value || "all";
+          bankState.offset = 0;
+          loadList();
+        });
         document.getElementById("bank-prev").onclick = function () { bankState.offset = Math.max(0, bankState.offset - bankState.limit); loadList(); };
         document.getElementById("bank-next").onclick = function () { bankState.offset += bankState.limit; loadList(); };
         document.getElementById("bank-select-page").onclick = function () {

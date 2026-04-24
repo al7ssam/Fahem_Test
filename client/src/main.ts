@@ -31,6 +31,7 @@ const DEFAULT_RESULT_MESSAGES = {
   loser: "انتهت الجولة لصالح لاعب آخر.",
   tie: "تعادل أو لا فائز — حاول مرة أخرى!",
 } as const;
+const PLAYER_NAME_STORAGE_KEY = "fahem.playerName";
 
 const RESULT_VIDEO_SRC = {
   win: "/videos/win.mp4",
@@ -39,6 +40,23 @@ const RESULT_VIDEO_SRC = {
 } as const;
 
 type ResultScreenKind = "win" | "lose" | "tie" | "empty";
+
+function getStoredPlayerName(): string {
+  try {
+    const raw = window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY);
+    return (raw ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function storePlayerName(name: string): void {
+  try {
+    window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
+  } catch {
+    /* ignore storage failures */
+  }
+}
 
 function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): void {
   const root = app.querySelector<HTMLDivElement>("#result-screen");
@@ -197,6 +215,10 @@ function render(): void {
       `),
     );
     const input = app.querySelector<HTMLInputElement>("#name-input")!;
+    const storedName = getStoredPlayerName();
+    if (storedName) {
+      input.value = storedName;
+    }
     const btn = app.querySelector<HTMLButtonElement>("#join-btn")!;
     const err = app.querySelector<HTMLParagraphElement>("#join-err")!;
     const modeBtns = app.querySelectorAll<HTMLButtonElement>(".mode-option-btn");
@@ -218,6 +240,7 @@ function render(): void {
         err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
         return;
       }
+      storePlayerName(name);
       connectSocket(name, selectedMode);
     });
     return;

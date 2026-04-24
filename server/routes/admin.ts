@@ -280,14 +280,22 @@ export function registerAdminRoutes(app: Express): void {
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const modeRaw = typeof req.query.mode === "string" ? req.query.mode.trim() : "all";
+    const mode = modeRaw === "study" || modeRaw === "direct" ? modeRaw : "all";
     try {
       const pool = getPool();
       const params: unknown[] = [];
-      let where = "";
+      const whereParts: string[] = [];
       if (q.length > 0) {
         params.push(`%${q}%`);
-        where = `WHERE prompt ILIKE $${params.length}`;
+        whereParts.push(`prompt ILIKE $${params.length}`);
       }
+      if (mode === "study") {
+        whereParts.push(`study_body IS NOT NULL AND btrim(study_body) <> ''`);
+      } else if (mode === "direct") {
+        whereParts.push(`(study_body IS NULL OR btrim(study_body) = '')`);
+      }
+      const where = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
       params.push(limit, offset);
       const limIdx = params.length - 1;
       const offIdx = params.length;
