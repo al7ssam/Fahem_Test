@@ -124,7 +124,7 @@ function render(): void {
       el(`
         <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
           <div class="flex items-center justify-between gap-2">
-            <h2 class="text-lg font-bold text-amber-300">مرحلة المراجعة</h2>
+            <h2 class="text-lg font-bold text-amber-300">مراجعة شاملة</h2>
             <div id="study-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums">—</div>
           </div>
           <p id="study-hint" class="text-right text-slate-400 text-sm min-h-[1.25rem]"></p>
@@ -135,7 +135,7 @@ function render(): void {
     const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
     if (hint) {
       hint.textContent = hasCards
-        ? "اقرأ البطاقات قبل بدء أسئلة هذه الجولة."
+        ? "مراجعة شاملة — اقرأ البطاقات قبل أول سؤال."
         : "جاري تجهيز الجولة…";
     }
     const container = app.querySelector<HTMLDivElement>("#study-cards");
@@ -342,6 +342,7 @@ function connectSocket(name: string, mode: GameMode): void {
       cards: Array<{ id: number; body: string; order: number }>;
       endsAt: number;
       macroRound?: number;
+      scope?: string;
     }) => {
       studyCards = payload.cards ?? [];
       studyEndsAt = payload.endsAt;
@@ -350,10 +351,12 @@ function connectSocket(name: string, mode: GameMode): void {
       const container = app.querySelector<HTMLDivElement>("#study-cards");
       const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
       if (hint) {
+        const full =
+          payload.scope === "match_start"
+            ? "مراجعة شاملة لدفعة الأسئلة في المباراة — اقرأ كل البطاقات قبل أول سؤال."
+            : "اقرأ البطاقات قبل متابعة الأسئلة.";
         hint.textContent =
-          studyCards.length > 0
-            ? "اقرأ البطاقات قبل بدء أسئلة هذه الجولة."
-            : "جاري تجهيز الجولة…";
+          studyCards.length > 0 ? full : "جاري تجهيز الجولة…";
       }
       if (container) {
         container.innerHTML = "";

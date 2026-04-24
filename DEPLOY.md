@@ -25,5 +25,6 @@
 - الخادم يقدّم الواجهة من `client/dist` في وضع الإنتاج.
 - Socket.io يعمل على نفس المنفذ والمسار الافتراضي `/socket.io`.
 - إدارة الأسئلة: افتح `https://<اسم-الخدمة>.onrender.com/admin` بعد ضبط `ADMIN_SECRET`؛ تعرض الصفحة **إجمالي عدد الأسئلة** وتحدّثه بعد كل حفظ ناجح.
-- استيراد دفعة: من نفس الصفحة يمكن لصق JSON (مصفوفة أو `{ "questions": [...] }`)؛ الحد الأقصى **200** سؤالاً لكل طلب، وحجم جسم الطلب حتى نحو **1 MB** (`express.json`).
-- نمط «بطاقات ثم أسئلة»: متغيرات اختيارية `STUDY_PHASE_MS`، `STUDY_QUIZ_BLOCK_SIZE`، `MAX_STUDY_CARDS_DISPLAY` (انظر `.env.example`). يتطلب جدول `question_study_cards` بعد اكتمال التنفيذ الكامل في الكود.
+- استيراد دفعة: من نفس الصفحة يمكن لصق JSON (مصفوفة أو `{ "questions": [...] }`)؛ الحد الأقصى **200** سؤالاً لكل طلب، وحجم جسم الطلب حتى نحو **1 MB** (`express.json`). يمكن تضمين **`studyCards`** داخل كل سؤال: مصفوفة `{ "body": "...", "sort_order": 0 }` (أو `sortOrder`) لإدراج بطاقات `question_study_cards` مع نفس المعاملة.
+
+- نمط «بطاقات ثم أسئلة»: متغيرات اختيارية `STUDY_PHASE_MS`، `STUDY_QUIZ_BLOCK_SIZE`، `MAX_STUDY_CARDS_DISPLAY`، `STUDY_MATCH_PREFETCH` (عدد الأسئلة المُسبَقة لمراجعة واحدة في بداية المباراة)، `MAX_STUDY_CARDS_MATCH_START` (سقف بطاقات تلك المراجعة) — انظر `.env.example`. يتطلب جدول `question_study_cards`.

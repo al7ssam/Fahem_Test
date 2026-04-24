@@ -2,18 +2,31 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import type { Express, Request, Response } from "express";
+import type { PoolClient } from "pg";
 import { z } from "zod";
 import { config } from "../config";
 import { getPool } from "../db/pool";
+
+const studyCardBodySchema = z.object({
+  body: z.string().trim().min(1).max(50_000),
+  sortOrder: z.number().int().min(0).max(10_000).optional(),
+  sort_order: z.number().int().min(0).max(10_000).optional(),
+});
 
 const questionBodySchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
   options: z.array(z.string().trim().min(1).max(500)).length(4),
   correctIndex: z.number().int().min(0).max(3),
   difficulty: z.string().trim().max(32).optional(),
+  studyCards: z.array(studyCardBodySchema).max(100).optional(),
 });
 
-/** عنصر استيراد JSON: يقبل correctIndex أو correct_index */
+const studyCardImportRowSchema = z.object({
+  body: z.string().trim().min(1).max(50_000),
+  sort_order: z.number().int().min(0).max(10_000).optional(),
+  sortOrder: z.number().int().min(0).max(10_000).optional(),
+});
+
 const importItemSchema = z
   .object({
     prompt: z.string().trim().min(1).max(2000),
@@ -21,6 +34,7 @@ const importItemSchema = z
     correctIndex: z.number().int().min(0).max(3).optional(),
     correct_index: z.number().int().min(0).max(3).optional(),
     difficulty: z.string().trim().max(32).optional(),
+    studyCards: z.array(studyCardImportRowSchema).max(100).optional(),
   })
   .refine((d) => d.correctIndex !== undefined || d.correct_index !== undefined, {
     message: "correctIndex or correct_index required",
@@ -30,9 +44,27 @@ const importItemSchema = z
     options: d.options,
     correctIndex: (d.correctIndex ?? d.correct_index) as number,
     difficulty: d.difficulty,
+    studyCards: (d.studyCards ?? []).map((c, idx) => ({
+      body: c.body,
+      sortOrder: c.sort_order ?? c.sortOrder ?? idx,
+    })),
   }));
 
 const importArraySchema = z.array(importItemSchema).min(1).max(200);
+
+async function insertStudyCardsForQuestion(
+  client: PoolClient,
+  questionId: number,
+  cards: Array<{ body: string; sortOrder: number }>,
+): Promise<void> {
+  for (const c of cards) {
+    await client.query(
+      `INSERT INTO question_study_cards (question_id, body, sort_order)
+       VALUES ($1, $2, $3)`,
+      [questionId, c.body, c.sortOrder],
+    );
+  }
+}
 
 function timingSafeEqualString(a: string, b: string): boolean {
   try {
@@ -135,11 +167,13 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
 
-    const { prompt, options, correctIndex, difficulty } = parsed.data;
+    const { prompt, options, correctIndex, difficulty, studyCards } = parsed.data;
 
+    const pool = getPool();
+    const client = await pool.connect();
     try {
-      const pool = getPool();
-      const ins = await pool.query<{ id: number }>(
+      await client.query("BEGIN");
+      const ins = await client.query<{ id: number }>(
         `INSERT INTO questions (prompt, options, correct_index, difficulty)
          VALUES ($1, $2::jsonb, $3, $4)
          RETURNING id`,
@@ -151,6 +185,14 @@ export function registerAdminRoutes(app: Express): void {
         ],
       );
       const id = ins.rows[0]?.id;
+      if (id != null && studyCards && studyCards.length > 0) {
+        const normalized = studyCards.map((c, idx) => ({
+          body: c.body,
+          sortOrder: c.sortOrder ?? c.sort_order ?? idx,
+        }));
+        await insertStudyCardsForQuestion(client, id, normalized);
+      }
+      await client.query("COMMIT");
       const total = await countQuestions();
       res.status(201).json({
         ok: true,
@@ -158,7 +200,14 @@ export function registerAdminRoutes(app: Express): void {
         totalQuestions: total ?? undefined,
       });
     } catch {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
       res.status(500).json({ ok: false, error: "insert_failed" });
+    } finally {
+      client.release();
     }
   });
 
@@ -192,9 +241,10 @@ export function registerAdminRoutes(app: Express): void {
     try {
       await client.query("BEGIN");
       for (const row of rows) {
-        await client.query(
+        const ins = await client.query<{ id: number }>(
           `INSERT INTO questions (prompt, options, correct_index, difficulty)
-           VALUES ($1, $2::jsonb, $3, $4)`,
+           VALUES ($1, $2::jsonb, $3, $4)
+           RETURNING id`,
           [
             row.prompt,
             JSON.stringify(row.options),
@@ -202,6 +252,10 @@ export function registerAdminRoutes(app: Express): void {
             row.difficulty ?? null,
           ],
         );
+        const qid = ins.rows[0]?.id;
+        if (qid != null && row.studyCards.length > 0) {
+          await insertStudyCardsForQuestion(client, qid, row.studyCards);
+        }
       }
       await client.query("COMMIT");
     } catch {

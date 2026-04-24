@@ -1,7 +1,7 @@
 ﻿import type { Server } from "socket.io";
 import { config } from "../config";
 import { getPool } from "../db/pool";
-import { getRandomQuestion, getRandomQuestionBlock, type QuestionRow } from "../db/questions";
+import { getRandomQuestion, type QuestionRow } from "../db/questions";
 import { getStudyCardsForQuestions } from "../db/studyCards";
 
 const QUESTION_MS = 15_000;
@@ -35,6 +35,8 @@ export class Match {
   private studyPhaseResolve: (() => void) | null = null;
   private studyWaitTimer: ReturnType<typeof setTimeout> | null = null;
   private macroRound = 0;
+  private questionQueue: QuestionRow[] = [];
+  private queueIndex = 0;
 
   constructor(
     private readonly io: Server,
@@ -136,6 +138,7 @@ export class Match {
       cards,
       endsAt,
       macroRound: this.macroRound,
+      scope: "match_start",
     });
     const ms = Math.max(0, endsAt - Date.now());
     await new Promise<void>((resolve) => {
@@ -184,34 +187,61 @@ export class Match {
   }
 
   private async runStudyThenQuizLoop(pool: ReturnType<typeof getPool>): Promise<void> {
-    const blockSize = config.studyQuizBlockSize;
-    const maxCards = config.maxStudyCardsDisplay;
+    const prefetch = Math.min(MAX_ROUNDS, config.studyMatchPrefetch);
+    const refillBatch = Math.max(1, config.studyQuizBlockSize);
+    const maxCardsFull = config.maxStudyCardsMatchStart;
+
+    this.questionQueue = [];
+    this.queueIndex = 0;
+    await this.fillQuestionQueue(pool, prefetch);
+    if (this.questionQueue.length === 0) {
+      this.emitNoQuestions();
+      return;
+    }
+
+    this.macroRound = 1;
+    const ids = this.questionQueue.map((q) => q.id);
+    const cards = await getStudyCardsForQuestions(pool, ids, maxCardsFull);
+    const endsAt = Date.now() + config.studyPhaseMs;
+    if (cards.length > 0) {
+      await this.runStudyPhase(cards, endsAt);
+    }
+    if (this.finished) return;
 
     while (!this.finished && this.countActive() > 1) {
-      const block = await getRandomQuestionBlock(
-        pool,
-        this.usedQuestionIds,
-        blockSize,
-      );
-      if (block.length === 0) {
-        this.emitNoQuestions();
-        return;
+      if (this.queueIndex >= this.questionQueue.length) {
+        const lenBefore = this.questionQueue.length;
+        await this.fillQuestionQueue(pool, refillBatch);
+        if (this.queueIndex >= this.questionQueue.length) {
+          if (this.questionQueue.length === lenBefore) {
+            this.emitNoQuestions();
+            return;
+          }
+        }
       }
-      this.macroRound++;
-      const ids = block.map((q) => q.id);
-      const cards = await getStudyCardsForQuestions(pool, ids, maxCards);
-      const endsAt = Date.now() + config.studyPhaseMs;
-      if (cards.length > 0) {
-        await this.runStudyPhase(cards, endsAt);
-      }
+      if (this.round >= MAX_ROUNDS) return;
+      const q = this.questionQueue[this.queueIndex];
+      this.queueIndex += 1;
+      await this.playOneQuestion(pool, q);
       if (this.finished) return;
+    }
+  }
 
-      for (const q of block) {
-        if (this.finished || this.countActive() <= 1) return;
-        if (this.round >= MAX_ROUNDS) return;
-        await this.playOneQuestion(pool, q);
-        if (this.finished) return;
-      }
+  private async fillQuestionQueue(
+    pool: ReturnType<typeof getPool>,
+    targetMore: number,
+  ): Promise<void> {
+    const exclude = new Set<number>(this.usedQuestionIds);
+    for (const q of this.questionQueue) {
+      exclude.add(q.id);
+    }
+    let added = 0;
+    while (added < targetMore) {
+      const q = await getRandomQuestion(pool, [...exclude]);
+      if (!q) break;
+      exclude.add(q.id);
+      this.questionQueue.push(q);
+      added += 1;
     }
   }
 
