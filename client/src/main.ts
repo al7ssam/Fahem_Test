@@ -76,6 +76,10 @@ const DEFAULT_RESULT_MESSAGES = {
   tie: "تعادل أو لا فائز — حاول مرة أخرى!",
 } as const;
 const PLAYER_NAME_STORAGE_KEY = "fahem.playerName";
+const RELEASE_VERSION_QUERY_KEY = "v";
+const RELEASE_WATCH_INTERVAL_MS = 30000;
+let releaseWatchHandle: number | null = null;
+let lastKnownReleaseVersion: string | null = null;
 
 const RESULT_VIDEO_SRC = {
   win: "/videos/win.mp4",
@@ -100,6 +104,54 @@ function storePlayerName(name: string): void {
   } catch {
     /* ignore storage failures */
   }
+}
+
+function getReleaseVersionFromUrl(): string | null {
+  try {
+    const url = new URL(window.location.href);
+    const v = url.searchParams.get(RELEASE_VERSION_QUERY_KEY);
+    return v && v.trim() ? v.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchReleaseVersion(): Promise<string | null> {
+  try {
+    const res = await fetch("/api/release-version", {
+      cache: "no-store",
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { ok?: boolean; releaseVersion?: string };
+    if (!data?.ok || typeof data.releaseVersion !== "string") return null;
+    const value = data.releaseVersion.trim();
+    return value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function checkReleaseVersionForRefresh(): Promise<void> {
+  const remoteVersion = await fetchReleaseVersion();
+  if (!remoteVersion) return;
+  if (!lastKnownReleaseVersion) {
+    lastKnownReleaseVersion = remoteVersion;
+    return;
+  }
+  if (remoteVersion === lastKnownReleaseVersion) return;
+  const target = new URL(window.location.href);
+  target.searchParams.set(RELEASE_VERSION_QUERY_KEY, remoteVersion);
+  window.location.replace(target.toString());
+}
+
+function startReleaseVersionWatch(): void {
+  if (releaseWatchHandle !== null) return;
+  lastKnownReleaseVersion = getReleaseVersionFromUrl();
+  void checkReleaseVersionForRefresh();
+  releaseWatchHandle = window.setInterval(() => {
+    void checkReleaseVersionForRefresh();
+  }, RELEASE_WATCH_INTERVAL_MS);
 }
 
 function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): void {
@@ -1873,3 +1925,4 @@ function startStudyTimer(): void {
 }
 
 render();
+startReleaseVersionWatch();

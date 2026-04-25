@@ -536,6 +536,22 @@
       </div>
 
       <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="cache-bust">
+          <span class="accordion-title">تحديث الكاش</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <p class="subtitle">استخدم هذا الزر لفرض تحديث العملاء للنسخة الجديدة دون مسح كاش يدوي.</p>
+            <div class="btn-row">
+              <button type="button" class="btn" id="cb-run-btn">تحديث الكاش الآن</button>
+            </div>
+            <div class="msg" id="cb-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="keys-settings">
           <span class="accordion-title">المفاتيح والقدرات</span>
           <span class="accordion-icon">⌄</span>
@@ -852,6 +868,27 @@
             if (r.ok && j.ok) setRmMsg("تم الحفظ.", true); else setRmMsg("تعذر الحفظ.", false);
           } catch (e) { setRmMsg("خطأ في الاتصال.", false); }
           finally { rmSave.disabled = false; }
+        });
+      })();
+
+      (function () {
+        var cbRun = document.getElementById("cb-run-btn");
+        var cbMsg = document.getElementById("cb-msg");
+        function setCbMsg(t, ok) { cbMsg.textContent = t || ""; cbMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        cbRun.addEventListener("click", async function () {
+          var s = secret(); if (!s) return setCbMsg("أدخل مفتاح الإدارة.", false);
+          cbRun.disabled = true;
+          try {
+            var r = await fetch("/api/admin/cache-bust", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s }
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) setCbMsg("تم تحديث الكاش. الإصدار الجديد: " + String(j.releaseVersion || "-"), true);
+            else setCbMsg("تعذر تنفيذ تحديث الكاش.", false);
+          } catch (e) { setCbMsg("خطأ في الاتصال.", false); }
+          finally { cbRun.disabled = false; }
         });
       })();
 

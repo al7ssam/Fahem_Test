@@ -178,6 +178,19 @@ function mergedStudyBody(data: {
 }
 
 export function registerAdminRoutes(app: Express): void {
+  app.get("/api/release-version", async (_req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const r = await pool.query<{ value: string }>(
+        `SELECT value FROM app_settings WHERE key = 'release_version' LIMIT 1`,
+      );
+      const releaseVersion = String(r.rows[0]?.value ?? "1").trim() || "1";
+      res.json({ ok: true, releaseVersion });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
   app.get("/admin", async (_req: Request, res: Response) => {
     try {
       const total = await countQuestions();
@@ -266,6 +279,23 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true });
     } catch {
       res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/cache-bust", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const pool = getPool();
+      const releaseVersion = String(Date.now());
+      await pool.query(
+        `INSERT INTO app_settings (key, value)
+         VALUES ('release_version', $1)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [releaseVersion],
+      );
+      res.json({ ok: true, releaseVersion });
+    } catch {
+      res.status(500).json({ ok: false, error: "cache_bust_failed" });
     }
   });
 
