@@ -631,6 +631,54 @@
             <input id="cat-sub-icon" type="text" value="📘" />
             <button type="button" class="btn btn-secondary" id="cat-sub-save-btn">حفظ/تحديث فرعي</button>
             <div class="msg" id="cat-msg"></div>
+            <hr />
+            <div class="bank-toolbar">
+              <input type="search" id="cat-q" placeholder="بحث في المفاتيح أو الأسماء..." />
+              <select id="cat-active-filter">
+                <option value="">الكل</option>
+                <option value="true">مفعّل</option>
+                <option value="false">معطّل</option>
+              </select>
+              <button type="button" class="btn btn-secondary" id="cat-refresh-btn">تحديث</button>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="cat-bulk-activate">تفعيل المحدد</button>
+              <button type="button" class="btn btn-secondary" id="cat-bulk-deactivate">تعطيل المحدد</button>
+              <button type="button" class="btn btn-danger" id="cat-bulk-delete">حذف المحدد</button>
+            </div>
+            <div style="overflow-x:auto">
+              <table class="bank">
+                <thead>
+                  <tr>
+                    <th><input type="checkbox" id="cat-check-all-main" /></th>
+                    <th>#</th>
+                    <th>المفتاح</th>
+                    <th>الاسم</th>
+                    <th>الحالة</th>
+                    <th>الترتيب</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="cat-main-tbody"></tbody>
+              </table>
+            </div>
+            <div style="overflow-x:auto; margin-top: 0.7rem;">
+              <table class="bank">
+                <thead>
+                  <tr>
+                    <th><input type="checkbox" id="cat-check-all-sub" /></th>
+                    <th>#</th>
+                    <th>الرئيسي</th>
+                    <th>المفتاح الفرعي</th>
+                    <th>الاسم</th>
+                    <th>الحالة</th>
+                    <th>الترتيب</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="cat-sub-tbody"></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -666,6 +714,9 @@
                     <th>#</th>
                     <th>معاينة</th>
                     <th>مذاكرة</th>
+                    <th>رئيسي</th>
+                    <th>فرعي</th>
+                    <th>مفتاح الفرعي</th>
                     <th>إجراءات</th>
                   </tr>
                 </thead>
@@ -758,11 +809,13 @@
             var optA = document.createElement("option");
             optA.value = s.subcategoryKey;
             optA.textContent = t;
+            optA.dataset.mainKey = m.mainKey;
             qSub.appendChild(optA.cloneNode(true));
             editSub.appendChild(optA.cloneNode(true));
             var optB = document.createElement("option");
             optB.value = s.subcategoryKey;
             optB.textContent = t;
+            optB.dataset.mainKey = m.mainKey;
             bankSub.appendChild(optB);
           });
         });
@@ -1104,8 +1157,126 @@
 
       (function () {
         var catMsg = document.getElementById("cat-msg");
+        var selectedMainIds = {};
+        var selectedSubIds = {};
         function setCatMsg(t, ok) { catMsg.textContent = t || ""; catMsg.className = "msg " + (ok ? "ok" : "err"); }
         function secret() { return document.getElementById("admin-secret").value.trim(); }
+        function applyQueryFilter(list) {
+          var q = (document.getElementById("cat-q").value || "").trim().toLowerCase();
+          var af = document.getElementById("cat-active-filter").value;
+          return list.filter(function (x) {
+            var activeOk = !af || String(x.isActive) === af;
+            var qOk = !q || String(x.nameAr || "").toLowerCase().includes(q) || String(x.mainKey || x.subcategoryKey || "").toLowerCase().includes(q);
+            return activeOk && qOk;
+          });
+        }
+        function rowBtn(label, cls, onClick) {
+          var b = document.createElement("button");
+          b.type = "button";
+          b.className = cls || "";
+          b.textContent = label;
+          b.onclick = onClick;
+          return b;
+        }
+        async function api(url, method, body) {
+          var s = secret();
+          if (!s) throw new Error("no_secret");
+          var r = await fetch(url, {
+            method: method || "GET",
+            headers: { "Content-Type": "application/json", "X-Admin-Secret": s },
+            body: body ? JSON.stringify(body) : undefined
+          });
+          var j = await r.json().catch(function () { return {}; });
+          if (!r.ok || !j.ok) throw new Error(j.error || "request_failed");
+          return j;
+        }
+        function renderCategoryTables(list) {
+          var mainBody = document.getElementById("cat-main-tbody");
+          var subBody = document.getElementById("cat-sub-tbody");
+          mainBody.innerHTML = "";
+          subBody.innerHTML = "";
+          var mains = applyQueryFilter(list || []);
+          mains.forEach(function (m) {
+            var tr = document.createElement("tr");
+            var ck = document.createElement("input");
+            ck.type = "checkbox";
+            ck.checked = Boolean(selectedMainIds[m.id]);
+            ck.onchange = function () { if (ck.checked) selectedMainIds[m.id] = true; else delete selectedMainIds[m.id]; };
+            var td0 = document.createElement("td"); td0.appendChild(ck);
+            var td1 = document.createElement("td"); td1.textContent = String(m.id);
+            var td2 = document.createElement("td"); td2.textContent = m.mainKey;
+            var td3 = document.createElement("td"); td3.textContent = (m.icon || "📚") + " " + m.nameAr;
+            var td4 = document.createElement("td"); td4.textContent = m.isActive ? "مفعّل" : "معطّل";
+            var td5 = document.createElement("td"); td5.textContent = String(m.sortOrder);
+            var td6 = document.createElement("td"); td6.className = "bank-actions";
+            td6.appendChild(rowBtn(m.isActive ? "تعطيل" : "تفعيل", "", async function () {
+              try { await api("/api/admin/categories/main/" + m.id, "PATCH", { isActive: !m.isActive }); await refreshTables(); }
+              catch (e) { setCatMsg("تعذر تحديث الحالة.", false); }
+            }));
+            td6.appendChild(rowBtn("↑", "", async function () {
+              try { await api("/api/admin/categories/reorder", "PATCH", { target: "main", items: [{ id: m.id, sortOrder: Math.max(0, (m.sortOrder || 0) - 10) }] }); await refreshTables(); }
+              catch (e) { setCatMsg("تعذر تعديل الترتيب.", false); }
+            }));
+            td6.appendChild(rowBtn("↓", "", async function () {
+              try { await api("/api/admin/categories/reorder", "PATCH", { target: "main", items: [{ id: m.id, sortOrder: (m.sortOrder || 0) + 10 }] }); await refreshTables(); }
+              catch (e) { setCatMsg("تعذر تعديل الترتيب.", false); }
+            }));
+            td6.appendChild(rowBtn("حذف", "btn-danger", async function () {
+              try {
+                var preview = await api("/api/admin/categories/main/" + m.id + "?dryRun=true", "DELETE");
+                var a = preview.affectedCounts || {};
+                if (!confirm("سيتم حذف الرئيسي وكل ما تحته. الفرعيات: " + (a.subcategories || 0) + "، الأسئلة: " + (a.questions || 0) + ". متابعة؟")) return;
+                await api("/api/admin/categories/main/" + m.id, "DELETE");
+                await refreshTables();
+              } catch (e) { setCatMsg("تعذر الحذف.", false); }
+            }));
+            tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tr.appendChild(td5); tr.appendChild(td6);
+            mainBody.appendChild(tr);
+            (m.subcategories || []).forEach(function (s) {
+              var ts = document.createElement("tr");
+              var cks = document.createElement("input");
+              cks.type = "checkbox";
+              cks.checked = Boolean(selectedSubIds[s.id]);
+              cks.onchange = function () { if (cks.checked) selectedSubIds[s.id] = true; else delete selectedSubIds[s.id]; };
+              var sd0 = document.createElement("td"); sd0.appendChild(cks);
+              var sd1 = document.createElement("td"); sd1.textContent = String(s.id);
+              var sd2 = document.createElement("td"); sd2.textContent = m.nameAr;
+              var sd3 = document.createElement("td"); sd3.textContent = s.subcategoryKey;
+              var sd4 = document.createElement("td"); sd4.textContent = (s.icon || "📘") + " " + s.nameAr;
+              var sd5 = document.createElement("td"); sd5.textContent = s.isActive ? "مفعّل" : "معطّل";
+              var sd6 = document.createElement("td"); sd6.textContent = String(s.sortOrder);
+              var sd7 = document.createElement("td"); sd7.className = "bank-actions";
+              sd7.appendChild(rowBtn(s.isActive ? "تعطيل" : "تفعيل", "", async function () {
+                try { await api("/api/admin/categories/sub/" + s.id, "PATCH", { isActive: !s.isActive }); await refreshTables(); }
+                catch (e) { setCatMsg("تعذر تحديث الحالة.", false); }
+              }));
+              sd7.appendChild(rowBtn("↑", "", async function () {
+                try { await api("/api/admin/categories/reorder", "PATCH", { target: "sub", items: [{ id: s.id, sortOrder: Math.max(0, (s.sortOrder || 0) - 10) }] }); await refreshTables(); }
+                catch (e) { setCatMsg("تعذر تعديل الترتيب.", false); }
+              }));
+              sd7.appendChild(rowBtn("↓", "", async function () {
+                try { await api("/api/admin/categories/reorder", "PATCH", { target: "sub", items: [{ id: s.id, sortOrder: (s.sortOrder || 0) + 10 }] }); await refreshTables(); }
+                catch (e) { setCatMsg("تعذر تعديل الترتيب.", false); }
+              }));
+              sd7.appendChild(rowBtn("حذف", "btn-danger", async function () {
+                try {
+                  var previewSub = await api("/api/admin/categories/sub/" + s.id + "?dryRun=true", "DELETE");
+                  var qn = (previewSub.affectedCounts || {}).questions || 0;
+                  if (!confirm("سيتم حذف التصنيف الفرعي وكل الأسئلة المرتبطة (" + qn + "). متابعة؟")) return;
+                  await api("/api/admin/categories/sub/" + s.id, "DELETE");
+                  await refreshTables();
+                } catch (e) { setCatMsg("تعذر الحذف.", false); }
+              }));
+              ts.appendChild(sd0); ts.appendChild(sd1); ts.appendChild(sd2); ts.appendChild(sd3); ts.appendChild(sd4); ts.appendChild(sd5); ts.appendChild(sd6); ts.appendChild(sd7);
+              subBody.appendChild(ts);
+            });
+          });
+        }
+        async function refreshTables() {
+          var s = secret(); if (!s) return;
+          await loadCategoriesForUi(s);
+          renderCategoryTables(categoriesCache || []);
+        }
         document.getElementById("cat-main-save-btn").addEventListener("click", async function () {
           var s = secret(); if (!s) return setCatMsg("أدخل مفتاح الإدارة.", false);
           var body = {
@@ -1117,7 +1288,7 @@
           try {
             var r = await fetch("/api/admin/categories/main", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": s }, body: JSON.stringify(body) });
             var j = await r.json().catch(function () { return {}; });
-            if (r.ok && j.ok) { setCatMsg("تم حفظ التصنيف الرئيسي.", true); await loadCategoriesForUi(s); }
+            if (r.ok && j.ok) { setCatMsg("تم حفظ التصنيف الرئيسي.", true); await refreshTables(); }
             else setCatMsg("تعذر حفظ الرئيسي.", false);
           } catch (e) { setCatMsg("خطأ في الاتصال.", false); }
         });
@@ -1133,10 +1304,59 @@
           try {
             var r = await fetch("/api/admin/categories/sub", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": s }, body: JSON.stringify(body) });
             var j = await r.json().catch(function () { return {}; });
-            if (r.ok && j.ok) { setCatMsg("تم حفظ التصنيف الفرعي.", true); await loadCategoriesForUi(s); }
+            if (r.ok && j.ok) { setCatMsg("تم حفظ التصنيف الفرعي.", true); await refreshTables(); }
             else setCatMsg("تعذر حفظ الفرعي.", false);
           } catch (e) { setCatMsg("خطأ في الاتصال.", false); }
         });
+        document.getElementById("cat-refresh-btn").addEventListener("click", function () { refreshTables().catch(function () {}); });
+        document.getElementById("cat-q").addEventListener("input", function () { renderCategoryTables(categoriesCache || []); });
+        document.getElementById("cat-active-filter").addEventListener("change", function () { renderCategoryTables(categoriesCache || []); });
+        document.getElementById("cat-check-all-main").addEventListener("change", function (ev) {
+          var on = ev.target.checked;
+          document.querySelectorAll("#cat-main-tbody input[type='checkbox']").forEach(function (c) {
+            c.checked = on;
+            var id = parseInt(c.parentElement.nextSibling.textContent, 10);
+            if (on) selectedMainIds[id] = true; else delete selectedMainIds[id];
+          });
+        });
+        document.getElementById("cat-check-all-sub").addEventListener("change", function (ev) {
+          var on = ev.target.checked;
+          document.querySelectorAll("#cat-sub-tbody input[type='checkbox']").forEach(function (c) {
+            c.checked = on;
+            var id = parseInt(c.parentElement.nextSibling.textContent, 10);
+            if (on) selectedSubIds[id] = true; else delete selectedSubIds[id];
+          });
+        });
+        async function bulkAction(target, action) {
+          var ids = Object.keys(target === "main" ? selectedMainIds : selectedSubIds).map(function (x) { return parseInt(x, 10); }).filter(Boolean);
+          if (!ids.length) return setCatMsg("حدد عناصر أولاً.", false);
+          try {
+            if (action === "delete") {
+              var preview = await api("/api/admin/categories/bulk", "POST", { target: target, action: action, ids: ids, dryRun: true });
+              var a = preview.affectedCounts || {};
+              var danger = target === "main"
+                ? ("سيتم حذف " + (a.categories || ids.length) + " رئيسي و" + (a.subcategories || 0) + " فرعي و" + (a.questions || 0) + " سؤال.")
+                : ("سيتم حذف " + (a.categories || ids.length) + " فرعي و" + (a.questions || 0) + " سؤال.");
+              if (!confirm(danger + " متابعة؟")) return;
+            }
+            await api("/api/admin/categories/bulk", "POST", { target: target, action: action, ids: ids });
+            if (target === "main") selectedMainIds = {}; else selectedSubIds = {};
+            setCatMsg("تم تنفيذ العملية.", true);
+            await refreshTables();
+          } catch (e) {
+            setCatMsg("تعذر تنفيذ العملية.", false);
+          }
+        }
+        document.getElementById("cat-bulk-activate").addEventListener("click", function () {
+          bulkAction(Object.keys(selectedSubIds).length ? "sub" : "main", "activate");
+        });
+        document.getElementById("cat-bulk-deactivate").addEventListener("click", function () {
+          bulkAction(Object.keys(selectedSubIds).length ? "sub" : "main", "deactivate");
+        });
+        document.getElementById("cat-bulk-delete").addEventListener("click", function () {
+          bulkAction(Object.keys(selectedSubIds).length ? "sub" : "main", "delete");
+        });
+        setTimeout(function () { refreshTables().catch(function () {}); }, 100);
       })();
 
       (function () {
@@ -1147,6 +1367,28 @@
         function setBankMsg(t, ok) { bankMsg.textContent = t || ""; bankMsg.className = "msg " + (ok ? "ok" : "err"); }
         function secret() { return document.getElementById("admin-secret").value.trim(); }
         function hdr() { return { "Content-Type": "application/json", "X-Admin-Secret": secret() }; }
+        function syncBankSubcategoryOptions() {
+          var selectedMain = document.getElementById("bank-main-category").value || "";
+          var selectedSub = bankState.subcategoryKey || "";
+          var bankSub = document.getElementById("bank-subcategory");
+          bankSub.innerHTML = '<option value="">كل التصنيفات الفرعية</option>';
+          categoriesCache.forEach(function (m) {
+            if (selectedMain && m.mainKey !== selectedMain) return;
+            (m.subcategories || []).forEach(function (s) {
+              var opt = document.createElement("option");
+              opt.value = s.subcategoryKey;
+              opt.dataset.mainKey = m.mainKey;
+              opt.textContent = m.nameAr + " / " + s.nameAr;
+              bankSub.appendChild(opt);
+            });
+          });
+          if (selectedSub && Array.from(bankSub.options).some(function (o) { return o.value === selectedSub; })) {
+            bankSub.value = selectedSub;
+          } else {
+            bankState.subcategoryKey = "";
+            bankSub.value = "";
+          }
+        }
         async function loadStats() {
           var s = secret(); if (!s) return;
           try {
@@ -1161,7 +1403,12 @@
         }
         async function loadList() {
           var s = secret(); if (!s) return setBankMsg("أدخل مفتاح الإدارة.", false);
-          if (!categoriesCache.length) { try { await loadCategoriesForUi(s); } catch (e) {} }
+          if (!categoriesCache.length) {
+            try {
+              await loadCategoriesForUi(s);
+              syncBankSubcategoryOptions();
+            } catch (e) {}
+          }
           var qs =
             "?offset=" + bankState.offset +
             "&limit=" + bankState.limit +
@@ -1186,11 +1433,14 @@
               var td1 = document.createElement("td"); td1.textContent = String(row.id);
               var td2 = document.createElement("td"); td2.textContent = row.promptPreview || "";
               var td3 = document.createElement("td"); td3.textContent = row.hasStudyCards ? "نعم" : "لا";
-              var td4 = document.createElement("td"); td4.className = "bank-actions";
+              var td4 = document.createElement("td"); td4.textContent = row.mainCategoryName || "—";
+              var td5 = document.createElement("td"); td5.textContent = row.subcategoryName || "—";
+              var td6 = document.createElement("td"); td6.textContent = row.subcategoryKey || "—";
+              var td7 = document.createElement("td"); td7.className = "bank-actions";
               var bEdit = document.createElement("button"); bEdit.type = "button"; bEdit.textContent = "تعديل"; bEdit.onclick = function () { openEditModal(row.id); };
               var bDel = document.createElement("button"); bDel.type = "button"; bDel.textContent = "حذف"; bDel.onclick = function () { if (confirm("حذف السؤال #" + row.id + "؟")) deleteOne(row.id); };
-              td4.appendChild(bEdit); td4.appendChild(bDel);
-              tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4);
+              td7.appendChild(bEdit); td7.appendChild(bDel);
+              tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tr.appendChild(td5); tr.appendChild(td6); tr.appendChild(td7);
               tbody.appendChild(tr);
             });
             var from = j.total === 0 ? 0 : bankState.offset + 1;
@@ -1224,6 +1474,26 @@
         document.getElementById("bank-refresh-btn").onclick = function () { loadList(); };
         document.getElementById("bank-mode").addEventListener("change", function (ev) {
           bankState.mode = ev.target.value || "all";
+          bankState.offset = 0;
+          loadList();
+        });
+        document.getElementById("bank-main-category").addEventListener("change", function (ev) {
+          bankState.mainCategoryKey = ev.target.value || "";
+          bankState.subcategoryKey = "";
+          syncBankSubcategoryOptions();
+          bankState.offset = 0;
+          loadList();
+        });
+        document.getElementById("bank-subcategory").addEventListener("change", function (ev) {
+          bankState.subcategoryKey = ev.target.value || "";
+          if (bankState.subcategoryKey && !bankState.mainCategoryKey) {
+            var selected = ev.target.selectedOptions && ev.target.selectedOptions[0];
+            bankState.mainCategoryKey = selected && selected.dataset.mainKey ? selected.dataset.mainKey : "";
+            if (bankState.mainCategoryKey) {
+              document.getElementById("bank-main-category").value = bankState.mainCategoryKey;
+              syncBankSubcategoryOptions();
+            }
+          }
           bankState.offset = 0;
           loadList();
         });

@@ -120,6 +120,23 @@ const subCategorySchema = z.object({
   isActive: z.boolean().optional(),
 });
 
+const categoriesBulkSchema = z.object({
+  target: z.enum(["main", "sub"]),
+  action: z.enum(["activate", "deactivate", "delete"]),
+  ids: z.array(z.number().int().positive()).min(1).max(500),
+  dryRun: z.boolean().optional(),
+});
+
+const categoriesReorderSchema = z.object({
+  target: z.enum(["main", "sub"]),
+  items: z.array(
+    z.object({
+      id: z.number().int().positive(),
+      sortOrder: z.number().int().min(0).max(100000),
+    }),
+  ).min(1).max(1000),
+});
+
 const bulkDeleteSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(500),
 });
@@ -265,6 +282,79 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
       isActive: s.is_active,
     })),
   }));
+}
+
+async function readCategoriesTreeFiltered(
+  pool: ReturnType<typeof getPool>,
+  opts?: { q?: string; isActive?: boolean | null; mainKey?: string },
+): Promise<Awaited<ReturnType<typeof readCategoriesTree>>> {
+  const q = opts?.q?.trim().toLowerCase() ?? "";
+  const mainKey = opts?.mainKey?.trim() ?? "";
+  const activeFilter = opts?.isActive;
+  const tree = await readCategoriesTree(pool);
+  return tree
+    .filter((m) => !mainKey || m.mainKey === mainKey)
+    .map((m) => ({
+      ...m,
+      subcategories: m.subcategories.filter((s) =>
+        q.length === 0
+          ? true
+          : m.nameAr.toLowerCase().includes(q) ||
+            m.mainKey.toLowerCase().includes(q) ||
+            s.nameAr.toLowerCase().includes(q) ||
+            s.subcategoryKey.toLowerCase().includes(q),
+      ),
+    }))
+    .filter((m) => {
+      if (activeFilter === null || activeFilter === undefined) return true;
+      const mainOk = m.isActive === activeFilter;
+      const hasSubMatch = m.subcategories.some((s) => s.isActive === activeFilter);
+      return mainOk || hasSubMatch;
+    })
+    .map((m) => ({
+      ...m,
+      subcategories:
+        activeFilter === null || activeFilter === undefined
+          ? m.subcategories
+          : m.subcategories.filter((s) => s.isActive === activeFilter),
+    }));
+}
+
+async function countAffectedForMainDelete(
+  pool: ReturnType<typeof getPool>,
+  mainId: number,
+): Promise<{ subcategories: number; questions: number }> {
+  const s = await pool.query<{ c: string }>(
+    `SELECT COUNT(*)::text AS c FROM question_subcategories WHERE main_category_id = $1`,
+    [mainId],
+  );
+  const q = await pool.query<{ c: string }>(
+    `SELECT COUNT(*)::text AS c
+     FROM questions
+     WHERE subcategory_key IN (
+       SELECT subcategory_key FROM question_subcategories WHERE main_category_id = $1
+     )`,
+    [mainId],
+  );
+  return {
+    subcategories: Number(s.rows[0]?.c ?? 0),
+    questions: Number(q.rows[0]?.c ?? 0),
+  };
+}
+
+async function countAffectedForSubDelete(
+  pool: ReturnType<typeof getPool>,
+  subId: number,
+): Promise<{ questions: number }> {
+  const q = await pool.query<{ c: string }>(
+    `SELECT COUNT(*)::text AS c
+     FROM questions
+     WHERE subcategory_key = (
+       SELECT subcategory_key FROM question_subcategories WHERE id = $1
+     )`,
+    [subId],
+  );
+  return { questions: Number(q.rows[0]?.c ?? 0) };
 }
 
 export function registerAdminRoutes(app: Express): void {
@@ -659,7 +749,17 @@ export function registerAdminRoutes(app: Express): void {
     if (!verifyAdmin(req, res)) return;
     try {
       const pool = getPool();
-      res.json({ ok: true, categories: await readCategoriesTree(pool) });
+      const q = typeof req.query.q === "string" ? req.query.q : "";
+      const mainKey = typeof req.query.mainKey === "string" ? req.query.mainKey : "";
+      const isActiveRaw = typeof req.query.isActive === "string" ? req.query.isActive : "";
+      const isActive =
+        isActiveRaw === "true" ? true : isActiveRaw === "false" ? false : null;
+      const categories = await readCategoriesTreeFiltered(pool, {
+        q,
+        mainKey,
+        isActive,
+      });
+      res.json({ ok: true, categories });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
     }
@@ -713,6 +813,224 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  app.patch("/api/admin/categories/main/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const parsed = mainCategorySchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const d = parsed.data;
+    try {
+      const pool = getPool();
+      const cur = await pool.query<{
+        main_key: string; name_ar: string; icon: string; sort_order: number; is_active: boolean;
+      }>(`SELECT main_key, name_ar, icon, sort_order, is_active FROM question_main_categories WHERE id = $1`, [id]);
+      const row = cur.rows[0];
+      if (!row) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      await pool.query(
+        `UPDATE question_main_categories
+         SET main_key = $1, name_ar = $2, icon = $3, sort_order = $4, is_active = $5
+         WHERE id = $6`,
+        [
+          d.mainKey ?? row.main_key,
+          d.nameAr ?? row.name_ar,
+          d.icon ?? row.icon,
+          d.sortOrder ?? row.sort_order,
+          d.isActive ?? row.is_active,
+          id,
+        ],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.patch("/api/admin/categories/sub/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const parsed = subCategorySchema.partial().safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const d = parsed.data;
+    try {
+      const pool = getPool();
+      const cur = await pool.query<{
+        main_category_id: number; subcategory_key: string; name_ar: string; icon: string; sort_order: number; is_active: boolean;
+      }>(`SELECT main_category_id, subcategory_key, name_ar, icon, sort_order, is_active FROM question_subcategories WHERE id = $1`, [id]);
+      const row = cur.rows[0];
+      if (!row) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      await pool.query(
+        `UPDATE question_subcategories
+         SET main_category_id = $1, subcategory_key = $2, name_ar = $3, icon = $4, sort_order = $5, is_active = $6
+         WHERE id = $7`,
+        [
+          d.mainCategoryId ?? row.main_category_id,
+          d.subcategoryKey ?? row.subcategory_key,
+          d.nameAr ?? row.name_ar,
+          d.icon ?? row.icon,
+          d.sortOrder ?? row.sort_order,
+          d.isActive ?? row.is_active,
+          id,
+        ],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.delete("/api/admin/categories/main/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const dryRun = String(req.query.dryRun ?? "").trim() === "true";
+    try {
+      const pool = getPool();
+      const affected = await countAffectedForMainDelete(pool, id);
+      if (dryRun) {
+        res.json({ ok: true, dryRun: true, affectedCounts: affected });
+        return;
+      }
+      const del = await pool.query(`DELETE FROM question_main_categories WHERE id = $1`, [id]);
+      if ((del.rowCount ?? 0) === 0) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true, affectedCounts: affected });
+    } catch {
+      res.status(500).json({ ok: false, error: "delete_failed" });
+    }
+  });
+
+  app.delete("/api/admin/categories/sub/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const dryRun = String(req.query.dryRun ?? "").trim() === "true";
+    try {
+      const pool = getPool();
+      const affected = await countAffectedForSubDelete(pool, id);
+      if (dryRun) {
+        res.json({ ok: true, dryRun: true, affectedCounts: affected });
+        return;
+      }
+      const del = await pool.query(`DELETE FROM question_subcategories WHERE id = $1`, [id]);
+      if ((del.rowCount ?? 0) === 0) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true, affectedCounts: affected });
+    } catch {
+      res.status(500).json({ ok: false, error: "delete_failed" });
+    }
+  });
+
+  app.post("/api/admin/categories/bulk", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = categoriesBulkSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const { target, action, ids, dryRun } = parsed.data;
+    try {
+      const pool = getPool();
+      if (action === "delete") {
+        if (dryRun) {
+          if (target === "main") {
+            let subcategories = 0;
+            let questions = 0;
+            for (const id of ids) {
+              const c = await countAffectedForMainDelete(pool, id);
+              subcategories += c.subcategories;
+              questions += c.questions;
+            }
+            res.json({ ok: true, dryRun: true, affectedCounts: { categories: ids.length, subcategories, questions } });
+            return;
+          }
+          let questions = 0;
+          for (const id of ids) {
+            const c = await countAffectedForSubDelete(pool, id);
+            questions += c.questions;
+          }
+          res.json({ ok: true, dryRun: true, affectedCounts: { categories: ids.length, questions } });
+          return;
+        }
+        if (target === "main") {
+          await pool.query(`DELETE FROM question_main_categories WHERE id = ANY($1::int[])`, [ids]);
+          res.json({ ok: true, affectedCounts: { categories: ids.length } });
+          return;
+        }
+        await pool.query(`DELETE FROM question_subcategories WHERE id = ANY($1::int[])`, [ids]);
+        res.json({ ok: true, affectedCounts: { categories: ids.length } });
+        return;
+      }
+      const next = action === "activate";
+      if (target === "main") {
+        await pool.query(`UPDATE question_main_categories SET is_active = $1 WHERE id = ANY($2::int[])`, [next, ids]);
+      } else {
+        await pool.query(`UPDATE question_subcategories SET is_active = $1 WHERE id = ANY($2::int[])`, [next, ids]);
+      }
+      res.json({ ok: true, affectedCounts: { categories: ids.length } });
+    } catch {
+      res.status(500).json({ ok: false, error: "bulk_failed" });
+    }
+  });
+
+  app.patch("/api/admin/categories/reorder", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = categoriesReorderSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const { target, items } = parsed.data;
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const item of items) {
+        if (target === "main") {
+          await client.query(`UPDATE question_main_categories SET sort_order = $1 WHERE id = $2`, [item.sortOrder, item.id]);
+        } else {
+          await client.query(`UPDATE question_subcategories SET sort_order = $1 WHERE id = $2`, [item.sortOrder, item.id]);
+        }
+      }
+      await client.query("COMMIT");
+      res.json({ ok: true, affectedCounts: { categories: items.length } });
+    } catch {
+      try { await client.query("ROLLBACK"); } catch {}
+      res.status(500).json({ ok: false, error: "reorder_failed" });
+    } finally {
+      client.release();
+    }
+  });
+
   app.get("/api/admin/questions", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
     const offset = Math.max(0, Number(req.query.offset) || 0);
@@ -751,7 +1069,10 @@ export function registerAdminRoutes(app: Express): void {
       const listSql = `
         SELECT q.id,
                LEFT(q.prompt, 160) AS prompt_preview,
-               (q.study_body IS NOT NULL AND btrim(q.study_body) <> '') AS has_study
+               (q.study_body IS NOT NULL AND btrim(q.study_body) <> '') AS has_study,
+               COALESCE(mc.name_ar, '') AS main_name_ar,
+               COALESCE(sc.name_ar, '') AS sub_name_ar,
+               COALESCE(q.subcategory_key, '') AS subcategory_key
         FROM questions q
         LEFT JOIN question_subcategories sc ON sc.subcategory_key = q.subcategory_key
         LEFT JOIN question_main_categories mc ON mc.id = sc.main_category_id
@@ -763,6 +1084,9 @@ export function registerAdminRoutes(app: Express): void {
         id: number;
         prompt_preview: string;
         has_study: boolean;
+        main_name_ar: string;
+        sub_name_ar: string;
+        subcategory_key: string;
       }>(listSql, params);
 
       const countSql = `SELECT COUNT(*)::text AS c
@@ -780,6 +1104,9 @@ export function registerAdminRoutes(app: Express): void {
           id: row.id,
           promptPreview: row.prompt_preview,
           hasStudyCards: row.has_study,
+          mainCategoryName: row.main_name_ar,
+          subcategoryName: row.sub_name_ar,
+          subcategoryKey: row.subcategory_key,
         })),
         total,
         offset,
