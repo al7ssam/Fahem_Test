@@ -513,8 +513,10 @@
         </button>
         <div class="accordion-content">
           <div class="card">
-            <label for="ks-streak">صحيحة متتالية لكل مفتاح (+1)</label>
+            <label for="ks-streak">صحيحة متتالية لمنح مكافأة المفاتيح الصغرى (كل N إجابة صحيحة متتالية)</label>
             <input id="ks-streak" type="text" inputmode="numeric" value="5" />
+            <label for="ks-small-reward">عدد مفاتيح المكافأة الصغرى (عند الوصول لـ N أعلاه)</label>
+            <input id="ks-small-reward" type="text" inputmode="numeric" value="1" />
             <label for="ks-mega-streak">صحيحة متتالية للمكافأة الكبرى</label>
             <input id="ks-mega-streak" type="text" inputmode="numeric" value="8" />
             <label for="ks-mega-reward">عدد مفاتيح المكافأة الكبرى</label>
@@ -870,6 +872,7 @@
             var j = await r.json();
             if (r.ok && j.ok) {
               document.getElementById("ks-streak").value = String(j.keysStreakPerKey ?? 5);
+              document.getElementById("ks-small-reward").value = String(j.keysSmallStreakReward ?? 1);
               document.getElementById("ks-mega-streak").value = String(j.keysMegaStreak ?? 8);
               document.getElementById("ks-mega-reward").value = String(j.keysMegaReward ?? 5);
               document.getElementById("ks-max").value = String(j.keysMaxPerPlayer ?? 20);
@@ -890,6 +893,7 @@
           var s = secret(); if (!s) return setKsMsg("أدخل مفتاح الإدارة.", false);
           var body = {
             keysStreakPerKey: parseInt(document.getElementById("ks-streak").value, 10),
+            keysSmallStreakReward: parseInt(document.getElementById("ks-small-reward").value, 10),
             keysMegaStreak: parseInt(document.getElementById("ks-mega-streak").value, 10),
             keysMegaReward: parseInt(document.getElementById("ks-mega-reward").value, 10),
             keysMaxPerPlayer: parseInt(document.getElementById("ks-max").value, 10),
@@ -902,7 +906,7 @@
             keysDropRate: parseFloat(document.getElementById("ks-drop").value),
             keysRevealDirectQuestionSpan: parseInt(document.getElementById("ks-direct-reveal").value, 10)
           };
-          var nums = [body.keysStreakPerKey, body.keysMegaStreak, body.keysMegaReward, body.keysMaxPerPlayer, body.keysSkillBoostPercent, body.keysHeartAttackCost, body.keysShieldCost, body.keysRevealCost, body.keysDropRate, body.keysRevealDirectQuestionSpan, body.keysSkillBoostMaxMultiplier];
+          var nums = [body.keysStreakPerKey, body.keysSmallStreakReward, body.keysMegaStreak, body.keysMegaReward, body.keysMaxPerPlayer, body.keysSkillBoostPercent, body.keysHeartAttackCost, body.keysShieldCost, body.keysRevealCost, body.keysDropRate, body.keysRevealDirectQuestionSpan, body.keysSkillBoostMaxMultiplier];
           if (nums.some(function (v) { return typeof v !== "number" || !isFinite(v); })) {
             return setKsMsg("تحقق من القيم الرقمية.", false);
           }

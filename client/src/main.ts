@@ -34,6 +34,26 @@ let currentMatchPlayers: Array<{
 }> = [];
 let revealKeysActiveState = false;
 let keysAttacksEnabledState = true;
+
+type AbilityCostsPayload = {
+  skillBoost: number;
+  skipQuestion: number;
+  heartAttack: number;
+  reveal: number;
+};
+let abilityCostsState: AbilityCostsPayload = {
+  skillBoost: 1,
+  skipQuestion: 1,
+  heartAttack: 2,
+  reveal: 2,
+};
+
+const ABILITY_FULL_NAMES = {
+  boost: "تعزيز نقاط المهارة",
+  skip: "تجاوز السؤال دون قلب أو نقاط",
+  attack: "هجوم على قلب",
+  reveal: "كشف مفاتيح الجميع",
+} as const;
 let studyCards: Array<{
   id: number;
   questionId?: number;
@@ -437,7 +457,7 @@ function render(): void {
               <button type="button" id="ab-boost" class="ability-btn ability-btn--boost" title="تعزيز نقاط المهارة" aria-label="تعزيز">⚡</button>
               <button type="button" id="ab-skip" class="ability-btn ability-btn--skip" title="تجاوز السؤال دون قلب أو نقاط" aria-label="تجاوز">🛡️</button>
               <button type="button" id="ab-attack" class="ability-btn ability-btn--attack" title="هجوم على قلب" aria-label="هجوم">⚔️</button>
-              <button type="button" id="ab-reveal" class="ability-btn ability-btn--reveal" title="كشف مفاتيح الجميع" aria-label="كشف">🔮</button>
+              <button type="button" id="ab-reveal" class="ability-btn ability-btn--reveal" title="كشف مفاتيح الجميع" aria-label="كشف">🔍</button>
             </div>
           </div>
         </div>
@@ -628,6 +648,62 @@ function patchMyKeysCount(next: number): void {
     p.socketId === mySocketId ? { ...p, keys: Math.max(0, next) } : p,
   );
   refreshKeysBadge();
+  refreshAbilityAffordability();
+}
+
+function applyAbilityCostsPayload(c?: Partial<AbilityCostsPayload> | null): void {
+  if (!c) return;
+  if (typeof c.skillBoost === "number") abilityCostsState.skillBoost = c.skillBoost;
+  if (typeof c.skipQuestion === "number") abilityCostsState.skipQuestion = c.skipQuestion;
+  if (typeof c.heartAttack === "number") abilityCostsState.heartAttack = c.heartAttack;
+  if (typeof c.reveal === "number") abilityCostsState.reveal = c.reveal;
+  refreshAbilityAffordability();
+}
+
+function refreshAbilityAffordability(): void {
+  const k = myKeysCount();
+  const c = abilityCostsState;
+  const boost = document.querySelector<HTMLButtonElement>("#ab-boost");
+  const skip = document.querySelector<HTMLButtonElement>("#ab-skip");
+  const attack = document.querySelector<HTMLButtonElement>("#ab-attack");
+  const reveal = document.querySelector<HTMLButtonElement>("#ab-reveal");
+  boost?.classList.toggle("ability-btn--insufficient", k < c.skillBoost);
+  skip?.classList.toggle("ability-btn--insufficient", k < c.skipQuestion);
+  const atkVisible = keysAttacksEnabledState && attack && !attack.classList.contains("hidden");
+  attack?.classList.toggle("ability-btn--insufficient", Boolean(atkVisible && k < c.heartAttack));
+  reveal?.classList.toggle("ability-btn--insufficient", k < c.reveal);
+}
+
+function flashKeysBadgeReward(): void {
+  const run = (el: Element | null): void => {
+    if (!el) return;
+    el.classList.remove("keys-badge--reward-glow");
+    void (el as HTMLElement).offsetWidth;
+    el.classList.add("keys-badge--reward-glow");
+    const done = (): void => {
+      el.classList.remove("keys-badge--reward-glow");
+    };
+    el.addEventListener("animationend", done, { once: true });
+    window.setTimeout(done, 1100);
+  };
+  run(document.querySelector("#keys-badge"));
+  run(document.querySelector("#study-keys-line"));
+}
+
+function showInsufficientAbilityTip(anchor: HTMLElement, fullAbilityName: string): void {
+  document.querySelectorAll(".ability-insufficient-tip").forEach((el) => el.remove());
+  const tip = document.createElement("div");
+  tip.className = "ability-insufficient-tip";
+  tip.setAttribute("role", "status");
+  tip.textContent = `لا يمكن استخدام القدرة — ${fullAbilityName}`;
+  document.body.appendChild(tip);
+  const r = anchor.getBoundingClientRect();
+  tip.style.position = "fixed";
+  tip.style.left = `${r.left + r.width / 2}px`;
+  tip.style.top = `${r.top}px`;
+  tip.style.transform = "translate(-50%, calc(-100% - 6px))";
+  tip.style.zIndex = "80";
+  window.setTimeout(() => tip.remove(), 2200);
 }
 
 function refreshKeysBadge(): void {
@@ -683,7 +759,12 @@ function mergeKeysFromServerList(
     keys?: number;
     skillBoostStacks?: number;
   }>,
+  opts?: { keyRewardGlow?: boolean },
 ): void {
+  const prevMe =
+    mySocketId && opts?.keyRewardGlow
+      ? (currentMatchPlayers.find((p) => p.socketId === mySocketId)?.keys ?? 0)
+      : 0;
   currentMatchPlayers = currentMatchPlayers.map((old) => {
     const n = list.find((x) => x.socketId === old.socketId);
     if (!n) return old;
@@ -700,34 +781,44 @@ function mergeKeysFromServerList(
     };
   });
   refreshKeysBadge();
+  refreshAbilityAffordability();
+  if (opts?.keyRewardGlow && mySocketId) {
+    const nextMe = currentMatchPlayers.find((p) => p.socketId === mySocketId)?.keys ?? prevMe;
+    if (nextMe > prevMe) flashKeysBadgeReward();
+  }
 }
 
 /**
  * دمج حالة المفاتيح/الكشف من `keys_room_state` أو من `question_result`.
  * `skipPanelRender`: عند دمج `question_result` مع `lastRoundResult` يُؤجَّل الرسم لإطار واحد.
  */
-function applyKeysRoomSlice(payload: {
-  revealKeysActive?: boolean;
-  keysAttacksEnabled?: boolean;
-  players?: Array<{
-    socketId: string;
-    name?: string;
-    hearts?: number;
-    eliminated?: boolean;
-    isSpectator?: boolean;
-    skillPoints?: number;
-    lastAward?: number;
-    keys?: number;
-    skillBoostStacks?: number;
-  }>;
-}, options?: { skipPanelRender?: boolean }): void {
+function applyKeysRoomSlice(
+  payload: {
+    revealKeysActive?: boolean;
+    keysAttacksEnabled?: boolean;
+    abilityCosts?: Partial<AbilityCostsPayload> | null;
+    players?: Array<{
+      socketId: string;
+      name?: string;
+      hearts?: number;
+      eliminated?: boolean;
+      isSpectator?: boolean;
+      skillPoints?: number;
+      lastAward?: number;
+      keys?: number;
+      skillBoostStacks?: number;
+    }>;
+  },
+  options?: { skipPanelRender?: boolean; keyRewardGlow?: boolean },
+): void {
   if (typeof payload.revealKeysActive === "boolean") {
     revealKeysActiveState = payload.revealKeysActive;
   }
   if (typeof payload.keysAttacksEnabled === "boolean") {
     keysAttacksEnabledState = payload.keysAttacksEnabled;
   }
-  if (payload.players) mergeKeysFromServerList(payload.players);
+  if (payload.abilityCosts) applyAbilityCostsPayload(payload.abilityCosts);
+  if (payload.players) mergeKeysFromServerList(payload.players, { keyRewardGlow: options?.keyRewardGlow });
   if (!options?.skipPanelRender && phase === "playing") renderPlayingPlayersPanel();
 }
 
@@ -751,6 +842,7 @@ function bindPlayingAbilityUi(sk: Socket): void {
     optimisticDelta: number | null,
   ): void => {
     if (!btn || btn.disabled) return;
+    if (optimisticDelta !== null && myKeysCount() + optimisticDelta < 0) return;
     btn.disabled = true;
     btn.setAttribute("aria-busy", "true");
     btn.classList.add("ability-btn--busy");
@@ -800,19 +892,36 @@ function bindPlayingAbilityUi(sk: Socket): void {
 
   b1?.addEventListener("pointerdown", (e) => {
     e.preventDefault();
-    runAbility(b1, "ability_skill_boost", {}, -1);
+    if (myKeysCount() < abilityCostsState.skillBoost) {
+      showInsufficientAbilityTip(b1, ABILITY_FULL_NAMES.boost);
+      return;
+    }
+    runAbility(b1, "ability_skill_boost", {}, -abilityCostsState.skillBoost);
   });
   s1?.addEventListener("pointerdown", (e) => {
     e.preventDefault();
-    runAbility(s1, "ability_skip_question", {}, -1);
+    if (myKeysCount() < abilityCostsState.skipQuestion) {
+      showInsufficientAbilityTip(s1, ABILITY_FULL_NAMES.skip);
+      return;
+    }
+    runAbility(s1, "ability_skip_question", {}, -abilityCostsState.skipQuestion);
   });
   r1?.addEventListener("pointerdown", (e) => {
     e.preventDefault();
-    runAbility(r1, "ability_reveal_keys", {}, -2);
+    if (myKeysCount() < abilityCostsState.reveal) {
+      showInsufficientAbilityTip(r1, ABILITY_FULL_NAMES.reveal);
+      return;
+    }
+    runAbility(r1, "ability_reveal_keys", {}, -abilityCostsState.reveal);
   });
 
   a1?.addEventListener("pointerdown", (e) => {
     e.preventDefault();
+    if (!keysAttacksEnabledState) return;
+    if (myKeysCount() < abilityCostsState.heartAttack) {
+      showInsufficientAbilityTip(a1, ABILITY_FULL_NAMES.attack);
+      return;
+    }
     if (!overlay || !bubbles) return;
     bubbles.innerHTML = "";
     for (const p of currentMatchPlayers) {
@@ -829,10 +938,14 @@ function bindPlayingAbilityUi(sk: Socket): void {
       wrap.appendChild(circle);
       wrap.appendChild(hearts);
       wrap.addEventListener("click", () => {
+        if (myKeysCount() < abilityCostsState.heartAttack) {
+          showInsufficientAbilityTip(a1, ABILITY_FULL_NAMES.attack);
+          return;
+        }
         wrap.classList.add("attack-bubble--pop");
         window.setTimeout(() => {
           overlay.hidden = true;
-          runAbility(a1, "ability_heart_attack", { targetSocketId: p.socketId }, -2);
+          runAbility(a1, "ability_heart_attack", { targetSocketId: p.socketId }, -abilityCostsState.heartAttack);
         }, 380);
       });
       bubbles.appendChild(wrap);
@@ -843,6 +956,8 @@ function bindPlayingAbilityUi(sk: Socket): void {
   c1?.addEventListener("click", () => {
     if (overlay) overlay.hidden = true;
   });
+
+  refreshAbilityAffordability();
 }
 
 function bindStudyRevealUi(sk: Socket): void {
@@ -853,9 +968,14 @@ function bindStudyRevealUi(sk: Socket): void {
   b?.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     if (b.disabled) return;
+    const cost = abilityCostsState.reveal;
+    if (myKeysCount() < cost) {
+      showInsufficientAbilityTip(b, ABILITY_FULL_NAMES.reveal);
+      return;
+    }
     b.disabled = true;
     const prev = myKeysCount();
-    patchMyKeysCount(prev - 2);
+    patchMyKeysCount(prev - cost);
     flashKeysBadge();
     const tmr = window.setTimeout(() => {
       b.disabled = false;
@@ -1054,6 +1174,7 @@ function connectSocket(name: string, mode: GameMode): void {
       gameMode?: GameMode;
       revealKeysActive?: boolean;
       keysAttacksEnabled?: boolean;
+      abilityCosts?: Partial<AbilityCostsPayload> | null;
       players?: Array<{
         socketId: string;
         name: string;
@@ -1083,6 +1204,9 @@ function connectSocket(name: string, mode: GameMode): void {
           lastAward: p.lastAward ?? 0,
         }));
       }
+      applyAbilityCostsPayload(payload.abilityCosts ?? null);
+      refreshKeysBadge();
+      refreshAbilityAffordability();
       spectatorEligible = false;
       spectatorFollowing = false;
       if (payload.gameMode === "study_then_quiz") {
@@ -1268,6 +1392,7 @@ function connectSocket(name: string, mode: GameMode): void {
       serverNow?: number;
       revealKeysActive?: boolean;
       keysAttacksEnabled?: boolean;
+      abilityCosts?: Partial<AbilityCostsPayload> | null;
     }) => {
       syncClock(q.serverNow);
       if (spectatorEligible && !spectatorFollowing) return;
@@ -1283,6 +1408,7 @@ function connectSocket(name: string, mode: GameMode): void {
       if (typeof q.keysAttacksEnabled === "boolean") {
         keysAttacksEnabledState = q.keysAttacksEnabled;
       }
+      applyAbilityCostsPayload(q.abilityCosts ?? null);
       phase = "playing";
       if (!app.querySelector("#q-text")) render();
       const text = app.querySelector<HTMLParagraphElement>("#q-text");
@@ -1329,6 +1455,7 @@ function connectSocket(name: string, mode: GameMode): void {
     (payload: {
       revealKeysActive?: boolean;
       keysAttacksEnabled?: boolean;
+      abilityCosts?: Partial<AbilityCostsPayload> | null;
       results?: Array<{
         socketId: string;
         correct: boolean;
@@ -1352,9 +1479,10 @@ function connectSocket(name: string, mode: GameMode): void {
         {
           revealKeysActive: payload.revealKeysActive,
           keysAttacksEnabled: payload.keysAttacksEnabled,
+          abilityCosts: payload.abilityCosts,
           players: payload.players,
         },
-        { skipPanelRender: true },
+        { skipPanelRender: true, keyRewardGlow: true },
       );
       const me = payload.players.find((p) => p.socketId === mySocketId);
       if (me && phase === "playing") renderHearts(me.hearts);
@@ -1485,6 +1613,7 @@ function connectSocket(name: string, mode: GameMode): void {
     "keys_room_state",
     (payload: {
       revealKeysActive?: boolean;
+      abilityCosts?: Partial<AbilityCostsPayload> | null;
       players?: Array<{
         socketId: string;
         name: string;
@@ -1499,6 +1628,7 @@ function connectSocket(name: string, mode: GameMode): void {
     }) => {
       applyKeysRoomSlice({
         revealKeysActive: payload.revealKeysActive,
+        abilityCosts: payload.abilityCosts,
         players: payload.players,
       });
     },

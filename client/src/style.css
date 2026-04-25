@@ -629,6 +629,26 @@ body {
   animation: keys-badge-flash 0.55s ease-out;
 }
 
+.keys-badge--reward-glow,
+#study-keys-line.keys-badge--reward-glow {
+  animation: keys-badge-reward-glow 0.95s ease-out;
+}
+
+@keyframes keys-badge-reward-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    filter: brightness(1);
+  }
+  35% {
+    box-shadow: 0 0 22px 6px rgba(250, 204, 21, 0.65);
+    filter: brightness(1.15);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    filter: brightness(1);
+  }
+}
+
 @keyframes keys-badge-flash {
   0% {
     box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.65);
@@ -758,20 +778,42 @@ body {
   transform: scale(0.94);
 }
 
-.ability-btn--boost:not(:disabled) {
+.ability-btn--boost:not(:disabled):not(.ability-btn--insufficient) {
   box-shadow: 0 0 16px rgba(250, 204, 21, 0.45);
 }
 
-.ability-btn--skip:not(:disabled) {
+.ability-btn--skip:not(:disabled):not(.ability-btn--insufficient) {
   box-shadow: 0 0 16px rgba(56, 189, 248, 0.45);
 }
 
-.ability-btn--attack:not(:disabled) {
+.ability-btn--attack:not(:disabled):not(.ability-btn--insufficient) {
   box-shadow: 0 0 16px rgba(248, 113, 113, 0.5);
 }
 
-.ability-btn--reveal:not(:disabled) {
+.ability-btn--reveal:not(:disabled):not(.ability-btn--insufficient) {
   box-shadow: 0 0 16px rgba(167, 139, 250, 0.45);
+}
+
+.ability-btn--insufficient {
+  opacity: 0.42;
+  filter: grayscale(0.92);
+  box-shadow: none !important;
+  cursor: not-allowed;
+}
+
+.ability-insufficient-tip {
+  max-width: min(16rem, calc(100vw - 1.5rem));
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  color: #fef3c7;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
 }
 
 .ability-btn--busy {

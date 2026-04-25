@@ -78,6 +78,7 @@ export class Match {
   private revealKeysForMacroRound: number | null = null;
   private directRevealRemaining = 0;
   private keysStreakPerKey = 5;
+  private keysSmallStreakReward = 1;
   private keysMegaStreak = 8;
   private keysMegaReward = 5;
   private keysMaxPerPlayer = 20;
@@ -126,11 +127,27 @@ export class Match {
     }));
   }
 
+  /** تكاليف القدرات للعميل (مزامنة مع الإدارة). */
+  private snapshotAbilityCosts(): {
+    skillBoost: number;
+    skipQuestion: number;
+    heartAttack: number;
+    reveal: number;
+  } {
+    return {
+      skillBoost: 1,
+      skipQuestion: 1,
+      heartAttack: this.keysHeartAttackCost,
+      reveal: this.keysRevealCost,
+    };
+  }
+
   private emitKeysRoomState(): void {
     this.io.to(this.room).emit("keys_room_state", {
       revealKeysActive: this.revealKeysActive,
       macroRound: this.macroRound,
       players: this.snapshotPlayers(),
+      abilityCosts: this.snapshotAbilityCosts(),
     });
   }
 
@@ -186,7 +203,7 @@ export class Match {
     const streak = p.correctStreak;
     if (streak <= 0) return;
     let add = 0;
-    if (streak % this.keysStreakPerKey === 0) add += 1;
+    if (streak % this.keysStreakPerKey === 0) add += this.keysSmallStreakReward;
     if (streak % this.keysMegaStreak === 0) add += this.keysMegaReward;
     if (add <= 0) return;
     const scaled = Math.floor(add * this.keysDropRate);
@@ -383,7 +400,7 @@ export class Match {
          FROM app_settings
          WHERE key IN (
            'game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms',
-           'keys_streak_per_key', 'keys_mega_streak', 'keys_mega_reward', 'keys_max_per_player',
+           'keys_streak_per_key', 'keys_small_streak_reward', 'keys_mega_streak', 'keys_mega_reward', 'keys_max_per_player',
            'keys_skill_boost_percent', 'keys_skill_boost_max_multiplier',
            'keys_heart_attack_cost', 'keys_shield_cost', 'keys_reveal_cost',
            'keys_attacks_enabled', 'keys_drop_rate', 'keys_reveal_direct_question_span'
@@ -398,6 +415,7 @@ export class Match {
       this.studyPhaseMs = Math.min(300_000, Math.max(5_000, Number.isFinite(phaseMs) ? phaseMs : DEFAULT_STUDY_PHASE_MS));
 
       this.keysStreakPerKey = Math.min(50, Math.max(1, Number(map.get("keys_streak_per_key") ?? 5)));
+      this.keysSmallStreakReward = Math.min(50, Math.max(0, Number(map.get("keys_small_streak_reward") ?? 1)));
       this.keysMegaStreak = Math.min(50, Math.max(1, Number(map.get("keys_mega_streak") ?? 8)));
       this.keysMegaReward = Math.min(50, Math.max(0, Number(map.get("keys_mega_reward") ?? 5)));
       this.keysMaxPerPlayer = Math.min(100, Math.max(1, Number(map.get("keys_max_per_player") ?? 20)));
@@ -414,6 +432,7 @@ export class Match {
       this.maxStudyRounds = DEFAULT_MAX_STUDY_ROUNDS;
       this.studyRoundSize = DEFAULT_STUDY_ROUND_SIZE;
       this.studyPhaseMs = DEFAULT_STUDY_PHASE_MS;
+      this.keysSmallStreakReward = 1;
     }
   }
 
@@ -425,6 +444,7 @@ export class Match {
       players: this.snapshotPlayers(),
       revealKeysActive: this.revealKeysActive,
       keysAttacksEnabled: this.keysAttacksEnabled,
+      abilityCosts: this.snapshotAbilityCosts(),
     });
     this.emitKeysRoomState();
 
@@ -549,6 +569,7 @@ export class Match {
       macroRound: this.macroRound,
       revealKeysActive: this.revealKeysActive,
       keysAttacksEnabled: this.keysAttacksEnabled,
+      abilityCosts: this.snapshotAbilityCosts(),
     });
 
     this.questionTimer = setTimeout(() => {
@@ -670,6 +691,7 @@ export class Match {
       revealKeysActive: this.revealKeysActive,
       macroRound: this.macroRound,
       keysAttacksEnabled: this.keysAttacksEnabled,
+      abilityCosts: this.snapshotAbilityCosts(),
     });
 
     this.resolveRound?.();

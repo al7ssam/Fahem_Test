@@ -60,6 +60,7 @@ const gameSettingsPatchSchema = z.object({
 
 const keysSettingsPatchSchema = z.object({
   keysStreakPerKey: z.number().int().min(1).max(50),
+  keysSmallStreakReward: z.number().int().min(0).max(50),
   keysMegaStreak: z.number().int().min(1).max(50),
   keysMegaReward: z.number().int().min(0).max(50),
   keysMaxPerPlayer: z.number().int().min(1).max(100),
@@ -374,6 +375,7 @@ export function registerAdminRoutes(app: Express): void {
     if (!verifyAdmin(req, res)) return;
     const keys = [
       "keys_streak_per_key",
+      "keys_small_streak_reward",
       "keys_mega_streak",
       "keys_mega_reward",
       "keys_max_per_player",
@@ -399,6 +401,7 @@ export function registerAdminRoutes(app: Express): void {
       res.json({
         ok: true,
         keysStreakPerKey: Math.min(50, Math.max(1, num("keys_streak_per_key", "5"))),
+        keysSmallStreakReward: Math.min(50, Math.max(0, num("keys_small_streak_reward", "1"))),
         keysMegaStreak: Math.min(50, Math.max(1, num("keys_mega_streak", "8"))),
         keysMegaReward: Math.min(50, Math.max(0, num("keys_mega_reward", "5"))),
         keysMaxPerPlayer: Math.min(100, Math.max(1, num("keys_max_per_player", "20"))),
@@ -433,20 +436,22 @@ export function registerAdminRoutes(app: Express): void {
       await pool.query(
         `INSERT INTO app_settings (key, value) VALUES
            ('keys_streak_per_key', $1),
-           ('keys_mega_streak', $2),
-           ('keys_mega_reward', $3),
-           ('keys_max_per_player', $4),
-           ('keys_skill_boost_percent', $5),
-           ('keys_skill_boost_max_multiplier', $6),
-           ('keys_heart_attack_cost', $7),
-           ('keys_shield_cost', $8),
-           ('keys_reveal_cost', $9),
-           ('keys_attacks_enabled', $10),
-           ('keys_drop_rate', $11),
-           ('keys_reveal_direct_question_span', $12)
+           ('keys_small_streak_reward', $2),
+           ('keys_mega_streak', $3),
+           ('keys_mega_reward', $4),
+           ('keys_max_per_player', $5),
+           ('keys_skill_boost_percent', $6),
+           ('keys_skill_boost_max_multiplier', $7),
+           ('keys_heart_attack_cost', $8),
+           ('keys_shield_cost', $9),
+           ('keys_reveal_cost', $10),
+           ('keys_attacks_enabled', $11),
+           ('keys_drop_rate', $12),
+           ('keys_reveal_direct_question_span', $13)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [
           String(d.keysStreakPerKey),
+          String(d.keysSmallStreakReward),
           String(d.keysMegaStreak),
           String(d.keysMegaReward),
           String(d.keysMaxPerPlayer),
