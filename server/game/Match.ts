@@ -15,6 +15,7 @@ const DEFAULT_MAX_STUDY_ROUNDS = 3;
 const DEFAULT_STUDY_ROUND_SIZE = 8;
 const DEFAULT_STUDY_PHASE_MS = 60_000;
 const DEFAULT_ROUND_READY_MS = 12_000;
+const RUNTIME_SETTINGS_CACHE_MS = 15_000;
 
 export type GameMode = "direct" | "study_then_quiz";
 
@@ -47,6 +48,10 @@ export type AbilityAck =
   | { ok: false; error: string };
 
 export class Match {
+  private static runtimeSettingsCache: {
+    loadedAtMs: number;
+    map: Map<string, string>;
+  } | null = null;
   readonly room: string;
   private readonly players = new Map<string, MatchPlayerState>();
   private usedQuestionIds: number[] = [];
@@ -448,24 +453,35 @@ export class Match {
 
   private async loadRuntimeSettings(): Promise<void> {
     try {
-      const pool = getPool();
-      const rows = await pool.query<{ key: string; value: string }>(
-        `SELECT key, value
-         FROM app_settings
-         WHERE key IN (
-           'game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms',
-           'keys_streak_per_key', 'keys_small_streak_reward', 'keys_mega_streak', 'keys_mega_reward', 'keys_max_per_player',
-           'keys_skill_boost_percent', 'keys_skill_boost_max_multiplier',
-           'keys_heart_attack_cost', 'keys_shield_cost', 'keys_reveal_cost',
-           'keys_reveal_questions_direct', 'keys_reveal_questions_study',
-           'keys_drop_rate',
-           'ability_skill_boost_direct_enabled', 'ability_skill_boost_study_enabled',
-           'ability_skip_direct_enabled', 'ability_skip_study_enabled',
-           'ability_attack_direct_enabled', 'ability_attack_study_enabled',
-           'ability_reveal_direct_enabled', 'ability_reveal_study_enabled'
-         )`,
-      );
-      const map = new Map(rows.rows.map((r) => [r.key, r.value]));
+      const now = Date.now();
+      let map: Map<string, string>;
+      const cached = Match.runtimeSettingsCache;
+      if (cached && now - cached.loadedAtMs <= RUNTIME_SETTINGS_CACHE_MS) {
+        map = cached.map;
+      } else {
+        const pool = getPool();
+        const rows = await pool.query<{ key: string; value: string }>(
+          `SELECT key, value
+           FROM app_settings
+           WHERE key IN (
+             'game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms',
+             'keys_streak_per_key', 'keys_small_streak_reward', 'keys_mega_streak', 'keys_mega_reward', 'keys_max_per_player',
+             'keys_skill_boost_percent', 'keys_skill_boost_max_multiplier',
+             'keys_heart_attack_cost', 'keys_shield_cost', 'keys_reveal_cost',
+             'keys_reveal_questions_direct', 'keys_reveal_questions_study',
+             'keys_drop_rate',
+             'ability_skill_boost_direct_enabled', 'ability_skill_boost_study_enabled',
+             'ability_skip_direct_enabled', 'ability_skip_study_enabled',
+             'ability_attack_direct_enabled', 'ability_attack_study_enabled',
+             'ability_reveal_direct_enabled', 'ability_reveal_study_enabled'
+           )`,
+        );
+        map = new Map(rows.rows.map((r) => [r.key, r.value]));
+        Match.runtimeSettingsCache = {
+          loadedAtMs: now,
+          map,
+        };
+      }
       const maxRounds = Number(map.get("game_max_study_rounds") ?? DEFAULT_MAX_STUDY_ROUNDS);
       const roundSize = Number(map.get("game_study_round_size") ?? DEFAULT_STUDY_ROUND_SIZE);
       const phaseMs = Number(map.get("game_study_phase_ms") ?? DEFAULT_STUDY_PHASE_MS);
@@ -505,7 +521,9 @@ export class Match {
   }
 
   async run(): Promise<void> {
+    const startupAt = Date.now();
     await this.loadRuntimeSettings();
+    const loadRuntimeMs = Date.now() - startupAt;
     this.io.to(this.room).emit("game_started", {
       matchId: this.matchId,
       gameMode: this.gameMode,
@@ -515,6 +533,7 @@ export class Match {
       abilityCosts: this.snapshotAbilityCosts(),
       abilityToggles: this.snapshotAbilityToggles(),
     });
+    console.debug(`[matchmaking] runtime_settings_loaded_ms=${loadRuntimeMs} match=${this.matchId} mode=${this.gameMode}`);
     this.emitKeysRoomState();
 
     const pool = getPool();

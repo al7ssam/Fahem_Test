@@ -843,12 +843,14 @@ body {
   }
 }
 
-#ready-btn.btn-pending {
+#ready-btn.btn-pending,
+#join-btn.btn-pending {
   position: relative;
   opacity: 0.9;
 }
 
-#ready-btn.btn-pending::after {
+#ready-btn.btn-pending::after,
+#join-btn.btn-pending::after {
   content: "";
   display: inline-block;
   width: 1rem;
@@ -862,7 +864,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #ready-btn.btn-pending::after {
+  #ready-btn.btn-pending::after,
+  #join-btn.btn-pending::after {
     animation: none;
     border-right-color: rgba(255, 255, 255, 0.35);
   }

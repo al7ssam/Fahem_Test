@@ -60,12 +60,6 @@ let abilityTogglesState: AbilityTogglesPayload = {
   reveal: true,
 };
 
-const ABILITY_FULL_NAMES = {
-  boost: "تعزيز نقاط المهارة",
-  skip: "تجاوز السؤال دون قلب أو نقاط",
-  attack: "هجوم على قلب",
-  reveal: "كشف مفاتيح الجميع",
-} as const;
 let studyCards: Array<{
   id: number;
   questionId?: number;
@@ -318,13 +312,20 @@ function render(): void {
       });
     });
     btn.addEventListener("click", () => {
+      if (btn.disabled) return;
       err.textContent = "";
       const name = input.value.trim();
       if (!name) {
         err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
         return;
       }
+      btn.disabled = true;
+      btn.classList.add("btn-pending");
+      btn.textContent = "جاري الدخول...";
       storePlayerName(name);
+      phase = "matchmaking";
+      lobbyNotice = "جاري الاتصال بالخادم...";
+      render();
       connectSocket(name, selectedMode);
     });
     return;
@@ -688,20 +689,23 @@ function applyAbilityTogglesPayload(t?: Partial<AbilityTogglesPayload> | null): 
 function refreshAbilityAffordability(): void {
   const k = myKeysCount();
   const c = abilityCostsState;
+  const boostVisible = abilityTogglesState.skillBoost;
+  const skipVisible = abilityTogglesState.skipQuestion;
+  const attackVisible = abilityTogglesState.heartAttack && keysAttacksEnabledState;
+  const revealVisible = abilityTogglesState.reveal;
   const boost = document.querySelector<HTMLButtonElement>("#ab-boost");
   const skip = document.querySelector<HTMLButtonElement>("#ab-skip");
   const attack = document.querySelector<HTMLButtonElement>("#ab-attack");
   const reveal = document.querySelector<HTMLButtonElement>("#ab-reveal");
-  boost?.classList.toggle("ability-btn--insufficient", abilityTogglesState.skillBoost && k < c.skillBoost);
-  skip?.classList.toggle("ability-btn--insufficient", abilityTogglesState.skipQuestion && k < c.skipQuestion);
-  const atkVisible = keysAttacksEnabledState && attack && !attack.classList.contains("hidden");
-  attack?.classList.toggle("ability-btn--insufficient", Boolean(abilityTogglesState.heartAttack && atkVisible && k < c.heartAttack));
-  reveal?.classList.toggle("ability-btn--insufficient", abilityTogglesState.reveal && k < c.reveal);
+  boost?.classList.toggle("hidden", !boostVisible);
+  skip?.classList.toggle("hidden", !skipVisible);
+  attack?.classList.toggle("hidden", !attackVisible);
+  reveal?.classList.toggle("hidden", !revealVisible);
 
-  boost?.classList.toggle("hidden", !abilityTogglesState.skillBoost);
-  skip?.classList.toggle("hidden", !abilityTogglesState.skipQuestion);
-  attack?.classList.toggle("hidden", !abilityTogglesState.heartAttack);
-  reveal?.classList.toggle("hidden", !abilityTogglesState.reveal);
+  boost?.classList.toggle("ability-btn--insufficient", boostVisible && k < c.skillBoost);
+  skip?.classList.toggle("ability-btn--insufficient", skipVisible && k < c.skipQuestion);
+  attack?.classList.toggle("ability-btn--insufficient", attackVisible && k < c.heartAttack);
+  reveal?.classList.toggle("ability-btn--insufficient", revealVisible && k < c.reveal);
 }
 
 function flashKeysBadgeReward(): void {
@@ -719,12 +723,12 @@ function flashKeysBadgeReward(): void {
   run(document.querySelector("#keys-badge"));
 }
 
-function showInsufficientAbilityTip(anchor: HTMLElement, fullAbilityName: string): void {
+function showInsufficientAbilityTip(anchor: HTMLElement, requiredKeys: number): void {
   document.querySelectorAll(".ability-insufficient-tip").forEach((el) => el.remove());
   const tip = document.createElement("div");
   tip.className = "ability-insufficient-tip";
   tip.setAttribute("role", "status");
-  tip.textContent = `لا يمكن استخدام القدرة — ${fullAbilityName}`;
+  tip.textContent = `تحتاج الى ${Math.max(1, Math.floor(requiredKeys))} مفتاح`;
   document.body.appendChild(tip);
   const r = anchor.getBoundingClientRect();
   tip.style.position = "fixed";
@@ -864,10 +868,6 @@ function bindPlayingAbilityUi(sk: Socket): void {
   const bubbles = document.querySelector<HTMLDivElement>("#attack-bubbles");
   const attackClose = document.querySelector<HTMLButtonElement>("#attack-close");
 
-  if (attack) {
-    attack.classList.toggle("hidden", !keysAttacksEnabledState);
-  }
-
   const runAbility = (
     btn: HTMLButtonElement | null,
     eventName: string,
@@ -944,7 +944,7 @@ function bindPlayingAbilityUi(sk: Socket): void {
       return;
     }
     if (myKeysCount() < abilityCostsState.skillBoost) {
-      showInsufficientAbilityTip(b1, ABILITY_FULL_NAMES.boost);
+      showInsufficientAbilityTip(b1, abilityCostsState.skillBoost);
       return;
     }
     runAbility(b1, "ability_skill_boost", {}, -abilityCostsState.skillBoost);
@@ -956,7 +956,7 @@ function bindPlayingAbilityUi(sk: Socket): void {
       return;
     }
     if (myKeysCount() < abilityCostsState.skipQuestion) {
-      showInsufficientAbilityTip(s1, ABILITY_FULL_NAMES.skip);
+      showInsufficientAbilityTip(s1, abilityCostsState.skipQuestion);
       return;
     }
     runAbility(s1, "ability_skip_question", {}, -abilityCostsState.skipQuestion);
@@ -968,7 +968,7 @@ function bindPlayingAbilityUi(sk: Socket): void {
       return;
     }
     if (myKeysCount() < abilityCostsState.reveal) {
-      showInsufficientAbilityTip(r1, ABILITY_FULL_NAMES.reveal);
+      showInsufficientAbilityTip(r1, abilityCostsState.reveal);
       return;
     }
     runAbility(r1, "ability_reveal_keys", {}, -abilityCostsState.reveal);
@@ -981,7 +981,7 @@ function bindPlayingAbilityUi(sk: Socket): void {
       return;
     }
     if (myKeysCount() < abilityCostsState.heartAttack) {
-      showInsufficientAbilityTip(a1, ABILITY_FULL_NAMES.attack);
+      showInsufficientAbilityTip(a1, abilityCostsState.heartAttack);
       return;
     }
     if (!overlay || !bubbles) return;
@@ -1001,7 +1001,7 @@ function bindPlayingAbilityUi(sk: Socket): void {
       wrap.appendChild(hearts);
       wrap.addEventListener("click", () => {
         if (myKeysCount() < abilityCostsState.heartAttack) {
-          showInsufficientAbilityTip(a1, ABILITY_FULL_NAMES.attack);
+          showInsufficientAbilityTip(a1, abilityCostsState.heartAttack);
           return;
         }
         wrap.classList.add("attack-bubble--pop");
@@ -1023,6 +1023,7 @@ function bindPlayingAbilityUi(sk: Socket): void {
 }
 
 function connectSocket(name: string, mode: GameMode): void {
+  const joinFlowStartMs = performance.now();
   socket?.removeAllListeners();
   socket?.disconnect();
 
@@ -1033,6 +1034,20 @@ function connectSocket(name: string, mode: GameMode): void {
     transports: ["websocket", "polling"],
   });
   socket = s;
+  let joinAckTimer: number | null = null;
+  let joinCompleted = false;
+
+  const failBackToName = (msg: string): void => {
+    if (joinAckTimer) {
+      window.clearTimeout(joinAckTimer);
+      joinAckTimer = null;
+    }
+    joinCompleted = true;
+    phase = "name";
+    render();
+    const errEl = document.querySelector<HTMLParagraphElement>("#join-err");
+    if (errEl) errEl.textContent = msg;
+  };
 
   lobbyPlayersList = [];
 
@@ -1062,17 +1077,40 @@ function connectSocket(name: string, mode: GameMode): void {
 
   s.on("connect", () => {
     mySocketId = s.id ?? null;
+    console.debug("[join-flow] click->connect_ms", Math.round(performance.now() - joinFlowStartMs));
+    const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+    if (noticeEl && phase === "matchmaking") {
+      noticeEl.textContent = "تم الاتصال بالخادم. جاري الدخول إلى البحث...";
+    }
+    joinAckTimer = window.setTimeout(() => {
+      if (joinCompleted) return;
+      failBackToName("تأخر الاتصال. تحقق من الشبكة ثم حاول مرة أخرى.");
+      socket?.disconnect();
+    }, 8000);
     s.emit("join_lobby", { name, mode }, (ack: { ok?: boolean }) => {
+      if (joinAckTimer) {
+        window.clearTimeout(joinAckTimer);
+        joinAckTimer = null;
+      }
+      joinCompleted = true;
       if (!ack?.ok) {
-        phase = "name";
-        render();
-        const errEl = document.querySelector("#join-err");
-        if (errEl) errEl.textContent = "تعذر الدخول. حاول مرة أخرى.";
+        failBackToName("تعذر الدخول. حاول مرة أخرى.");
         return;
       }
-      phase = "matchmaking";
-      render();
+      console.debug("[join-flow] connect->join_ack_ms", Math.round(performance.now() - joinFlowStartMs));
+      if (phase !== "matchmaking") {
+        phase = "matchmaking";
+        render();
+      } else {
+        const noticeEl2 = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+        if (noticeEl2) noticeEl2.textContent = "تم الدخول بنجاح. جاري البحث عن منافسين...";
+      }
     });
+  });
+
+  s.on("connect_error", () => {
+    if (joinCompleted) return;
+    failBackToName("تعذر الاتصال بالخادم. حاول مرة أخرى.");
   });
 
   s.on("disconnect", () => {
