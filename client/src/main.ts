@@ -212,6 +212,8 @@ function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): v
 }
 
 let studyEndsAt = 0;
+let studyStartsAt = 0;
+let studyDurationMs = 0;
 let spectatorEligible = false;
 let spectatorFollowing = false;
 let currentLeaderboard: Array<{
@@ -266,13 +268,13 @@ function render(): void {
     let selectedMode: GameMode = "direct";
     app.append(
       el(`
-        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white flex flex-col items-center justify-center p-4">
+        <div class="app-screen min-h-screen text-white flex flex-col items-center justify-center p-4">
           <div class="max-w-lg w-full space-y-6 text-center">
             <h1 class="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-l from-amber-300 to-orange-400">فاهم</h1>
             <p class="text-slate-300 text-lg">تحدٍّ سريع — من يبقى آخر يفوز؟</p>
-            <div class="rounded-2xl bg-white/5 border border-white/10 p-6 shadow-xl backdrop-blur space-y-5">
+            <div class="app-card p-6 space-y-5">
               <label class="block text-right text-sm text-slate-400">اسمك في اللعبة</label>
-              <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="w-full rounded-xl bg-slate-900/80 border border-white/10 px-4 py-3 text-right text-lg outline-none focus:ring-2 focus:ring-amber-400/60" />
+              <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="app-input w-full px-4 py-3 text-right text-lg" />
               <p class="text-sm text-slate-400 text-right m-0">اختر نمط اللعب</p>
               <div class="mode-picker-grid" role="group" aria-label="نمط اللعب">
                 <button type="button" class="mode-option-btn mode-option-btn--selected" data-mode="direct" aria-pressed="true">
@@ -286,7 +288,7 @@ function render(): void {
                   <span class="mode-option-desc">بطاقة مراجعة لكل سؤال ثم كتلة أسئلة في الجولة</span>
                 </button>
               </div>
-              <button id="join-btn" class="w-full rounded-xl bg-gradient-to-l from-amber-500 to-orange-600 py-3 text-lg font-bold text-slate-950 shadow-lg active:scale-[0.98] transition">ابدأ التحدي</button>
+              <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg">ابدأ التحدي</button>
               <p id="join-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
             </div>
           </div>
@@ -328,7 +330,7 @@ function render(): void {
   if (phase === "matchmaking") {
     app.append(
       el(`
-        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-indigo-950 to-slate-900 text-white p-4 flex flex-col max-w-lg mx-auto w-full">
+        <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full">
           <header class="flex items-center justify-between py-4">
             <h1 class="text-2xl font-extrabold text-amber-300">فاهم</h1>
             <span id="conn" class="text-xs px-2 py-1 rounded-full bg-white/10">…</span>
@@ -353,7 +355,7 @@ function render(): void {
   if (phase === "countdown") {
     app.append(
       el(`
-        <div class="min-h-screen bg-gradient-to-b from-slate-950 to-indigo-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <div class="app-screen min-h-screen text-white flex flex-col items-center justify-center p-6 text-center">
           <p id="cd-subtitle" class="text-emerald-200/95 text-base max-w-md mb-3 leading-relaxed">تم العثور على منافسين. جاري اكتمال المجموعة…</p>
           <p class="text-slate-300 mb-4">تبدأ المباراة خلال</p>
           <div id="cd" class="text-7xl font-black text-amber-300 tabular-nums">3</div>
@@ -368,17 +370,24 @@ function render(): void {
     app.append(
       el(`
         <div class="study-shell min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
-          <div class="flex items-center justify-between gap-2 pt-1">
-            <h2 class="text-lg font-bold text-amber-200 drop-shadow-sm">مراجعة قبل الأسئلة</h2>
-            <div id="study-main-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums drop-shadow-sm">—</div>
+          <div class="study-progress-fixed">
+            <div class="study-progress-head">
+              <h2 class="text-lg font-bold text-amber-200 drop-shadow-sm">مراجعة قبل الأسئلة</h2>
+              <div id="study-main-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums drop-shadow-sm">—</div>
+            </div>
+            <p id="study-main-clock-label" class="text-right text-slate-300 text-xs min-h-[1rem]">وقت المذاكرة</p>
+            <div id="study-progress-track" class="study-progress-track" role="progressbar" aria-label="تقدم وقت المذاكرة" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="study-progress-fill" class="study-progress-fill"></div>
+            </div>
           </div>
-          <p id="study-main-clock-label" class="text-right text-slate-300 text-xs min-h-[1rem]">وقت المذاكرة</p>
-          <button id="round-ready-btn" type="button" class="w-full rounded-xl bg-indigo-600/80 hover:bg-indigo-500 py-2 text-sm font-bold">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
+          <div class="study-content-stack">
+          <button id="round-ready-btn" type="button" class="ui-btn ui-btn--primary w-full py-2 text-sm">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
           <p id="study-hint" class="text-right text-slate-300/90 text-sm min-h-[1.25rem] leading-relaxed"></p>
           <p id="study-ready-state" class="text-right text-amber-200/90 text-xs min-h-[1.1rem] leading-relaxed"></p>
-          <div id="study-cards" class="flex-1 space-y-4 overflow-y-auto max-h-[60vh] pb-2"></div>
+          <div id="study-cards" class="study-cards-container flex-1 space-y-4 overflow-y-auto pb-2"></div>
           <p id="study-keys-line" class="study-reveal-bar text-right text-sm text-amber-100/90 font-semibold">مفاتيحك: 0</p>
           <button type="button" id="study-reveal-btn" class="study-reveal-btn">🔍 كشف مفاتيح الجميع (للبلوك الحالي)</button>
+          </div>
         </div>
       `),
     );
@@ -438,7 +447,7 @@ function render(): void {
   if (phase === "playing") {
     app.append(
       el(`
-        <div class="playing-shell min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950 text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
+        <div class="playing-shell app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
           <div id="toast-root" class="toast-root"></div>
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div id="hearts" class="flex gap-1 text-2xl shrink-0"></div>
@@ -451,17 +460,17 @@ function render(): void {
             <summary class="px-3 py-2 text-sm font-bold text-amber-200 cursor-pointer select-none">المنافسون</summary>
             <div id="players-panel" class="players-panel border-0 rounded-none"></div>
           </details>
-          <div id="q-card" class="rounded-2xl bg-white/5 border border-white/10 p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0">
+          <div id="q-card" class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0">
             <p id="q-text" class="text-right text-xl font-semibold leading-relaxed min-h-[4rem]"></p>
-            <div id="opts" class="grid gap-2"></div>
+            <div id="opts" class="options-grid grid"></div>
           </div>
-          <p id="status" class="text-center text-slate-400 text-sm min-h-[1.25rem]"></p>
+          <p id="status" class="status-line text-center text-sm min-h-[1.25rem]"></p>
           <p id="spectator-badge" class="text-center text-amber-200 text-sm min-h-[1.25rem]"></p>
           <div id="attack-overlay" class="attack-overlay" hidden>
             <div class="attack-overlay__panel">
               <p class="text-center font-bold text-amber-200 mb-1">اختر من تريد استهداف قلبه</p>
               <div id="attack-bubbles" class="attack-bubbles"></div>
-              <button type="button" id="attack-close" class="w-full rounded-xl bg-slate-700 py-2 text-sm font-bold">إلغاء</button>
+              <button type="button" id="attack-close" class="ui-btn ui-btn--ghost w-full py-2 text-sm">إلغاء</button>
             </div>
           </div>
           <div class="ability-dock" aria-label="قدرات">
@@ -509,9 +518,9 @@ function render(): void {
           <h2 id="res-title" class="result-screen__title text-3xl font-extrabold tracking-tight"></h2>
           <p id="res-kicker" class="result-screen__kicker text-sm font-semibold min-h-[1.25rem]"></p>
           <p id="res-body" class="result-screen__body text-lg leading-relaxed"></p>
-          <button id="continue-watch" type="button" class="result-screen__again w-full rounded-xl py-3 text-base font-bold shadow-lg active:scale-[0.98] transition hidden">متابعة الجولة كمشاهد</button>
+          <button id="continue-watch" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base hidden">متابعة الجولة كمشاهد</button>
           <div id="res-leaderboard" class="w-full text-right"></div>
-          <button id="again" type="button" class="result-screen__again w-full rounded-xl py-3 text-lg font-bold shadow-lg active:scale-[0.98] transition">العب مجدداً</button>
+          <button id="again" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-lg">العب مجدداً</button>
         </div>
       `),
     );
@@ -1291,6 +1300,8 @@ function connectSocket(name: string, mode: GameMode): void {
         phase = "studying";
         studyCards = [];
         studyEndsAt = nowSynced();
+        studyStartsAt = studyEndsAt;
+        studyDurationMs = 0;
         readyBtnState = "idle";
         studyPhaseState = "idle";
         activeStudyRoundToken = null;
@@ -1319,6 +1330,8 @@ function connectSocket(name: string, mode: GameMode): void {
       studyPhaseState = "ready_window";
       readyBtnState = "window_open";
       studyEndsAt = payload.endsAt;
+      studyStartsAt = payload.startsAt ?? payload.serverNow ?? nowSynced();
+      studyDurationMs = Math.max(1000, studyEndsAt - studyStartsAt);
       if (!app.querySelector("#study-cards")) render();
       const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
       if (hint) {
@@ -1358,6 +1371,8 @@ function connectSocket(name: string, mode: GameMode): void {
       }
       studyCards = payload.cards ?? [];
       studyEndsAt = payload.endsAt;
+      studyStartsAt = payload.startsAt ?? payload.serverNow ?? nowSynced();
+      studyDurationMs = Math.max(1000, studyEndsAt - studyStartsAt);
       phase = "studying";
       studyPhaseState = "study_content";
       if (!app.querySelector("#study-cards")) render();
@@ -1497,24 +1512,44 @@ function connectSocket(name: string, mode: GameMode): void {
       if (!text || !opts) return;
       text.textContent = q.prompt;
       opts.innerHTML = "";
+      let answered = false;
       q.options.forEach((label, idx) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.className =
-          "w-full text-right rounded-xl border border-white/10 bg-slate-800/60 px-4 py-3 text-base font-medium hover:bg-slate-700/80 active:scale-[0.99] transition";
+        b.className = "option-btn";
         b.textContent = label;
-        b.addEventListener("click", () => {
+        const clearPressed = (): void => {
+          b.classList.remove("option-btn--pressed");
+        };
+        const submitAnswer = (): void => {
+          if (answered) return;
           if (spectatorFollowing) return;
           if (currentQuestionId == null) return;
+          answered = true;
+          b.classList.add("option-btn--selected");
           if (status) status.textContent = "تم إرسال إجابتك.";
           s.emit("answer", {
             questionId: currentQuestionId,
             choiceIndex: idx,
           });
           opts.querySelectorAll("button").forEach((btn) => {
-            (btn as HTMLButtonElement).disabled = true;
+            const htmlBtn = btn as HTMLButtonElement;
+            htmlBtn.disabled = true;
+            htmlBtn.classList.add("option-btn--disabled");
+            htmlBtn.classList.remove("option-btn--pressed");
           });
+        };
+        b.addEventListener("pointerdown", () => {
+          if (b.disabled) return;
+          b.classList.add("option-btn--pressed");
         });
+        b.addEventListener("pointercancel", clearPressed);
+        b.addEventListener("pointerleave", clearPressed);
+        b.addEventListener("pointerup", (ev) => {
+          clearPressed();
+          if (ev.pointerType !== "mouse") submitAnswer();
+        });
+        b.addEventListener("click", submitAnswer);
         opts.appendChild(b);
       });
       if (status) status.textContent = "";
@@ -1832,17 +1867,29 @@ function startStudyTimer(): void {
   clearTimer();
   const mainClock = app.querySelector<HTMLDivElement>("#study-main-clock");
   const mainLabel = app.querySelector<HTMLParagraphElement>("#study-main-clock-label");
+  const progressTrack = app.querySelector<HTMLDivElement>("#study-progress-track");
+  const progressFill = app.querySelector<HTMLDivElement>("#study-progress-fill");
   if (!mainClock) return;
   timerHandle = window.setInterval(() => {
     const now = nowSynced();
     const studyMs = Math.max(0, studyEndsAt - now);
     const studySec = Math.max(0, Math.floor((studyMs + 250) / 1000));
+    const totalMs = studyDurationMs > 0 ? studyDurationMs : Math.max(1000, studyEndsAt - studyStartsAt);
+    const elapsedMs = Math.max(0, Math.min(totalMs, totalMs - studyMs));
+    const ratio = totalMs > 0 ? elapsedMs / totalMs : 0;
+    const percent = Math.max(0, Math.min(100, ratio * 100));
 
     if (mainClock) {
       mainClock.textContent = `${studySec}s`;
     }
     if (mainLabel) {
-      mainLabel.textContent = "وقت المذاكرة";
+      mainLabel.textContent = `وقت المذاكرة — ${Math.round(percent)}%`;
+    }
+    if (progressFill) {
+      progressFill.style.width = `${percent.toFixed(2)}%`;
+    }
+    if (progressTrack) {
+      progressTrack.setAttribute("aria-valuenow", String(Math.round(percent)));
     }
   }, 200);
 }
