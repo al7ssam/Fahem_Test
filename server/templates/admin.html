@@ -661,6 +661,14 @@
             <input id="cat-main-name" type="text" />
             <label for="cat-main-icon">أيقونة الرئيسي</label>
             <input id="cat-main-icon" type="text" value="📚" />
+            <label for="cat-main-desc">الوصف الداخلي (لا يظهر للاعبين)</label>
+            <textarea id="cat-main-desc" rows="3" maxlength="8000" placeholder="للاستخدام الداخلي لاحقًا"></textarea>
+            <label for="cat-main-level">مستوى التصنيف الرئيسي</label>
+            <select id="cat-main-level">
+              <option value="beginner">مبتدئ</option>
+              <option value="intermediate" selected>متوسط</option>
+              <option value="advanced">متقدم</option>
+            </select>
             <button type="button" class="btn btn-secondary" id="cat-main-save-btn">حفظ/تحديث رئيسي</button>
             <hr />
             <label for="cat-sub-main-id">التصنيف الرئيسي</label>
@@ -671,6 +679,14 @@
             <input id="cat-sub-name" type="text" />
             <label for="cat-sub-icon">أيقونة الفرعي</label>
             <input id="cat-sub-icon" type="text" value="📘" />
+            <label for="cat-sub-desc">الوصف الداخلي للفرعي (لا يظهر للاعبين)</label>
+            <textarea id="cat-sub-desc" rows="3" maxlength="8000" placeholder="للاستخدام الداخلي لاحقًا"></textarea>
+            <label for="cat-sub-level">مستوى التصنيف الفرعي</label>
+            <select id="cat-sub-level">
+              <option value="beginner">مبتدئ</option>
+              <option value="intermediate" selected>متوسط</option>
+              <option value="advanced">متقدم</option>
+            </select>
             <button type="button" class="btn btn-secondary" id="cat-sub-save-btn">حفظ/تحديث فرعي</button>
             <div class="msg" id="cat-msg"></div>
             <hr />
@@ -696,6 +712,8 @@
                     <th>#</th>
                     <th>المفتاح</th>
                     <th>الاسم</th>
+                    <th>مستوى</th>
+                    <th>وصف داخلي</th>
                     <th>الحالة</th>
                     <th>الترتيب</th>
                     <th>إجراءات</th>
@@ -713,6 +731,8 @@
                     <th>الرئيسي</th>
                     <th>المفتاح الفرعي</th>
                     <th>الاسم</th>
+                    <th>مستوى</th>
+                    <th>وصف داخلي</th>
                     <th>الحالة</th>
                     <th>الترتيب</th>
                     <th>إجراءات</th>
@@ -1198,12 +1218,33 @@
         var selectedSubIds = {};
         function setCatMsg(t, ok) { catMsg.textContent = t || ""; catMsg.className = "msg " + (ok ? "ok" : "err"); }
         function secret() { return document.getElementById("admin-secret").value.trim(); }
+        function catLevelAr(lv) {
+          if (lv === "beginner") return "مبتدئ";
+          if (lv === "advanced") return "متقدم";
+          return "متوسط";
+        }
+        function catDescPreview(t) {
+          t = (t || "").trim();
+          if (!t) return "—";
+          return t.length > 52 ? t.slice(0, 52) + "…" : t;
+        }
         function applyQueryFilter(list) {
           var q = (document.getElementById("cat-q").value || "").trim().toLowerCase();
           var af = document.getElementById("cat-active-filter").value;
           return list.filter(function (x) {
             var activeOk = !af || String(x.isActive) === af;
-            var qOk = !q || String(x.nameAr || "").toLowerCase().includes(q) || String(x.mainKey || x.subcategoryKey || "").toLowerCase().includes(q);
+            var qOk =
+              !q ||
+              String(x.nameAr || "").toLowerCase().includes(q) ||
+              String(x.mainKey || "").toLowerCase().includes(q) ||
+              String(x.internalDescription || "").toLowerCase().includes(q) ||
+              (x.subcategories || []).some(function (s) {
+                return (
+                  String(s.nameAr || "").toLowerCase().includes(q) ||
+                  String(s.subcategoryKey || "").toLowerCase().includes(q) ||
+                  String(s.internalDescription || "").toLowerCase().includes(q)
+                );
+              });
             return activeOk && qOk;
           });
         }
@@ -1243,9 +1284,19 @@
             var td1 = document.createElement("td"); td1.textContent = String(m.id);
             var td2 = document.createElement("td"); td2.textContent = m.mainKey;
             var td3 = document.createElement("td"); td3.textContent = (m.icon || "📚") + " " + m.nameAr;
+            var td3b = document.createElement("td"); td3b.textContent = catLevelAr(m.difficultyLevel);
+            var td3c = document.createElement("td"); td3c.textContent = catDescPreview(m.internalDescription);
             var td4 = document.createElement("td"); td4.textContent = m.isActive ? "مفعّل" : "معطّل";
             var td5 = document.createElement("td"); td5.textContent = String(m.sortOrder);
             var td6 = document.createElement("td"); td6.className = "bank-actions";
+            td6.appendChild(rowBtn("تعديل", "", function () {
+              document.getElementById("cat-main-key").value = m.mainKey || "";
+              document.getElementById("cat-main-name").value = m.nameAr || "";
+              document.getElementById("cat-main-icon").value = m.icon || "📚";
+              document.getElementById("cat-main-desc").value = m.internalDescription || "";
+              document.getElementById("cat-main-level").value = m.difficultyLevel || "intermediate";
+              setCatMsg("تم تحميل التصنيف الرئيسي للتعديل.", true);
+            }));
             td6.appendChild(rowBtn(m.isActive ? "تعطيل" : "تفعيل", "", async function () {
               try { await api("/api/admin/categories/main/" + m.id, "PATCH", { isActive: !m.isActive }); await refreshTables(); }
               catch (e) { setCatMsg("تعذر تحديث الحالة.", false); }
@@ -1267,7 +1318,8 @@
                 await refreshTables();
               } catch (e) { setCatMsg("تعذر الحذف.", false); }
             }));
-            tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tr.appendChild(td5); tr.appendChild(td6);
+            tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+            tr.appendChild(td3b); tr.appendChild(td3c); tr.appendChild(td4); tr.appendChild(td5); tr.appendChild(td6);
             mainBody.appendChild(tr);
             (m.subcategories || []).forEach(function (s) {
               var ts = document.createElement("tr");
@@ -1280,9 +1332,20 @@
               var sd2 = document.createElement("td"); sd2.textContent = m.nameAr;
               var sd3 = document.createElement("td"); sd3.textContent = s.subcategoryKey;
               var sd4 = document.createElement("td"); sd4.textContent = (s.icon || "📘") + " " + s.nameAr;
+              var sd4b = document.createElement("td"); sd4b.textContent = catLevelAr(s.difficultyLevel);
+              var sd4c = document.createElement("td"); sd4c.textContent = catDescPreview(s.internalDescription);
               var sd5 = document.createElement("td"); sd5.textContent = s.isActive ? "مفعّل" : "معطّل";
               var sd6 = document.createElement("td"); sd6.textContent = String(s.sortOrder);
               var sd7 = document.createElement("td"); sd7.className = "bank-actions";
+              sd7.appendChild(rowBtn("تعديل", "", function () {
+                document.getElementById("cat-sub-main-id").value = String(m.id);
+                document.getElementById("cat-sub-key").value = s.subcategoryKey || "";
+                document.getElementById("cat-sub-name").value = s.nameAr || "";
+                document.getElementById("cat-sub-icon").value = s.icon || "📘";
+                document.getElementById("cat-sub-desc").value = s.internalDescription || "";
+                document.getElementById("cat-sub-level").value = s.difficultyLevel || "intermediate";
+                setCatMsg("تم تحميل التصنيف الفرعي للتعديل.", true);
+              }));
               sd7.appendChild(rowBtn(s.isActive ? "تعطيل" : "تفعيل", "", async function () {
                 try { await api("/api/admin/categories/sub/" + s.id, "PATCH", { isActive: !s.isActive }); await refreshTables(); }
                 catch (e) { setCatMsg("تعذر تحديث الحالة.", false); }
@@ -1304,7 +1367,8 @@
                   await refreshTables();
                 } catch (e) { setCatMsg("تعذر الحذف.", false); }
               }));
-              ts.appendChild(sd0); ts.appendChild(sd1); ts.appendChild(sd2); ts.appendChild(sd3); ts.appendChild(sd4); ts.appendChild(sd5); ts.appendChild(sd6); ts.appendChild(sd7);
+              ts.appendChild(sd0); ts.appendChild(sd1); ts.appendChild(sd2); ts.appendChild(sd3); ts.appendChild(sd4);
+              ts.appendChild(sd4b); ts.appendChild(sd4c); ts.appendChild(sd5); ts.appendChild(sd6); ts.appendChild(sd7);
               subBody.appendChild(ts);
             });
           });
@@ -1319,7 +1383,9 @@
           var body = {
             mainKey: document.getElementById("cat-main-key").value.trim(),
             nameAr: document.getElementById("cat-main-name").value.trim(),
-            icon: document.getElementById("cat-main-icon").value.trim() || "📚"
+            icon: document.getElementById("cat-main-icon").value.trim() || "📚",
+            internalDescription: document.getElementById("cat-main-desc").value,
+            difficultyLevel: document.getElementById("cat-main-level").value
           };
           if (!body.mainKey || !body.nameAr) return setCatMsg("أكمل حقول الرئيسي.", false);
           try {
@@ -1335,7 +1401,9 @@
             mainCategoryId: parseInt(document.getElementById("cat-sub-main-id").value, 10),
             subcategoryKey: document.getElementById("cat-sub-key").value.trim(),
             nameAr: document.getElementById("cat-sub-name").value.trim(),
-            icon: document.getElementById("cat-sub-icon").value.trim() || "📘"
+            icon: document.getElementById("cat-sub-icon").value.trim() || "📘",
+            internalDescription: document.getElementById("cat-sub-desc").value,
+            difficultyLevel: document.getElementById("cat-sub-level").value
           };
           if (!body.mainCategoryId || !body.subcategoryKey || !body.nameAr) return setCatMsg("أكمل حقول الفرعي.", false);
           try {

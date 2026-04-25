@@ -102,12 +102,16 @@ const questionPatchSchema = z.object({
   subcategory_key: z.string().trim().min(1).max(120).optional(),
 });
 
+const categoryDifficultyLevelSchema = z.enum(["beginner", "intermediate", "advanced"]);
+
 const mainCategorySchema = z.object({
   mainKey: z.string().trim().min(1).max(120),
   nameAr: z.string().trim().min(1).max(120),
   icon: z.string().trim().min(1).max(16).optional(),
   sortOrder: z.number().int().min(0).max(10000).optional(),
   isActive: z.boolean().optional(),
+  internalDescription: z.string().max(8000).optional(),
+  difficultyLevel: categoryDifficultyLevelSchema.optional(),
 });
 
 const subCategorySchema = z.object({
@@ -117,6 +121,8 @@ const subCategorySchema = z.object({
   icon: z.string().trim().min(1).max(16).optional(),
   sortOrder: z.number().int().min(0).max(10000).optional(),
   isActive: z.boolean().optional(),
+  internalDescription: z.string().max(8000).optional(),
+  difficultyLevel: categoryDifficultyLevelSchema.optional(),
 });
 
 const categoriesBulkSchema = z.object({
@@ -218,6 +224,12 @@ function mergedStudyBody(data: {
   return t.length === 0 ? null : t;
 }
 
+function categoryDifficultyLabelAr(level: string): string {
+  if (level === "beginner") return "مبتدئ";
+  if (level === "advanced") return "متقدم";
+  return "متوسط";
+}
+
 async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Array<{
   id: number;
   mainKey: string;
@@ -225,6 +237,8 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
   icon: string;
   sortOrder: number;
   isActive: boolean;
+  internalDescription: string;
+  difficultyLevel: "beginner" | "intermediate" | "advanced";
   subcategories: Array<{
     id: number;
     subcategoryKey: string;
@@ -232,6 +246,8 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     icon: string;
     sortOrder: number;
     isActive: boolean;
+    internalDescription: string;
+    difficultyLevel: "beginner" | "intermediate" | "advanced";
   }>;
 }>> {
   const mains = await pool.query<{
@@ -241,8 +257,12 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     icon: string;
     sort_order: number;
     is_active: boolean;
+    internal_description: string;
+    difficulty_level: string;
   }>(
-    `SELECT id, main_key, name_ar, icon, sort_order, is_active
+    `SELECT id, main_key, name_ar, icon, sort_order, is_active,
+            COALESCE(internal_description, '') AS internal_description,
+            COALESCE(difficulty_level, 'intermediate') AS difficulty_level
      FROM question_main_categories
      ORDER BY sort_order ASC, id ASC`,
   );
@@ -254,8 +274,12 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     icon: string;
     sort_order: number;
     is_active: boolean;
+    internal_description: string;
+    difficulty_level: string;
   }>(
-    `SELECT id, main_category_id, subcategory_key, name_ar, icon, sort_order, is_active
+    `SELECT id, main_category_id, subcategory_key, name_ar, icon, sort_order, is_active,
+            COALESCE(internal_description, '') AS internal_description,
+            COALESCE(difficulty_level, 'intermediate') AS difficulty_level
      FROM question_subcategories
      ORDER BY sort_order ASC, id ASC`,
   );
@@ -272,6 +296,10 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     icon: m.icon,
     sortOrder: m.sort_order,
     isActive: m.is_active,
+    internalDescription: m.internal_description,
+    difficultyLevel: (m.difficulty_level === "beginner" || m.difficulty_level === "advanced"
+      ? m.difficulty_level
+      : "intermediate") as "beginner" | "intermediate" | "advanced",
     subcategories: (subsByMain.get(m.id) ?? []).map((s) => ({
       id: s.id,
       subcategoryKey: s.subcategory_key,
@@ -279,6 +307,10 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
       icon: s.icon,
       sortOrder: s.sort_order,
       isActive: s.is_active,
+      internalDescription: s.internal_description,
+      difficultyLevel: (s.difficulty_level === "beginner" || s.difficulty_level === "advanced"
+        ? s.difficulty_level
+        : "intermediate") as "beginner" | "intermediate" | "advanced",
     })),
   }));
 }
@@ -300,8 +332,10 @@ async function readCategoriesTreeFiltered(
           ? true
           : m.nameAr.toLowerCase().includes(q) ||
             m.mainKey.toLowerCase().includes(q) ||
+            m.internalDescription.toLowerCase().includes(q) ||
             s.nameAr.toLowerCase().includes(q) ||
-            s.subcategoryKey.toLowerCase().includes(q),
+            s.subcategoryKey.toLowerCase().includes(q) ||
+            s.internalDescription.toLowerCase().includes(q),
       ),
     }))
     .filter((m) => {
@@ -366,8 +400,24 @@ export function registerAdminRoutes(app: Express): void {
         categories: tree
           .filter((m) => m.isActive)
           .map((m) => ({
-            ...m,
-            subcategories: m.subcategories.filter((s) => s.isActive),
+            id: m.id,
+            mainKey: m.mainKey,
+            nameAr: m.nameAr,
+            icon: m.icon,
+            sortOrder: m.sortOrder,
+            isActive: m.isActive,
+            subcategories: m.subcategories
+              .filter((s) => s.isActive)
+              .map((s) => ({
+                id: s.id,
+                subcategoryKey: s.subcategoryKey,
+                nameAr: s.nameAr,
+                icon: s.icon,
+                sortOrder: s.sortOrder,
+                isActive: s.isActive,
+                difficultyLevel: s.difficultyLevel,
+                difficultyLabelAr: categoryDifficultyLabelAr(s.difficultyLevel),
+              })),
           })),
       });
     } catch {
@@ -773,13 +823,19 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       const d = parsed.data;
+      const internalDesc = d.internalDescription ?? "";
+      const diffLevel = d.difficultyLevel ?? "intermediate";
       await pool.query(
-        `INSERT INTO question_main_categories (main_key, name_ar, icon, sort_order, is_active)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO question_main_categories (
+           main_key, name_ar, icon, sort_order, is_active, internal_description, difficulty_level
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (main_key) DO UPDATE
          SET name_ar = EXCLUDED.name_ar, icon = EXCLUDED.icon,
-             sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active`,
-        [d.mainKey, d.nameAr, d.icon ?? "📚", d.sortOrder ?? 0, d.isActive ?? true],
+             sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active,
+             internal_description = EXCLUDED.internal_description,
+             difficulty_level = EXCLUDED.difficulty_level`,
+        [d.mainKey, d.nameAr, d.icon ?? "📚", d.sortOrder ?? 0, d.isActive ?? true, internalDesc, diffLevel],
       );
       res.json({ ok: true });
     } catch {
@@ -797,13 +853,29 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       const d = parsed.data;
+      const internalDescSub = d.internalDescription ?? "";
+      const diffLevelSub = d.difficultyLevel ?? "intermediate";
       await pool.query(
-        `INSERT INTO question_subcategories (main_category_id, subcategory_key, name_ar, icon, sort_order, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO question_subcategories (
+           main_category_id, subcategory_key, name_ar, icon, sort_order, is_active,
+           internal_description, difficulty_level
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (subcategory_key) DO UPDATE
          SET main_category_id = EXCLUDED.main_category_id, name_ar = EXCLUDED.name_ar,
-             icon = EXCLUDED.icon, sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active`,
-        [d.mainCategoryId, d.subcategoryKey, d.nameAr, d.icon ?? "📘", d.sortOrder ?? 0, d.isActive ?? true],
+             icon = EXCLUDED.icon, sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active,
+             internal_description = EXCLUDED.internal_description,
+             difficulty_level = EXCLUDED.difficulty_level`,
+        [
+          d.mainCategoryId,
+          d.subcategoryKey,
+          d.nameAr,
+          d.icon ?? "📘",
+          d.sortOrder ?? 0,
+          d.isActive ?? true,
+          internalDescSub,
+          diffLevelSub,
+        ],
       );
       res.json({ ok: true });
     } catch {
@@ -827,23 +899,43 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       const cur = await pool.query<{
-        main_key: string; name_ar: string; icon: string; sort_order: number; is_active: boolean;
-      }>(`SELECT main_key, name_ar, icon, sort_order, is_active FROM question_main_categories WHERE id = $1`, [id]);
+        main_key: string;
+        name_ar: string;
+        icon: string;
+        sort_order: number;
+        is_active: boolean;
+        internal_description: string;
+        difficulty_level: string;
+      }>(
+        `SELECT main_key, name_ar, icon, sort_order, is_active,
+                COALESCE(internal_description, '') AS internal_description,
+                COALESCE(difficulty_level, 'intermediate') AS difficulty_level
+         FROM question_main_categories WHERE id = $1`,
+        [id],
+      );
       const row = cur.rows[0];
       if (!row) {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
       }
+      const nextLevel =
+        d.difficultyLevel ??
+        (row.difficulty_level === "beginner" || row.difficulty_level === "advanced"
+          ? row.difficulty_level
+          : "intermediate");
       await pool.query(
         `UPDATE question_main_categories
-         SET main_key = $1, name_ar = $2, icon = $3, sort_order = $4, is_active = $5
-         WHERE id = $6`,
+         SET main_key = $1, name_ar = $2, icon = $3, sort_order = $4, is_active = $5,
+             internal_description = $6, difficulty_level = $7
+         WHERE id = $8`,
         [
           d.mainKey ?? row.main_key,
           d.nameAr ?? row.name_ar,
           d.icon ?? row.icon,
           d.sortOrder ?? row.sort_order,
           d.isActive ?? row.is_active,
+          d.internalDescription !== undefined ? d.internalDescription : row.internal_description,
+          nextLevel,
           id,
         ],
       );
@@ -869,17 +961,36 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       const cur = await pool.query<{
-        main_category_id: number; subcategory_key: string; name_ar: string; icon: string; sort_order: number; is_active: boolean;
-      }>(`SELECT main_category_id, subcategory_key, name_ar, icon, sort_order, is_active FROM question_subcategories WHERE id = $1`, [id]);
+        main_category_id: number;
+        subcategory_key: string;
+        name_ar: string;
+        icon: string;
+        sort_order: number;
+        is_active: boolean;
+        internal_description: string;
+        difficulty_level: string;
+      }>(
+        `SELECT main_category_id, subcategory_key, name_ar, icon, sort_order, is_active,
+                COALESCE(internal_description, '') AS internal_description,
+                COALESCE(difficulty_level, 'intermediate') AS difficulty_level
+         FROM question_subcategories WHERE id = $1`,
+        [id],
+      );
       const row = cur.rows[0];
       if (!row) {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
       }
+      const nextSubLevel =
+        d.difficultyLevel ??
+        (row.difficulty_level === "beginner" || row.difficulty_level === "advanced"
+          ? row.difficulty_level
+          : "intermediate");
       await pool.query(
         `UPDATE question_subcategories
-         SET main_category_id = $1, subcategory_key = $2, name_ar = $3, icon = $4, sort_order = $5, is_active = $6
-         WHERE id = $7`,
+         SET main_category_id = $1, subcategory_key = $2, name_ar = $3, icon = $4, sort_order = $5, is_active = $6,
+             internal_description = $7, difficulty_level = $8
+         WHERE id = $9`,
         [
           d.mainCategoryId ?? row.main_category_id,
           d.subcategoryKey ?? row.subcategory_key,
@@ -887,6 +998,8 @@ export function registerAdminRoutes(app: Express): void {
           d.icon ?? row.icon,
           d.sortOrder ?? row.sort_order,
           d.isActive ?? row.is_active,
+          d.internalDescription !== undefined ? d.internalDescription : row.internal_description,
+          nextSubLevel,
           id,
         ],
       );

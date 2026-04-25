@@ -397,6 +397,14 @@ body {
   color: #fef3c7;
 }
 
+.mode-option-level {
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+
 .mode-option-desc {
   font-size: 0.85rem;
   color: #94a3b8;

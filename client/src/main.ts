@@ -35,6 +35,8 @@ let categoriesState: Array<{
     subcategoryKey: string;
     nameAr: string;
     icon: string;
+    difficultyLevel?: string;
+    difficultyLabelAr?: string;
   }>;
 }> = [];
 let lobbyNotice = "";
@@ -130,6 +132,12 @@ function storePlayerName(name: string): void {
   }
 }
 
+function difficultyLabelAr(level: string | undefined): string {
+  if (level === "beginner") return "مبتدئ";
+  if (level === "advanced") return "متقدم";
+  return "متوسط";
+}
+
 async function fetchCategoriesState(): Promise<void> {
   const res = await fetch("/api/categories", { cache: "no-store" });
   const data = (await res.json()) as {
@@ -144,6 +152,8 @@ async function fetchCategoriesState(): Promise<void> {
         subcategoryKey: string;
         nameAr: string;
         icon: string;
+        difficultyLevel?: string;
+        difficultyLabelAr?: string;
       }>;
     }>;
   };
@@ -158,6 +168,8 @@ async function fetchCategoriesState(): Promise<void> {
       subcategoryKey: s.subcategoryKey,
       nameAr: s.nameAr,
       icon: s.icon || "📘",
+      difficultyLevel: s.difficultyLevel,
+      difficultyLabelAr: s.difficultyLabelAr ?? difficultyLabelAr(s.difficultyLevel),
     })),
   }));
 }
@@ -388,6 +400,7 @@ function render(): void {
         <button type="button" class="mode-option-btn" data-sub-key="${escapeHtml(s.subcategoryKey)}" data-sub-name="${escapeHtml(s.nameAr)}">
           <span class="mode-option-icon">${escapeHtml(s.icon || "📘")}</span>
           <span class="mode-option-title">${escapeHtml(s.nameAr)}</span>
+          <span class="mode-option-level">${escapeHtml(s.difficultyLabelAr ?? difficultyLabelAr(s.difficultyLevel))}</span>
         </button>`,
       )
       .join("");
