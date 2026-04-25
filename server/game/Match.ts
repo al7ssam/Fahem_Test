@@ -74,9 +74,8 @@ export class Match {
   private roundReadyResolve: (() => void) | null = null;
   private roundReadyTimer: ReturnType<typeof setTimeout> | null = null;
   private skipSocketsForQuestion = new Set<string>();
-  private revealKeysActive = false;
-  private revealKeysForMacroRound: number | null = null;
-  private directRevealRemaining = 0;
+  private revealRemainingBySocket = new Map<string, number>();
+  private revealMacroRoundBySocket = new Map<string, number | null>();
   private keysStreakPerKey = 5;
   private keysSmallStreakReward = 1;
   private keysMegaStreak = 8;
@@ -173,15 +172,30 @@ export class Match {
     return toggles.reveal;
   }
 
+  private hasRevealFor(socketId: string): boolean {
+    const rem = this.revealRemainingBySocket.get(socketId) ?? 0;
+    if (rem <= 0) return false;
+    if (this.gameMode === "study_then_quiz") {
+      const mr = this.revealMacroRoundBySocket.get(socketId);
+      return mr === this.macroRound;
+    }
+    return true;
+  }
+
   private emitKeysRoomState(): void {
-    this.io.to(this.room).emit("keys_room_state", {
-      revealKeysActive: this.revealKeysActive,
-      macroRound: this.macroRound,
-      players: this.snapshotPlayers(),
-      abilityCosts: this.snapshotAbilityCosts(),
-      abilityToggles: this.snapshotAbilityToggles(),
-      keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
-    });
+    const players = this.snapshotPlayers();
+    const abilityCosts = this.snapshotAbilityCosts();
+    const abilityToggles = this.snapshotAbilityToggles();
+    for (const socketId of this.players.keys()) {
+      this.io.to(socketId).emit("keys_room_state", {
+        revealKeysActive: this.hasRevealFor(socketId),
+        macroRound: this.macroRound,
+        players,
+        abilityCosts,
+        abilityToggles,
+        keysAttacksEnabled: abilityToggles.heartAttack,
+      });
+    }
   }
 
   private countActive(): number {
@@ -222,12 +236,15 @@ export class Match {
   }
 
   private clearRevealIfNewMacro(): void {
-    if (
-      this.revealKeysForMacroRound !== null &&
-      this.macroRound > this.revealKeysForMacroRound
-    ) {
-      this.revealKeysActive = false;
-      this.revealKeysForMacroRound = null;
+    let changed = false;
+    for (const [socketId, mr] of this.revealMacroRoundBySocket.entries()) {
+      if (mr !== null && this.macroRound > mr) {
+        this.revealMacroRoundBySocket.delete(socketId);
+        this.revealRemainingBySocket.delete(socketId);
+        changed = true;
+      }
+    }
+    if (changed) {
       this.emitKeysRoomState();
     }
   }
@@ -256,6 +273,8 @@ export class Match {
   private damageHeart(socketId: string, p: MatchPlayerState): void {
     p.hearts = Math.max(0, p.hearts - 1);
     if (p.hearts === 0) {
+      this.revealRemainingBySocket.delete(socketId);
+      this.revealMacroRoundBySocket.delete(socketId);
       p.eliminated = true;
       p.isSpectator = true;
       this.io.to(this.room).emit("player_eliminated", {
@@ -336,6 +355,8 @@ export class Match {
   handleDisconnect(socketId: string): void {
     const p = this.players.get(socketId);
     if (!p || p.eliminated) return;
+    this.revealRemainingBySocket.delete(socketId);
+    this.revealMacroRoundBySocket.delete(socketId);
     p.hearts = 0;
     p.eliminated = true;
     p.isSpectator = false;
@@ -489,7 +510,7 @@ export class Match {
       matchId: this.matchId,
       gameMode: this.gameMode,
       players: this.snapshotPlayers(),
-      revealKeysActive: this.revealKeysActive,
+      revealKeysActive: false,
       keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
       abilityCosts: this.snapshotAbilityCosts(),
       abilityToggles: this.snapshotAbilityToggles(),
@@ -606,7 +627,9 @@ export class Match {
       this.resolveRound = resolve;
     });
 
-    this.io.to(this.room).emit("question", {
+    const abilityToggles = this.snapshotAbilityToggles();
+    const abilityCosts = this.snapshotAbilityCosts();
+    const baseQuestionPayload = {
       questionId: q.id,
       prompt: q.prompt,
       options: q.options,
@@ -615,11 +638,16 @@ export class Match {
       serverNow: Date.now(),
       round: this.round,
       macroRound: this.macroRound,
-      revealKeysActive: this.revealKeysActive,
-      keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
-      abilityCosts: this.snapshotAbilityCosts(),
-      abilityToggles: this.snapshotAbilityToggles(),
-    });
+      keysAttacksEnabled: abilityToggles.heartAttack,
+      abilityCosts,
+      abilityToggles,
+    };
+    for (const socketId of this.players.keys()) {
+      this.io.to(socketId).emit("question", {
+        ...baseQuestionPayload,
+        revealKeysActive: this.hasRevealFor(socketId),
+      });
+    }
 
     this.questionTimer = setTimeout(() => {
       this.questionTimer = null;
@@ -725,29 +753,36 @@ export class Match {
       });
     }
 
-    if (this.gameMode === "direct" && this.revealKeysActive && this.directRevealRemaining > 0) {
-      this.directRevealRemaining -= 1;
-      if (this.directRevealRemaining <= 0) {
-        this.revealKeysActive = false;
-      }
-    } else if (this.gameMode === "study_then_quiz" && this.revealKeysActive && this.directRevealRemaining > 0) {
-      this.directRevealRemaining -= 1;
-      if (this.directRevealRemaining <= 0) {
-        this.revealKeysActive = false;
+    for (const [socketId, rem] of this.revealRemainingBySocket.entries()) {
+      if (rem <= 0) continue;
+      const next = rem - 1;
+      if (next <= 0) {
+        this.revealRemainingBySocket.delete(socketId);
+        this.revealMacroRoundBySocket.delete(socketId);
+      } else {
+        this.revealRemainingBySocket.set(socketId, next);
       }
     }
 
-    this.io.to(this.room).emit("question_result", {
+    const players = this.snapshotPlayers();
+    const abilityToggles = this.snapshotAbilityToggles();
+    const abilityCosts = this.snapshotAbilityCosts();
+    const baseResultPayload = {
       questionId,
       correctIndex,
       results,
-      players: this.snapshotPlayers(),
-      revealKeysActive: this.revealKeysActive,
+      players,
       macroRound: this.macroRound,
-      keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
-      abilityCosts: this.snapshotAbilityCosts(),
-      abilityToggles: this.snapshotAbilityToggles(),
-    });
+      keysAttacksEnabled: abilityToggles.heartAttack,
+      abilityCosts,
+      abilityToggles,
+    };
+    for (const socketId of this.players.keys()) {
+      this.io.to(socketId).emit("question_result", {
+        ...baseResultPayload,
+        revealKeysActive: this.hasRevealFor(socketId),
+      });
+    }
 
     this.resolveRound?.();
     this.resolveRound = null;
@@ -912,24 +947,22 @@ export class Match {
     if (this.gameMode === "study_then_quiz") {
       if (this.macroRound <= 0) return { ok: false, error: "reveal_not_available" };
       if (this.keysRevealQuestionsStudy <= 0) return { ok: false, error: "reveal_not_available" };
-      if (this.revealKeysActive && this.revealKeysForMacroRound === this.macroRound) {
+      if (this.hasRevealFor(socketId) && this.revealMacroRoundBySocket.get(socketId) === this.macroRound) {
         return { ok: false, error: "reveal_already_active" };
       }
       p.keys -= this.keysRevealCost;
-      this.revealKeysActive = true;
-      this.revealKeysForMacroRound = this.macroRound;
-      this.directRevealRemaining = this.keysRevealQuestionsStudy;
+      this.revealRemainingBySocket.set(socketId, this.keysRevealQuestionsStudy);
+      this.revealMacroRoundBySocket.set(socketId, this.macroRound);
     } else {
       if (this.keysRevealQuestionsDirect <= 0) {
         return { ok: false, error: "reveal_disabled_direct" };
       }
-      if (this.revealKeysActive && this.directRevealRemaining > 0) {
+      if (this.hasRevealFor(socketId)) {
         return { ok: false, error: "reveal_already_active" };
       }
       p.keys -= this.keysRevealCost;
-      this.revealKeysActive = true;
-      this.revealKeysForMacroRound = null;
-      this.directRevealRemaining = this.keysRevealQuestionsDirect;
+      this.revealRemainingBySocket.set(socketId, this.keysRevealQuestionsDirect);
+      this.revealMacroRoundBySocket.set(socketId, null);
     }
 
     this.emitKeysRoomState();
