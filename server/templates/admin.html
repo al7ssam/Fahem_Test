@@ -661,14 +661,6 @@
             <input id="cat-main-name" type="text" />
             <label for="cat-main-icon">أيقونة الرئيسي</label>
             <input id="cat-main-icon" type="text" value="📚" />
-            <label for="cat-main-desc">الوصف الداخلي (لا يظهر للاعبين)</label>
-            <textarea id="cat-main-desc" rows="3" maxlength="8000" placeholder="للاستخدام الداخلي لاحقًا"></textarea>
-            <label for="cat-main-level">مستوى التصنيف الرئيسي</label>
-            <select id="cat-main-level">
-              <option value="beginner">مبتدئ</option>
-              <option value="intermediate" selected>متوسط</option>
-              <option value="advanced">متقدم</option>
-            </select>
             <button type="button" class="btn btn-secondary" id="cat-main-save-btn">حفظ/تحديث رئيسي</button>
             <hr />
             <label for="cat-sub-main-id">التصنيف الرئيسي</label>
@@ -712,8 +704,6 @@
                     <th>#</th>
                     <th>المفتاح</th>
                     <th>الاسم</th>
-                    <th>مستوى</th>
-                    <th>وصف داخلي</th>
                     <th>الحالة</th>
                     <th>الترتيب</th>
                     <th>إجراءات</th>
@@ -1237,7 +1227,6 @@
               !q ||
               String(x.nameAr || "").toLowerCase().includes(q) ||
               String(x.mainKey || "").toLowerCase().includes(q) ||
-              String(x.internalDescription || "").toLowerCase().includes(q) ||
               (x.subcategories || []).some(function (s) {
                 return (
                   String(s.nameAr || "").toLowerCase().includes(q) ||
@@ -1284,8 +1273,6 @@
             var td1 = document.createElement("td"); td1.textContent = String(m.id);
             var td2 = document.createElement("td"); td2.textContent = m.mainKey;
             var td3 = document.createElement("td"); td3.textContent = (m.icon || "📚") + " " + m.nameAr;
-            var td3b = document.createElement("td"); td3b.textContent = catLevelAr(m.difficultyLevel);
-            var td3c = document.createElement("td"); td3c.textContent = catDescPreview(m.internalDescription);
             var td4 = document.createElement("td"); td4.textContent = m.isActive ? "مفعّل" : "معطّل";
             var td5 = document.createElement("td"); td5.textContent = String(m.sortOrder);
             var td6 = document.createElement("td"); td6.className = "bank-actions";
@@ -1293,8 +1280,6 @@
               document.getElementById("cat-main-key").value = m.mainKey || "";
               document.getElementById("cat-main-name").value = m.nameAr || "";
               document.getElementById("cat-main-icon").value = m.icon || "📚";
-              document.getElementById("cat-main-desc").value = m.internalDescription || "";
-              document.getElementById("cat-main-level").value = m.difficultyLevel || "intermediate";
               setCatMsg("تم تحميل التصنيف الرئيسي للتعديل.", true);
             }));
             td6.appendChild(rowBtn(m.isActive ? "تعطيل" : "تفعيل", "", async function () {
@@ -1318,8 +1303,7 @@
                 await refreshTables();
               } catch (e) { setCatMsg("تعذر الحذف.", false); }
             }));
-            tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
-            tr.appendChild(td3b); tr.appendChild(td3c); tr.appendChild(td4); tr.appendChild(td5); tr.appendChild(td6);
+            tr.appendChild(td0); tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tr.appendChild(td5); tr.appendChild(td6);
             mainBody.appendChild(tr);
             (m.subcategories || []).forEach(function (s) {
               var ts = document.createElement("tr");
@@ -1383,9 +1367,7 @@
           var body = {
             mainKey: document.getElementById("cat-main-key").value.trim(),
             nameAr: document.getElementById("cat-main-name").value.trim(),
-            icon: document.getElementById("cat-main-icon").value.trim() || "📚",
-            internalDescription: document.getElementById("cat-main-desc").value,
-            difficultyLevel: document.getElementById("cat-main-level").value
+            icon: document.getElementById("cat-main-icon").value.trim() || "📚"
           };
           if (!body.mainKey || !body.nameAr) return setCatMsg("أكمل حقول الرئيسي.", false);
           try {
