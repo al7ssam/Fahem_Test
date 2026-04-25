@@ -886,7 +886,10 @@ function bindPlayingAbilityUi(sk: Socket): void {
       btn.removeAttribute("aria-busy");
       btn.classList.remove("ability-btn--busy");
     }, 4800);
-    sk.emit(eventName, payload ?? {}, (ack: { ok?: boolean; error?: string; keys?: number; skillBoostStacks?: number }) => {
+    sk.emit(
+      eventName,
+      payload ?? {},
+      (ack: { ok?: boolean; error?: string; keys?: number; skillBoostStacks?: number; revealQuestions?: number }) => {
       window.clearTimeout(tmr);
       btn.classList.remove("ability-btn--busy");
       btn.disabled = false;
@@ -898,6 +901,12 @@ function bindPlayingAbilityUi(sk: Socket): void {
             p.socketId === mySocketId ? { ...p, skillBoostStacks: ack.skillBoostStacks } : p,
           );
         }
+        if (eventName === "ability_reveal_keys") {
+          const revealQuestions = Number.isFinite(ack.revealQuestions) ? Math.max(1, Math.floor(ack.revealQuestions ?? 1)) : 1;
+          showGameToast(`تم كشف مفاتيح الخصوم لمدة ${revealQuestions} اسئلة`);
+        } else if (eventName === "ability_skip_question") {
+          showGameToast("تم تجاوز السؤال");
+        }
         return;
       }
       if (optimisticDelta !== null) {
@@ -905,7 +914,8 @@ function bindPlayingAbilityUi(sk: Socket): void {
         shakeKeysBadgeError();
       }
       showGameToast(abilityErrorMessage(ack?.error ?? "unknown"));
-    });
+      },
+    );
   };
 
   boost?.replaceWith(boost.cloneNode(true));
@@ -1030,17 +1040,23 @@ function bindStudyRevealUi(sk: Socket): void {
     const tmr = window.setTimeout(() => {
       b.disabled = false;
     }, 4800);
-    sk.emit("ability_reveal_keys", {}, (ack: { ok?: boolean; error?: string; keys?: number }) => {
+    sk.emit(
+      "ability_reveal_keys",
+      {},
+      (ack: { ok?: boolean; error?: string; keys?: number; revealQuestions?: number }) => {
       window.clearTimeout(tmr);
       b.disabled = false;
       if (ack?.ok && typeof ack.keys === "number") {
         patchMyKeysCount(ack.keys);
+        const revealQuestions = Number.isFinite(ack.revealQuestions) ? Math.max(1, Math.floor(ack.revealQuestions ?? 1)) : 1;
+        showGameToast(`تم كشف مفاتيح الخصوم لمدة ${revealQuestions} اسئلة`);
         return;
       }
       patchMyKeysCount(prev);
       shakeKeysBadgeError();
       showGameToast(abilityErrorMessage(ack?.error ?? "unknown"));
-    });
+      },
+    );
   });
 }
 

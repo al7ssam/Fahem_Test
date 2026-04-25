@@ -43,7 +43,7 @@ type MatchPlayerState = {
 };
 
 export type AbilityAck =
-  | { ok: true; keys: number; skillBoostStacks?: number }
+  | { ok: true; keys: number; skillBoostStacks?: number; revealQuestions?: number }
   | { ok: false; error: string };
 
 export class Match {
@@ -944,6 +944,7 @@ export class Match {
     }
     if (p.keys < this.keysRevealCost) return { ok: false, error: "not_enough_keys" };
 
+    let revealQuestions = 0;
     if (this.gameMode === "study_then_quiz") {
       if (this.macroRound <= 0) return { ok: false, error: "reveal_not_available" };
       if (this.keysRevealQuestionsStudy <= 0) return { ok: false, error: "reveal_not_available" };
@@ -951,7 +952,8 @@ export class Match {
         return { ok: false, error: "reveal_already_active" };
       }
       p.keys -= this.keysRevealCost;
-      this.revealRemainingBySocket.set(socketId, this.keysRevealQuestionsStudy);
+      revealQuestions = this.keysRevealQuestionsStudy;
+      this.revealRemainingBySocket.set(socketId, revealQuestions);
       this.revealMacroRoundBySocket.set(socketId, this.macroRound);
     } else {
       if (this.keysRevealQuestionsDirect <= 0) {
@@ -961,11 +963,12 @@ export class Match {
         return { ok: false, error: "reveal_already_active" };
       }
       p.keys -= this.keysRevealCost;
-      this.revealRemainingBySocket.set(socketId, this.keysRevealQuestionsDirect);
+      revealQuestions = this.keysRevealQuestionsDirect;
+      this.revealRemainingBySocket.set(socketId, revealQuestions);
       this.revealMacroRoundBySocket.set(socketId, null);
     }
 
     this.emitKeysRoomState();
-    return { ok: true, keys: p.keys };
+    return { ok: true, keys: p.keys, revealQuestions };
   }
 }
