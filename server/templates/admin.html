@@ -225,6 +225,29 @@
         color: #ffd3d3;
         border: 1px solid rgba(248, 113, 113, 0.38);
       }
+      .switch-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.55rem;
+        margin-bottom: 0.9rem;
+      }
+      .switch-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.55rem 0.65rem;
+        border: 1px solid rgba(223, 187, 106, 0.2);
+        border-radius: 0.65rem;
+        background: rgba(9, 13, 27, 0.75);
+        font-size: 0.88rem;
+        color: #e9dfca;
+      }
+      .switch-item input[type="checkbox"] {
+        width: 2.25rem;
+        height: 1.2rem;
+        margin: 0;
+      }
       .msg {
         min-height: 1.5rem;
         margin-top: 0.7rem;
@@ -357,16 +380,16 @@
             <input id="admin-secret" type="password" autocomplete="off" placeholder="ADMIN_SECRET" required />
             <label for="prompt">نص السؤال</label>
             <textarea id="prompt" required maxlength="2000"></textarea>
-            <label for="opt0">الخيار ١</label><input id="opt0" type="text" required maxlength="500" />
-            <label for="opt1">الخيار ٢</label><input id="opt1" type="text" required maxlength="500" />
-            <label for="opt2">الخيار ٣</label><input id="opt2" type="text" required maxlength="500" />
-            <label for="opt3">الخيار ٤</label><input id="opt3" type="text" required maxlength="500" />
+            <label for="opt0">الخيار 1</label><input id="opt0" type="text" required maxlength="500" />
+            <label for="opt1">الخيار 2</label><input id="opt1" type="text" required maxlength="500" />
+            <label for="opt2">الخيار 3</label><input id="opt2" type="text" required maxlength="500" />
+            <label for="opt3">الخيار 4</label><input id="opt3" type="text" required maxlength="500" />
             <label for="correct">الإجابة الصحيحة</label>
             <select id="correct" required>
-              <option value="0">الخيار ١</option>
-              <option value="1">الخيار ٢</option>
-              <option value="2">الخيار ٣</option>
-              <option value="3">الخيار ٤</option>
+              <option value="0">الخيار 1</option>
+              <option value="1">الخيار 2</option>
+              <option value="2">الخيار 3</option>
+              <option value="3">الخيار 4</option>
             </select>
             <label for="difficulty">الصعوبة (اختياري)</label>
             <input id="difficulty" type="text" maxlength="32" placeholder="easy / medium / hard" />
@@ -533,11 +556,23 @@
             <input id="ks-shield-cost" type="text" inputmode="numeric" value="2" />
             <label for="ks-reveal-cost">تكلفة كشف المفاتيح (مفاتيح)</label>
             <input id="ks-reveal-cost" type="text" inputmode="numeric" value="2" />
+            <label for="ks-reveal-q-direct">عدد أسئلة كشف المفاتيح (مباشر)</label>
+            <input id="ks-reveal-q-direct" type="text" inputmode="numeric" value="4" />
+            <label for="ks-reveal-q-study">عدد أسئلة كشف المفاتيح (مذاكرة)</label>
+            <input id="ks-reveal-q-study" type="text" inputmode="numeric" value="4" />
             <label for="ks-drop">معدل منح المفاتيح (معامل 0–5)</label>
             <input id="ks-drop" type="text" inputmode="decimal" value="1" />
-            <label for="ks-direct-reveal">كشف المفاتيح في النمط المباشر: عدد الأسئلة (0 = معطّل)</label>
-            <input id="ks-direct-reveal" type="text" inputmode="numeric" value="0" />
-            <label><input type="checkbox" id="ks-attacks-on" checked /> تفعيل هجمات القلب (وضع حربي)</label>
+            <label>تعطيل/تفعيل القدرات حسب النمط (سويتش)</label>
+            <div class="switch-grid">
+              <div class="switch-item"><span>تعزيز (مباشر)</span><input type="checkbox" id="ks-sw-boost-direct" checked /></div>
+              <div class="switch-item"><span>تعزيز (مذاكرة)</span><input type="checkbox" id="ks-sw-boost-study" checked /></div>
+              <div class="switch-item"><span>تجاوز (مباشر)</span><input type="checkbox" id="ks-sw-skip-direct" checked /></div>
+              <div class="switch-item"><span>تجاوز (مذاكرة)</span><input type="checkbox" id="ks-sw-skip-study" checked /></div>
+              <div class="switch-item"><span>هجوم (مباشر)</span><input type="checkbox" id="ks-sw-attack-direct" checked /></div>
+              <div class="switch-item"><span>هجوم (مذاكرة)</span><input type="checkbox" id="ks-sw-attack-study" checked /></div>
+              <div class="switch-item"><span>كشف (مباشر)</span><input type="checkbox" id="ks-sw-reveal-direct" checked /></div>
+              <div class="switch-item"><span>كشف (مذاكرة)</span><input type="checkbox" id="ks-sw-reveal-study" checked /></div>
+            </div>
             <div class="btn-row">
               <button type="button" class="btn btn-secondary" id="ks-load-btn">تحميل</button>
               <button type="button" class="btn" id="ks-save-btn">حفظ</button>
@@ -609,13 +644,13 @@
         <input type="hidden" id="edit-id" />
         <label for="edit-prompt">نص السؤال</label>
         <textarea id="edit-prompt" maxlength="2000" rows="3"></textarea>
-        <label for="edit-opt0">الخيار ١</label><input id="edit-opt0" type="text" maxlength="500" />
-        <label for="edit-opt1">الخيار ٢</label><input id="edit-opt1" type="text" maxlength="500" />
-        <label for="edit-opt2">الخيار ٣</label><input id="edit-opt2" type="text" maxlength="500" />
-        <label for="edit-opt3">الخيار ٤</label><input id="edit-opt3" type="text" maxlength="500" />
+        <label for="edit-opt0">الخيار 1</label><input id="edit-opt0" type="text" maxlength="500" />
+        <label for="edit-opt1">الخيار 2</label><input id="edit-opt1" type="text" maxlength="500" />
+        <label for="edit-opt2">الخيار 3</label><input id="edit-opt2" type="text" maxlength="500" />
+        <label for="edit-opt3">الخيار 4</label><input id="edit-opt3" type="text" maxlength="500" />
         <label for="edit-correct">الإجابة الصحيحة</label>
         <select id="edit-correct">
-          <option value="0">الخيار ١</option><option value="1">الخيار ٢</option><option value="2">الخيار ٣</option><option value="3">الخيار ٤</option>
+          <option value="0">الخيار 1</option><option value="1">الخيار 2</option><option value="2">الخيار 3</option><option value="3">الخيار 4</option>
         </select>
         <label for="edit-difficulty">الصعوبة</label><input id="edit-difficulty" type="text" maxlength="32" />
         <label for="edit-study">نص المذاكرة</label><textarea id="edit-study" maxlength="50000" rows="5"></textarea>
@@ -881,9 +916,17 @@
               document.getElementById("ks-attack-cost").value = String(j.keysHeartAttackCost ?? 2);
               document.getElementById("ks-shield-cost").value = String(j.keysShieldCost ?? 2);
               document.getElementById("ks-reveal-cost").value = String(j.keysRevealCost ?? 2);
+              document.getElementById("ks-reveal-q-direct").value = String(j.keysRevealQuestionsDirect ?? 4);
+              document.getElementById("ks-reveal-q-study").value = String(j.keysRevealQuestionsStudy ?? 4);
               document.getElementById("ks-drop").value = String(j.keysDropRate ?? 1);
-              document.getElementById("ks-direct-reveal").value = String(j.keysRevealDirectQuestionSpan ?? 0);
-              document.getElementById("ks-attacks-on").checked = Boolean(j.keysAttacksEnabled);
+              document.getElementById("ks-sw-boost-direct").checked = j.abilitySkillBoostDirectEnabled !== false;
+              document.getElementById("ks-sw-boost-study").checked = j.abilitySkillBoostStudyEnabled !== false;
+              document.getElementById("ks-sw-skip-direct").checked = j.abilitySkipDirectEnabled !== false;
+              document.getElementById("ks-sw-skip-study").checked = j.abilitySkipStudyEnabled !== false;
+              document.getElementById("ks-sw-attack-direct").checked = j.abilityAttackDirectEnabled !== false;
+              document.getElementById("ks-sw-attack-study").checked = j.abilityAttackStudyEnabled !== false;
+              document.getElementById("ks-sw-reveal-direct").checked = j.abilityRevealDirectEnabled !== false;
+              document.getElementById("ks-sw-reveal-study").checked = j.abilityRevealStudyEnabled !== false;
               setKsMsg("تم التحميل.", true);
             } else setKsMsg("تعذر التحميل.", false);
           } catch (e) { setKsMsg("خطأ في الاتصال.", false); }
@@ -902,11 +945,19 @@
             keysHeartAttackCost: parseInt(document.getElementById("ks-attack-cost").value, 10),
             keysShieldCost: parseInt(document.getElementById("ks-shield-cost").value, 10),
             keysRevealCost: parseInt(document.getElementById("ks-reveal-cost").value, 10),
-            keysAttacksEnabled: document.getElementById("ks-attacks-on").checked,
+            keysRevealQuestionsDirect: parseInt(document.getElementById("ks-reveal-q-direct").value, 10),
+            keysRevealQuestionsStudy: parseInt(document.getElementById("ks-reveal-q-study").value, 10),
             keysDropRate: parseFloat(document.getElementById("ks-drop").value),
-            keysRevealDirectQuestionSpan: parseInt(document.getElementById("ks-direct-reveal").value, 10)
+            abilitySkillBoostDirectEnabled: document.getElementById("ks-sw-boost-direct").checked,
+            abilitySkillBoostStudyEnabled: document.getElementById("ks-sw-boost-study").checked,
+            abilitySkipDirectEnabled: document.getElementById("ks-sw-skip-direct").checked,
+            abilitySkipStudyEnabled: document.getElementById("ks-sw-skip-study").checked,
+            abilityAttackDirectEnabled: document.getElementById("ks-sw-attack-direct").checked,
+            abilityAttackStudyEnabled: document.getElementById("ks-sw-attack-study").checked,
+            abilityRevealDirectEnabled: document.getElementById("ks-sw-reveal-direct").checked,
+            abilityRevealStudyEnabled: document.getElementById("ks-sw-reveal-study").checked
           };
-          var nums = [body.keysStreakPerKey, body.keysSmallStreakReward, body.keysMegaStreak, body.keysMegaReward, body.keysMaxPerPlayer, body.keysSkillBoostPercent, body.keysHeartAttackCost, body.keysShieldCost, body.keysRevealCost, body.keysDropRate, body.keysRevealDirectQuestionSpan, body.keysSkillBoostMaxMultiplier];
+          var nums = [body.keysStreakPerKey, body.keysSmallStreakReward, body.keysMegaStreak, body.keysMegaReward, body.keysMaxPerPlayer, body.keysSkillBoostPercent, body.keysHeartAttackCost, body.keysShieldCost, body.keysRevealCost, body.keysRevealQuestionsDirect, body.keysRevealQuestionsStudy, body.keysDropRate, body.keysSkillBoostMaxMultiplier];
           if (nums.some(function (v) { return typeof v !== "number" || !isFinite(v); })) {
             return setKsMsg("تحقق من القيم الرقمية.", false);
           }

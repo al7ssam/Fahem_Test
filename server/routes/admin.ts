@@ -69,9 +69,17 @@ const keysSettingsPatchSchema = z.object({
   keysHeartAttackCost: z.number().int().min(1).max(20),
   keysShieldCost: z.number().int().min(1).max(20),
   keysRevealCost: z.number().int().min(1).max(20),
-  keysAttacksEnabled: z.boolean(),
+  keysRevealQuestionsDirect: z.number().int().min(0).max(30),
+  keysRevealQuestionsStudy: z.number().int().min(0).max(30),
   keysDropRate: z.number().min(0).max(5),
-  keysRevealDirectQuestionSpan: z.number().int().min(0).max(30),
+  abilitySkillBoostDirectEnabled: z.boolean(),
+  abilitySkillBoostStudyEnabled: z.boolean(),
+  abilitySkipDirectEnabled: z.boolean(),
+  abilitySkipStudyEnabled: z.boolean(),
+  abilityAttackDirectEnabled: z.boolean(),
+  abilityAttackStudyEnabled: z.boolean(),
+  abilityRevealDirectEnabled: z.boolean(),
+  abilityRevealStudyEnabled: z.boolean(),
 });
 
 const questionPatchSchema = z.object({
@@ -384,9 +392,17 @@ export function registerAdminRoutes(app: Express): void {
       "keys_heart_attack_cost",
       "keys_shield_cost",
       "keys_reveal_cost",
-      "keys_attacks_enabled",
+      "keys_reveal_questions_direct",
+      "keys_reveal_questions_study",
       "keys_drop_rate",
-      "keys_reveal_direct_question_span",
+      "ability_skill_boost_direct_enabled",
+      "ability_skill_boost_study_enabled",
+      "ability_skip_direct_enabled",
+      "ability_skip_study_enabled",
+      "ability_attack_direct_enabled",
+      "ability_attack_study_enabled",
+      "ability_reveal_direct_enabled",
+      "ability_reveal_study_enabled",
     ] as const;
     try {
       const pool = getPool();
@@ -396,8 +412,6 @@ export function registerAdminRoutes(app: Express): void {
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
       const num = (k: string, d: string) => Number(map.get(k) ?? d);
-      const attacksRaw = String(map.get("keys_attacks_enabled") ?? "1").trim();
-      const keysAttacksEnabled = attacksRaw === "1" || attacksRaw.toLowerCase() === "true";
       res.json({
         ok: true,
         keysStreakPerKey: Math.min(50, Math.max(1, num("keys_streak_per_key", "5"))),
@@ -410,9 +424,17 @@ export function registerAdminRoutes(app: Express): void {
         keysHeartAttackCost: Math.min(20, Math.max(1, num("keys_heart_attack_cost", "2"))),
         keysShieldCost: Math.min(20, Math.max(1, num("keys_shield_cost", "2"))),
         keysRevealCost: Math.min(20, Math.max(1, num("keys_reveal_cost", "2"))),
-        keysAttacksEnabled,
+        keysRevealQuestionsDirect: Math.min(30, Math.max(0, Math.floor(num("keys_reveal_questions_direct", "4")))),
+        keysRevealQuestionsStudy: Math.min(30, Math.max(0, Math.floor(num("keys_reveal_questions_study", "4")))),
         keysDropRate: Math.min(5, Math.max(0, num("keys_drop_rate", "1"))),
-        keysRevealDirectQuestionSpan: Math.min(30, Math.max(0, Math.floor(num("keys_reveal_direct_question_span", "0")))),
+        abilitySkillBoostDirectEnabled: String(map.get("ability_skill_boost_direct_enabled") ?? "1").trim() !== "0",
+        abilitySkillBoostStudyEnabled: String(map.get("ability_skill_boost_study_enabled") ?? "1").trim() !== "0",
+        abilitySkipDirectEnabled: String(map.get("ability_skip_direct_enabled") ?? "1").trim() !== "0",
+        abilitySkipStudyEnabled: String(map.get("ability_skip_study_enabled") ?? "1").trim() !== "0",
+        abilityAttackDirectEnabled: String(map.get("ability_attack_direct_enabled") ?? "1").trim() !== "0",
+        abilityAttackStudyEnabled: String(map.get("ability_attack_study_enabled") ?? "1").trim() !== "0",
+        abilityRevealDirectEnabled: String(map.get("ability_reveal_direct_enabled") ?? "1").trim() !== "0",
+        abilityRevealStudyEnabled: String(map.get("ability_reveal_study_enabled") ?? "1").trim() !== "0",
       });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
@@ -445,9 +467,17 @@ export function registerAdminRoutes(app: Express): void {
            ('keys_heart_attack_cost', $8),
            ('keys_shield_cost', $9),
            ('keys_reveal_cost', $10),
-           ('keys_attacks_enabled', $11),
-           ('keys_drop_rate', $12),
-           ('keys_reveal_direct_question_span', $13)
+           ('keys_reveal_questions_direct', $11),
+           ('keys_reveal_questions_study', $12),
+           ('keys_drop_rate', $13),
+           ('ability_skill_boost_direct_enabled', $14),
+           ('ability_skill_boost_study_enabled', $15),
+           ('ability_skip_direct_enabled', $16),
+           ('ability_skip_study_enabled', $17),
+           ('ability_attack_direct_enabled', $18),
+           ('ability_attack_study_enabled', $19),
+           ('ability_reveal_direct_enabled', $20),
+           ('ability_reveal_study_enabled', $21)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [
           String(d.keysStreakPerKey),
@@ -460,9 +490,17 @@ export function registerAdminRoutes(app: Express): void {
           String(d.keysHeartAttackCost),
           String(d.keysShieldCost),
           String(d.keysRevealCost),
-          d.keysAttacksEnabled ? "1" : "0",
+          String(d.keysRevealQuestionsDirect),
+          String(d.keysRevealQuestionsStudy),
           String(d.keysDropRate),
-          String(d.keysRevealDirectQuestionSpan),
+          d.abilitySkillBoostDirectEnabled ? "1" : "0",
+          d.abilitySkillBoostStudyEnabled ? "1" : "0",
+          d.abilitySkipDirectEnabled ? "1" : "0",
+          d.abilitySkipStudyEnabled ? "1" : "0",
+          d.abilityAttackDirectEnabled ? "1" : "0",
+          d.abilityAttackStudyEnabled ? "1" : "0",
+          d.abilityRevealDirectEnabled ? "1" : "0",
+          d.abilityRevealStudyEnabled ? "1" : "0",
         ],
       );
       res.json({ ok: true });

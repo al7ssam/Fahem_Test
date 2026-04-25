@@ -87,9 +87,17 @@ export class Match {
   private keysHeartAttackCost = 2;
   private keysShieldCost = 2;
   private keysRevealCost = 2;
-  private keysAttacksEnabled = true;
+  private keysRevealQuestionsDirect = 4;
+  private keysRevealQuestionsStudy = 4;
   private keysDropRate = 1;
-  private keysRevealDirectQuestionSpan = 0;
+  private abilitySkillBoostDirectEnabled = true;
+  private abilitySkillBoostStudyEnabled = true;
+  private abilitySkipDirectEnabled = true;
+  private abilitySkipStudyEnabled = true;
+  private abilityAttackDirectEnabled = true;
+  private abilityAttackStudyEnabled = true;
+  private abilityRevealDirectEnabled = true;
+  private abilityRevealStudyEnabled = true;
 
   constructor(
     private readonly io: Server,
@@ -142,12 +150,37 @@ export class Match {
     };
   }
 
+  private snapshotAbilityToggles(): {
+    skillBoost: boolean;
+    skipQuestion: boolean;
+    heartAttack: boolean;
+    reveal: boolean;
+  } {
+    const isDirect = this.gameMode === "direct";
+    return {
+      skillBoost: isDirect ? this.abilitySkillBoostDirectEnabled : this.abilitySkillBoostStudyEnabled,
+      skipQuestion: isDirect ? this.abilitySkipDirectEnabled : this.abilitySkipStudyEnabled,
+      heartAttack: isDirect ? this.abilityAttackDirectEnabled : this.abilityAttackStudyEnabled,
+      reveal: isDirect ? this.abilityRevealDirectEnabled : this.abilityRevealStudyEnabled,
+    };
+  }
+
+  private isAbilityEnabled(kind: "skill_boost" | "skip" | "attack" | "reveal"): boolean {
+    const toggles = this.snapshotAbilityToggles();
+    if (kind === "skill_boost") return toggles.skillBoost;
+    if (kind === "skip") return toggles.skipQuestion;
+    if (kind === "attack") return toggles.heartAttack;
+    return toggles.reveal;
+  }
+
   private emitKeysRoomState(): void {
     this.io.to(this.room).emit("keys_room_state", {
       revealKeysActive: this.revealKeysActive,
       macroRound: this.macroRound,
       players: this.snapshotPlayers(),
       abilityCosts: this.snapshotAbilityCosts(),
+      abilityToggles: this.snapshotAbilityToggles(),
+      keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
     });
   }
 
@@ -403,7 +436,12 @@ export class Match {
            'keys_streak_per_key', 'keys_small_streak_reward', 'keys_mega_streak', 'keys_mega_reward', 'keys_max_per_player',
            'keys_skill_boost_percent', 'keys_skill_boost_max_multiplier',
            'keys_heart_attack_cost', 'keys_shield_cost', 'keys_reveal_cost',
-           'keys_attacks_enabled', 'keys_drop_rate', 'keys_reveal_direct_question_span'
+           'keys_reveal_questions_direct', 'keys_reveal_questions_study',
+           'keys_drop_rate',
+           'ability_skill_boost_direct_enabled', 'ability_skill_boost_study_enabled',
+           'ability_skip_direct_enabled', 'ability_skip_study_enabled',
+           'ability_attack_direct_enabled', 'ability_attack_study_enabled',
+           'ability_reveal_direct_enabled', 'ability_reveal_study_enabled'
          )`,
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -424,15 +462,24 @@ export class Match {
       this.keysHeartAttackCost = Math.min(20, Math.max(1, Number(map.get("keys_heart_attack_cost") ?? 2)));
       this.keysShieldCost = Math.min(20, Math.max(1, Number(map.get("keys_shield_cost") ?? 2)));
       this.keysRevealCost = Math.min(20, Math.max(1, Number(map.get("keys_reveal_cost") ?? 2)));
-      const atk = String(map.get("keys_attacks_enabled") ?? "1").trim();
-      this.keysAttacksEnabled = atk === "1" || atk.toLowerCase() === "true";
+      this.keysRevealQuestionsDirect = Math.min(30, Math.max(0, Math.floor(Number(map.get("keys_reveal_questions_direct") ?? 4))));
+      this.keysRevealQuestionsStudy = Math.min(30, Math.max(0, Math.floor(Number(map.get("keys_reveal_questions_study") ?? 4))));
       this.keysDropRate = Math.min(5, Math.max(0, Number(map.get("keys_drop_rate") ?? 1)));
-      this.keysRevealDirectQuestionSpan = Math.min(30, Math.max(0, Math.floor(Number(map.get("keys_reveal_direct_question_span") ?? 0))));
+      this.abilitySkillBoostDirectEnabled = String(map.get("ability_skill_boost_direct_enabled") ?? "1").trim() !== "0";
+      this.abilitySkillBoostStudyEnabled = String(map.get("ability_skill_boost_study_enabled") ?? "1").trim() !== "0";
+      this.abilitySkipDirectEnabled = String(map.get("ability_skip_direct_enabled") ?? "1").trim() !== "0";
+      this.abilitySkipStudyEnabled = String(map.get("ability_skip_study_enabled") ?? "1").trim() !== "0";
+      this.abilityAttackDirectEnabled = String(map.get("ability_attack_direct_enabled") ?? "1").trim() !== "0";
+      this.abilityAttackStudyEnabled = String(map.get("ability_attack_study_enabled") ?? "1").trim() !== "0";
+      this.abilityRevealDirectEnabled = String(map.get("ability_reveal_direct_enabled") ?? "1").trim() !== "0";
+      this.abilityRevealStudyEnabled = String(map.get("ability_reveal_study_enabled") ?? "1").trim() !== "0";
     } catch {
       this.maxStudyRounds = DEFAULT_MAX_STUDY_ROUNDS;
       this.studyRoundSize = DEFAULT_STUDY_ROUND_SIZE;
       this.studyPhaseMs = DEFAULT_STUDY_PHASE_MS;
       this.keysSmallStreakReward = 1;
+      this.keysRevealQuestionsDirect = 4;
+      this.keysRevealQuestionsStudy = 4;
     }
   }
 
@@ -443,8 +490,9 @@ export class Match {
       gameMode: this.gameMode,
       players: this.snapshotPlayers(),
       revealKeysActive: this.revealKeysActive,
-      keysAttacksEnabled: this.keysAttacksEnabled,
+      keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
       abilityCosts: this.snapshotAbilityCosts(),
+      abilityToggles: this.snapshotAbilityToggles(),
     });
     this.emitKeysRoomState();
 
@@ -568,8 +616,9 @@ export class Match {
       round: this.round,
       macroRound: this.macroRound,
       revealKeysActive: this.revealKeysActive,
-      keysAttacksEnabled: this.keysAttacksEnabled,
+      keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
       abilityCosts: this.snapshotAbilityCosts(),
+      abilityToggles: this.snapshotAbilityToggles(),
     });
 
     this.questionTimer = setTimeout(() => {
@@ -681,6 +730,11 @@ export class Match {
       if (this.directRevealRemaining <= 0) {
         this.revealKeysActive = false;
       }
+    } else if (this.gameMode === "study_then_quiz" && this.revealKeysActive && this.directRevealRemaining > 0) {
+      this.directRevealRemaining -= 1;
+      if (this.directRevealRemaining <= 0) {
+        this.revealKeysActive = false;
+      }
     }
 
     this.io.to(this.room).emit("question_result", {
@@ -690,8 +744,9 @@ export class Match {
       players: this.snapshotPlayers(),
       revealKeysActive: this.revealKeysActive,
       macroRound: this.macroRound,
-      keysAttacksEnabled: this.keysAttacksEnabled,
+      keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
       abilityCosts: this.snapshotAbilityCosts(),
+      abilityToggles: this.snapshotAbilityToggles(),
     });
 
     this.resolveRound?.();
@@ -772,6 +827,7 @@ export class Match {
 
   tryAbilitySkillBoost(socketId: string): AbilityAck {
     if (this.finished) return { ok: false, error: "match_finished" };
+    if (!this.isAbilityEnabled("skill_boost")) return { ok: false, error: "ability_disabled" };
     const p = this.players.get(socketId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
       return { ok: false, error: "not_eligible" };
@@ -786,6 +842,7 @@ export class Match {
 
   tryAbilitySkipQuestion(socketId: string): AbilityAck {
     if (this.finished) return { ok: false, error: "match_finished" };
+    if (!this.isAbilityEnabled("skip")) return { ok: false, error: "ability_disabled" };
     const p = this.players.get(socketId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
       return { ok: false, error: "not_eligible" };
@@ -801,7 +858,7 @@ export class Match {
   }
 
   tryAbilityHeartAttack(attackerId: string, victimId: string): AbilityAck {
-    if (!this.keysAttacksEnabled) return { ok: false, error: "attacks_disabled" };
+    if (!this.isAbilityEnabled("attack")) return { ok: false, error: "ability_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityWindowOpen()) return { ok: false, error: "question_closed" };
     if (attackerId === victimId) return { ok: false, error: "invalid_target" };
@@ -845,6 +902,7 @@ export class Match {
 
   tryAbilityRevealKeys(socketId: string): AbilityAck {
     if (this.finished) return { ok: false, error: "match_finished" };
+    if (!this.isAbilityEnabled("reveal")) return { ok: false, error: "ability_disabled" };
     const p = this.players.get(socketId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
       return { ok: false, error: "not_eligible" };
@@ -853,15 +911,16 @@ export class Match {
 
     if (this.gameMode === "study_then_quiz") {
       if (this.macroRound <= 0) return { ok: false, error: "reveal_not_available" };
+      if (this.keysRevealQuestionsStudy <= 0) return { ok: false, error: "reveal_not_available" };
       if (this.revealKeysActive && this.revealKeysForMacroRound === this.macroRound) {
         return { ok: false, error: "reveal_already_active" };
       }
       p.keys -= this.keysRevealCost;
       this.revealKeysActive = true;
       this.revealKeysForMacroRound = this.macroRound;
-      this.directRevealRemaining = 0;
+      this.directRevealRemaining = this.keysRevealQuestionsStudy;
     } else {
-      if (this.keysRevealDirectQuestionSpan <= 0) {
+      if (this.keysRevealQuestionsDirect <= 0) {
         return { ok: false, error: "reveal_disabled_direct" };
       }
       if (this.revealKeysActive && this.directRevealRemaining > 0) {
@@ -870,7 +929,7 @@ export class Match {
       p.keys -= this.keysRevealCost;
       this.revealKeysActive = true;
       this.revealKeysForMacroRound = null;
-      this.directRevealRemaining = this.keysRevealDirectQuestionSpan;
+      this.directRevealRemaining = this.keysRevealQuestionsDirect;
     }
 
     this.emitKeysRoomState();
