@@ -542,6 +542,34 @@
       </div>
 
       <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="subcategory-prompt-generator">
+          <span class="accordion-title">مولد برومبت التصنيف الفرعي</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <p class="subtitle">اختر التصنيف والعدد، وسيتم إدراج مفتاح الفرعي ووصفه ومستواه داخل البرومبت تلقائيًا.</p>
+            <label for="prompt-main-category">التصنيف الرئيسي</label>
+            <select id="prompt-main-category"></select>
+            <label for="prompt-subcategory">التصنيف الفرعي</label>
+            <select id="prompt-subcategory"></select>
+            <label for="prompt-question-count">عدد الأسئلة المطلوب توليدها</label>
+            <input id="prompt-question-count" type="text" inputmode="numeric" value="20" />
+            <label for="prompt-topic">موضوع أدق داخل التصنيف (اختياري)</label>
+            <textarea id="prompt-topic" rows="2" maxlength="500" placeholder="مثال: عجائب الدنيا / جسم الإنسان"></textarea>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="prompt-load-categories-btn">تحميل التصنيفات</button>
+              <button type="button" class="btn" id="prompt-generate-btn">إنشاء البرومبت</button>
+              <button type="button" class="btn btn-secondary" id="prompt-copy-btn">نسخ البرومبت</button>
+            </div>
+            <label for="prompt-output">البرومبت الجاهز</label>
+            <textarea id="prompt-output" class="mono" rows="16" readonly spellcheck="false"></textarea>
+            <div class="msg" id="prompt-generator-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="result-copy">
           <span class="accordion-title">نصوص نتيجة اللعبة</span>
           <span class="accordion-icon">⌄</span>
@@ -841,16 +869,19 @@
         var bankMain = document.getElementById("bank-main-category");
         var bankSub = document.getElementById("bank-subcategory");
         var subMain = document.getElementById("cat-sub-main-id");
+        var promptMain = document.getElementById("prompt-main-category");
         qSub.innerHTML = "";
         editSub.innerHTML = "";
         bankMain.innerHTML = '<option value="">كل التصنيفات الرئيسية</option>';
         bankSub.innerHTML = '<option value="">كل التصنيفات الفرعية</option>';
         subMain.innerHTML = "";
+        if (promptMain) promptMain.innerHTML = '<option value="">اختر التصنيف الرئيسي</option>';
         categoriesCache.forEach(function (m) {
           var optM = document.createElement("option");
           optM.value = m.mainKey;
           optM.textContent = (m.icon || "📚") + " " + m.nameAr;
           bankMain.appendChild(optM);
+          if (promptMain) promptMain.appendChild(optM.cloneNode(true));
           var subMainOpt = document.createElement("option");
           subMainOpt.value = String(m.id);
           subMainOpt.textContent = m.nameAr;
@@ -870,6 +901,39 @@
             bankSub.appendChild(optB);
           });
         });
+        syncPromptGeneratorSubcategories();
+      }
+
+      function findPromptMainCategory(mainKey) {
+        return (categoriesCache || []).find(function (m) { return m.mainKey === mainKey; }) || null;
+      }
+
+      function findPromptSubcategory(mainKey, subcategoryKey) {
+        var main = findPromptMainCategory(mainKey);
+        if (!main) return null;
+        return (main.subcategories || []).find(function (s) { return s.subcategoryKey === subcategoryKey; }) || null;
+      }
+
+      function syncPromptGeneratorSubcategories() {
+        var promptMain = document.getElementById("prompt-main-category");
+        var promptSub = document.getElementById("prompt-subcategory");
+        if (!promptMain || !promptSub) return;
+        var selectedMain = promptMain.value || "";
+        var selectedSub = promptSub.value || "";
+        promptSub.innerHTML = '<option value="">اختر التصنيف الفرعي</option>';
+        (categoriesCache || []).forEach(function (m) {
+          if (selectedMain && m.mainKey !== selectedMain) return;
+          (m.subcategories || []).forEach(function (s) {
+            var opt = document.createElement("option");
+            opt.value = s.subcategoryKey;
+            opt.dataset.mainKey = m.mainKey;
+            opt.textContent = (s.icon || "📘") + " " + s.nameAr + " — " + m.nameAr;
+            promptSub.appendChild(opt);
+          });
+        });
+        if (selectedSub && Array.from(promptSub.options).some(function (o) { return o.value === selectedSub; })) {
+          promptSub.value = selectedSub;
+        }
       }
 
       (function () {
@@ -997,6 +1061,129 @@
             else setAiMsg("تعذر الحفظ.", false);
           } catch (e) { setAiMsg("خطأ في الاتصال.", false); }
           finally { saveBtn.disabled = false; }
+        });
+      })();
+
+      (function () {
+        var mainSelect = document.getElementById("prompt-main-category");
+        var subSelect = document.getElementById("prompt-subcategory");
+        var countInput = document.getElementById("prompt-question-count");
+        var topicInput = document.getElementById("prompt-topic");
+        var loadBtn = document.getElementById("prompt-load-categories-btn");
+        var generateBtn = document.getElementById("prompt-generate-btn");
+        var copyBtn = document.getElementById("prompt-copy-btn");
+        var output = document.getElementById("prompt-output");
+        var msg = document.getElementById("prompt-generator-msg");
+        function setPromptMsg(t, ok) { msg.textContent = t || ""; msg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        function difficultyForPrompt(level) {
+          if (level === "beginner") return "easy";
+          if (level === "advanced") return "hard";
+          return "medium";
+        }
+        function levelLabel(level) {
+          if (level === "beginner") return "مبتدئ";
+          if (level === "advanced") return "متقدم";
+          return "متوسط";
+        }
+        async function ensurePromptCategories() {
+          var s = secret();
+          if (!s) {
+            setPromptMsg("أدخل مفتاح الإدارة أولاً.", false);
+            return false;
+          }
+          if (!categoriesCache.length) {
+            await loadCategoriesForUi(s);
+          }
+          if (!categoriesCache.length) {
+            setPromptMsg("تعذر تحميل التصنيفات.", false);
+            return false;
+          }
+          syncPromptGeneratorSubcategories();
+          return true;
+        }
+        function buildPrompt(main, sub, count, topic) {
+          var difficulty = difficultyForPrompt(sub.difficultyLevel);
+          var description = (sub.internalDescription || "").trim() || "لا يوجد وصف داخلي محدد لهذا التصنيف، اعتمد على اسم التصنيف الفرعي وسياقه.";
+          var focusedTopic = topic || sub.nameAr;
+          return [
+            "أنت خبير في تصميم المحتوى التعليمي التفاعلي (Gamified Education). أريد منك كتابة " + count + " سؤالاً تعليمياً حول " + focusedTopic + ".",
+            "",
+            "سياق التصنيف المطلوب:",
+            "- التصنيف الرئيسي: " + main.nameAr,
+            "- التصنيف الفرعي: " + sub.nameAr,
+            "- مفتاح التصنيف الفرعي الذي يجب استخدامه كما هو: " + sub.subcategoryKey,
+            "- مستوى التصنيف الفرعي: " + levelLabel(sub.difficultyLevel) + "، ويجب استخدام قيمة difficulty التالية: " + difficulty,
+            "- وصف التصنيف الفرعي لمساعدتك على فهم نوع الأسئلة المطلوبة: " + description,
+            "",
+            "يجب أن تلتزم بالقواعد الصارمة التالية لضمان توافقها مع نظامي البرمجي:",
+            "",
+            "هيكل البيانات: يجب أن يكون المخرج عبارة عن مصفوفة JSON واحدة تحتوي على كائنات بهذا الهيكل حصراً:",
+            "",
+            "{",
+            '  "prompt": "السؤال هنا؟",',
+            '  "options": ["خيار 1", "خيار 2", "خيار 3", "خيار 4"],',
+            '  "correctIndex": 0,',
+            '  "studyBody": "هنا تضع نص البطاقة التعليمية (بطاقة واحدة مركزة تشرح المعلومة بأسلوب شيق ومبسط).",',
+            '  "subcategoryKey": "' + sub.subcategoryKey + '",',
+            '  "difficulty": "' + difficulty + '"',
+            "}",
+            "",
+            "المحتوى التعليمي (studyBody): لكل سؤال، اكتب نصاً تعليمياً واحداً ومركزاً. يجب أن يكون شرحاً ممتعاً يُمكّن اللاعب من استخلاص الإجابة مباشرة من النص دون الحاجة لأي معرفة مسبقة.",
+            "",
+            "التصنيف والصعوبة:",
+            "- استخدم subcategoryKey واحد لجميع الأسئلة وهو: " + sub.subcategoryKey,
+            "- استخدم difficulty واحد لجميع الأسئلة وهو: " + difficulty,
+            "- تجنب الأسئلة السطحية جداً، واجعلها مناسبة لمستوى التصنيف.",
+            "",
+            "اللغة والقيود:",
+            "- استخدم لغة عربية بيضاء واضحة.",
+            "- ممنوع استخدام علامات التنصيص المزدوجة داخل نصوص الأسئلة أو المحتوى التعليمي. استخدم المفردات البديلة أو علامات الاقتباس المفردة عند الضرورة القصوى.",
+            "- تأكد من دقة correctIndex (يبدأ من 0) وسلامة بنية JSON.",
+            "",
+            "الإخراج: أريد كود JSON فقط، جاهز للصق مباشرة في حقل الاستيراد، دون أي نصوص ترحيبية أو تفسيرات خارج الكود."
+          ].join("\\n");
+        }
+        mainSelect.addEventListener("change", function () {
+          syncPromptGeneratorSubcategories();
+          setPromptMsg("", true);
+        });
+        loadBtn.addEventListener("click", async function () {
+          loadBtn.disabled = true;
+          try {
+            if (await ensurePromptCategories()) setPromptMsg("تم تحميل التصنيفات.", true);
+          } catch (e) {
+            setPromptMsg("تعذر تحميل التصنيفات.", false);
+          } finally {
+            loadBtn.disabled = false;
+          }
+        });
+        generateBtn.addEventListener("click", async function () {
+          try {
+            if (!(await ensurePromptCategories())) return;
+            var mainKey = mainSelect.value || "";
+            var subKey = subSelect.value || "";
+            var main = findPromptMainCategory(mainKey);
+            var sub = findPromptSubcategory(mainKey, subKey);
+            var count = parseInt(countInput.value, 10);
+            if (!main) return setPromptMsg("اختر التصنيف الرئيسي.", false);
+            if (!sub) return setPromptMsg("اختر التصنيف الفرعي.", false);
+            if (!Number.isFinite(count) || count < 1 || count > 200) return setPromptMsg("أدخل عدد أسئلة بين 1 و 200.", false);
+            output.value = buildPrompt(main, sub, count, topicInput.value.trim());
+            setPromptMsg("تم إنشاء البرومبت.", true);
+          } catch (e) {
+            setPromptMsg("تعذر إنشاء البرومبت.", false);
+          }
+        });
+        copyBtn.addEventListener("click", async function () {
+          if (!output.value.trim()) return setPromptMsg("أنشئ البرومبت أولاً.", false);
+          try {
+            await navigator.clipboard.writeText(output.value);
+            setPromptMsg("تم نسخ البرومبت.", true);
+          } catch (e) {
+            output.select();
+            setPromptMsg("تعذر النسخ التلقائي، تم تحديد النص.", false);
+          }
         });
       })();
 
