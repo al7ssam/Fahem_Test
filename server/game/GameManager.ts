@@ -2,11 +2,13 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getPool } from "../db/pool";
+import { countQuestionsBySubcategory } from "../db/questions";
 import { Match, type GameMode } from "./Match";
 
 const joinLobbySchema = z.object({
   name: z.string().trim().min(1).max(32),
   mode: z.enum(["direct", "study_then_quiz"]).default("direct"),
+  subcategoryKey: z.string().trim().min(1).max(120).optional(),
 });
 
 const answerSchema = z.object({
@@ -28,6 +30,7 @@ type LobbyEntry = {
   ready: boolean;
   readyOrder: number | null;
   mode: GameMode;
+  subcategoryKey: string | null;
 };
 
 type LobbyStatePayload = {
@@ -37,6 +40,7 @@ type LobbyStatePayload = {
     name: string;
     ready: boolean;
     mode: GameMode;
+    subcategoryKey: string | null;
   }>;
   isStarting: boolean;
   participantSocketIds: string[];
@@ -78,11 +82,12 @@ export class GameManager {
 
   constructor(private readonly io: Server) {}
 
-  private lobbyRoom(mode: GameMode): string {
-    return mode === "direct" ? "lobby:direct" : "lobby:study_then_quiz";
+  private lobbyRoom(mode: GameMode, subcategoryKey?: string | null): string {
+    if (mode === "direct") return "lobby:direct";
+    return `lobby:study_then_quiz:${subcategoryKey ?? "general_default"}`;
   }
 
-  private buildLobbyPayload(mode: GameMode): LobbyStatePayload {
+  private buildLobbyPayload(mode: GameMode, subcategoryKey?: string | null): LobbyStatePayload {
     const isStarting = Boolean(this.matchStartTimers[mode]);
     const endsAt = this.countdownEndsAt[mode];
     const countdownSecondsRemaining =
@@ -91,11 +96,14 @@ export class GameManager {
         : undefined;
     return {
       mode,
-      players: [...this.lobbies[mode].values()].map((p) => ({
+      players: [...this.lobbies[mode].values()]
+        .filter((p) => mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default"))
+        .map((p) => ({
         socketId: p.socketId,
         name: p.name,
         ready: p.ready,
         mode: p.mode,
+        subcategoryKey: p.subcategoryKey,
       })),
       isStarting,
       participantSocketIds: [...this.lockedParticipants[mode]],
@@ -113,6 +121,10 @@ export class GameManager {
           return;
         }
         const { name, mode } = parsed.data;
+        const subcategoryKey =
+          mode === "study_then_quiz"
+            ? String(parsed.data.subcategoryKey ?? "general_default").trim()
+            : null;
         this.leaveMatchForSocket(socket.id);
         this.leaveLobbyEverywhere(socket.id);
         this.lobbies[mode].set(socket.id, {
@@ -121,11 +133,12 @@ export class GameManager {
           ready: true,
           readyOrder: ++this.readyOrderCounter,
           mode,
+          subcategoryKey,
         });
-        await socket.join(this.lobbyRoom(mode));
-        this.broadcastLobby(mode);
-        socket.emit("lobby_state", this.buildLobbyPayload(mode));
-        this.enqueueScheduleMatchStart(mode);
+        await socket.join(this.lobbyRoom(mode, subcategoryKey));
+        this.broadcastLobby(mode, subcategoryKey);
+        socket.emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey));
+        this.enqueueScheduleMatchStart(mode, subcategoryKey);
         cb?.({ ok: true });
       } catch {
         cb?.({ ok: false, error: "server" });
@@ -142,8 +155,8 @@ export class GameManager {
         entry.ready = true;
         entry.readyOrder = ++this.readyOrderCounter;
       }
-      this.broadcastLobby(entry.mode);
-      this.enqueueScheduleMatchStart(entry.mode);
+      this.broadcastLobby(entry.mode, entry.subcategoryKey);
+      this.enqueueScheduleMatchStart(entry.mode, entry.subcategoryKey);
       cb?.({ ok: true });
     });
 
@@ -242,11 +255,12 @@ export class GameManager {
 
   private leaveLobbyEverywhere(socketId: string): void {
     for (const mode of ["direct", "study_then_quiz"] as const) {
+      const prev = this.lobbies[mode].get(socketId);
       if (this.lobbies[mode].delete(socketId)) {
         this.lockedParticipants[mode] = this.lockedParticipants[mode].filter((id) => id !== socketId);
-        void this.io.sockets.sockets.get(socketId)?.leave(this.lobbyRoom(mode));
+        void this.io.sockets.sockets.get(socketId)?.leave(this.lobbyRoom(mode, prev?.subcategoryKey));
         this.clearMatchStartTimerIfNeeded(mode);
-        this.broadcastLobby(mode);
+        this.broadcastLobby(mode, prev?.subcategoryKey);
       }
     }
   }
@@ -258,9 +272,9 @@ export class GameManager {
     this.lockedParticipants[entry.mode] = this.lockedParticipants[entry.mode].filter(
       (id) => id !== socketId,
     );
-    void this.io.sockets.sockets.get(socketId)?.leave(this.lobbyRoom(entry.mode));
+    void this.io.sockets.sockets.get(socketId)?.leave(this.lobbyRoom(entry.mode, entry.subcategoryKey));
     this.clearMatchStartTimerIfNeeded(entry.mode);
-    this.broadcastLobby(entry.mode);
+    this.broadcastLobby(entry.mode, entry.subcategoryKey);
   }
 
   private leaveMatchForSocket(socketId: string): void {
@@ -271,12 +285,16 @@ export class GameManager {
     void this.io.sockets.sockets.get(socketId)?.leave(m.room);
   }
 
-  private readyPlayers(mode: GameMode): LobbyEntry[] {
-    return [...this.lobbies[mode].values()].filter((p) => p.ready);
+  private readyPlayers(mode: GameMode, subcategoryKey?: string | null): LobbyEntry[] {
+    return [...this.lobbies[mode].values()].filter(
+      (p) =>
+        p.ready &&
+        (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")),
+    );
   }
 
-  private sortedReadyPlayers(mode: GameMode): LobbyEntry[] {
-    return this.readyPlayers(mode).sort((a, b) => {
+  private sortedReadyPlayers(mode: GameMode, subcategoryKey?: string | null): LobbyEntry[] {
+    return this.readyPlayers(mode, subcategoryKey).sort((a, b) => {
       const aOrder = a.readyOrder ?? Number.MAX_SAFE_INTEGER;
       const bOrder = b.readyOrder ?? Number.MAX_SAFE_INTEGER;
       return aOrder - bOrder;
@@ -330,14 +348,16 @@ export class GameManager {
     }
   }
 
-  private broadcastLobby(mode: GameMode): void {
-    this.io.to(this.lobbyRoom(mode)).emit("lobby_state", this.buildLobbyPayload(mode));
+  private broadcastLobby(mode: GameMode, subcategoryKey?: string | null): void {
+    this.io
+      .to(this.lobbyRoom(mode, subcategoryKey))
+      .emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey));
   }
 
-  private enqueueScheduleMatchStart(mode: GameMode): void {
+  private enqueueScheduleMatchStart(mode: GameMode, subcategoryKey?: string | null): void {
     this.scheduleChain[mode] = this.scheduleChain[mode]
       .catch(() => undefined)
-      .then(() => this.runScheduleMatchStart(mode));
+      .then(() => this.runScheduleMatchStart(mode, subcategoryKey));
   }
 
   private clearMatchStartTimerIfNeeded(mode: GameMode): void {
@@ -362,11 +382,16 @@ export class GameManager {
     }
   }
 
-  private emitMatchStarting(mode: GameMode, locked: string[], maxPlayers: number): void {
+  private emitMatchStarting(
+    mode: GameMode,
+    locked: string[],
+    maxPlayers: number,
+    subcategoryKey?: string | null,
+  ): void {
     const fillMs = this.matchFillWindowSeconds * 1000;
     const endsAt = this.countdownEndsAt[mode] ?? Date.now() + fillMs;
     const seconds = Math.max(1, Math.ceil((endsAt - Date.now()) / 1000));
-    this.io.to(this.lobbyRoom(mode)).emit("match_starting", {
+    this.io.to(this.lobbyRoom(mode, subcategoryKey)).emit("match_starting", {
       seconds,
       participantSocketIds: locked,
       maxPlayersPerMatch: maxPlayers,
@@ -374,9 +399,9 @@ export class GameManager {
     });
   }
 
-  private async updateRosterDuringCountdown(mode: GameMode): Promise<void> {
+  private async updateRosterDuringCountdown(mode: GameMode, subcategoryKey?: string | null): Promise<void> {
     const maxPlayers = await this.loadMaxPlayersPerMatch();
-    const locked = this.sortedReadyPlayers(mode)
+    const locked = this.sortedReadyPlayers(mode, subcategoryKey)
       .slice(0, maxPlayers)
       .map((p) => p.socketId);
     if (locked.length < 2) {
@@ -387,22 +412,22 @@ export class GameManager {
       }
       this.countdownEndsAt[mode] = null;
       this.lockedParticipants[mode] = [];
-      this.io.to(this.lobbyRoom(mode)).emit("match_start_cancelled", {
+      this.io.to(this.lobbyRoom(mode, subcategoryKey)).emit("match_start_cancelled", {
         reason: "not_enough_ready",
       });
-      this.broadcastLobby(mode);
-      if (this.readyPlayers(mode).length >= 2) {
-        this.enqueueScheduleMatchStart(mode);
+      this.broadcastLobby(mode, subcategoryKey);
+      if (this.readyPlayers(mode, subcategoryKey).length >= 2) {
+        this.enqueueScheduleMatchStart(mode, subcategoryKey);
       }
       return;
     }
     this.lockedParticipants[mode] = locked;
-    this.emitMatchStarting(mode, locked, maxPlayers);
-    this.broadcastLobby(mode);
+    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey);
+    this.broadcastLobby(mode, subcategoryKey);
   }
 
-  private async runScheduleMatchStart(mode: GameMode): Promise<void> {
-    const ready = this.readyPlayers(mode);
+  private async runScheduleMatchStart(mode: GameMode, subcategoryKey?: string | null): Promise<void> {
+    const ready = this.readyPlayers(mode, subcategoryKey);
     if (ready.length < 2) {
       if (!this.matchStartTimers[mode]) {
         this.clearMatchStartTimerIfNeeded(mode);
@@ -411,36 +436,36 @@ export class GameManager {
     }
 
     if (this.matchStartTimers[mode]) {
-      await this.updateRosterDuringCountdown(mode);
+      await this.updateRosterDuringCountdown(mode, subcategoryKey);
       return;
     }
 
     const maxPlayers = await this.loadMaxPlayersPerMatch();
     const fillSeconds = await this.loadMatchFillWindowSeconds();
     const fillMs = fillSeconds * 1000;
-    const locked = this.sortedReadyPlayers(mode)
+    const locked = this.sortedReadyPlayers(mode, subcategoryKey)
       .slice(0, maxPlayers)
       .map((p) => p.socketId);
     if (locked.length < 2) return;
 
     if (this.matchStartTimers[mode]) {
-      await this.updateRosterDuringCountdown(mode);
+      await this.updateRosterDuringCountdown(mode, subcategoryKey);
       return;
     }
 
     this.lockedParticipants[mode] = locked;
     this.countdownEndsAt[mode] = Date.now() + fillMs;
-    this.emitMatchStarting(mode, locked, maxPlayers);
-    this.broadcastLobby(mode);
+    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey);
+    this.broadcastLobby(mode, subcategoryKey);
 
     this.matchStartTimers[mode] = setTimeout(() => {
       this.matchStartTimers[mode] = null;
       this.countdownEndsAt[mode] = null;
-      void this.startMatchFromLobby(mode);
+      void this.startMatchFromLobby(mode, subcategoryKey);
     }, fillMs);
   }
 
-  private async startMatchFromLobby(gameMode: GameMode): Promise<void> {
+  private async startMatchFromLobby(gameMode: GameMode, subcategoryKey?: string | null): Promise<void> {
     const startedAt = Date.now();
     const locked = this.lockedParticipants[gameMode];
     const participants = locked
@@ -452,24 +477,44 @@ export class GameManager {
       });
     if (participants.length < 2) {
       this.lockedParticipants[gameMode] = [];
-      this.io.to(this.lobbyRoom(gameMode)).emit("match_start_cancelled", {
+      this.io.to(this.lobbyRoom(gameMode, subcategoryKey)).emit("match_start_cancelled", {
         reason: "not_enough_ready",
       });
-      this.broadcastLobby(gameMode);
-      if (this.readyPlayers(gameMode).length >= 2) {
-        this.enqueueScheduleMatchStart(gameMode);
+      this.broadcastLobby(gameMode, subcategoryKey);
+      if (this.readyPlayers(gameMode, subcategoryKey).length >= 2) {
+        this.enqueueScheduleMatchStart(gameMode, subcategoryKey);
       }
       return;
     }
+    if (gameMode === "study_then_quiz") {
+      const key = subcategoryKey ?? "general_default";
+      const total = await countQuestionsBySubcategory(getPool(), key, true);
+      if (total < 30) {
+        this.io.to(this.lobbyRoom(gameMode, subcategoryKey)).emit("match_start_cancelled", {
+          reason: "not_enough_questions",
+          message: "لا توجد أسئلة كافية في هذا التصنيف (الحد الأدنى 30).",
+          minRequired: 30,
+          available: total,
+        });
+        this.broadcastLobby(gameMode, subcategoryKey);
+        return;
+      }
+    }
     this.lockedParticipants[gameMode] = [];
     const matchId = randomUUID();
-    const match = new Match(this.io, matchId, participants, gameMode);
+    const match = new Match(
+      this.io,
+      matchId,
+      participants,
+      gameMode,
+      gameMode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
+    );
 
     await Promise.all(participants.map(async (p) => {
       this.lobbies[gameMode].delete(p.socketId);
       const s = this.io.sockets.sockets.get(p.socketId);
       if (s) {
-        await s.leave(this.lobbyRoom(gameMode));
+        await s.leave(this.lobbyRoom(gameMode, subcategoryKey));
         await s.join(match.room);
         this.socketToMatch.set(p.socketId, match);
       }
@@ -478,7 +523,7 @@ export class GameManager {
     console.debug(`[matchmaking] lobby_to_match_rooms_ms=${roomsReadyMs} mode=${gameMode} participants=${participants.length}`);
 
     this.runningMatches.set(matchId, match);
-    this.broadcastLobby(gameMode);
+    this.broadcastLobby(gameMode, subcategoryKey);
 
     try {
       await match.run();

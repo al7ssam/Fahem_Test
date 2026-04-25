@@ -111,6 +111,7 @@ export class Match {
     readonly matchId: string,
     entries: Array<{ socketId: string; name: string }>,
     readonly gameMode: GameMode,
+    private readonly studySubcategoryKey: string | null = null,
   ) {
     this.room = `match_${matchId}`;
     for (const e of entries) {
@@ -530,6 +531,7 @@ export class Match {
     this.io.to(this.room).emit("game_started", {
       matchId: this.matchId,
       gameMode: this.gameMode,
+      subcategoryKey: this.studySubcategoryKey ?? undefined,
       players: this.snapshotPlayers(),
       revealKeysActive: false,
       keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
@@ -580,7 +582,14 @@ export class Match {
       const block: QuestionRow[] = [];
       const exclude = new Set<number>(this.usedQuestionIds);
       for (let i = 0; i < blockSize; i++) {
-        const q = await getRandomQuestion(pool, [...exclude], true);
+        const q = await getRandomQuestion(
+          pool,
+          [...exclude],
+          true,
+          this.studySubcategoryKey
+            ? { subcategoryKey: this.studySubcategoryKey }
+            : undefined,
+        );
         if (!q) {
           this.emitNoQuestions();
           return;

@@ -395,6 +395,8 @@
             <input id="difficulty" type="text" maxlength="32" placeholder="easy / medium / hard" />
             <label for="study-body">نص المذاكرة (اختياري)</label>
             <textarea id="study-body" maxlength="50000" rows="4"></textarea>
+            <label for="q-subcategory">التصنيف الفرعي</label>
+            <select id="q-subcategory"></select>
             <button type="submit" class="btn" id="submit-btn">حفظ السؤال</button>
             <div class="msg" id="msg"></div>
           </form>
@@ -605,6 +607,35 @@
       </div>
 
       <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="categories">
+          <span class="accordion-title">إدارة التصنيفات</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <label for="cat-main-key">مفتاح التصنيف الرئيسي</label>
+            <input id="cat-main-key" type="text" />
+            <label for="cat-main-name">اسم التصنيف الرئيسي</label>
+            <input id="cat-main-name" type="text" />
+            <label for="cat-main-icon">أيقونة الرئيسي</label>
+            <input id="cat-main-icon" type="text" value="📚" />
+            <button type="button" class="btn btn-secondary" id="cat-main-save-btn">حفظ/تحديث رئيسي</button>
+            <hr />
+            <label for="cat-sub-main-id">التصنيف الرئيسي</label>
+            <select id="cat-sub-main-id"></select>
+            <label for="cat-sub-key">مفتاح التصنيف الفرعي</label>
+            <input id="cat-sub-key" type="text" />
+            <label for="cat-sub-name">اسم التصنيف الفرعي</label>
+            <input id="cat-sub-name" type="text" />
+            <label for="cat-sub-icon">أيقونة الفرعي</label>
+            <input id="cat-sub-icon" type="text" value="📘" />
+            <button type="button" class="btn btn-secondary" id="cat-sub-save-btn">حفظ/تحديث فرعي</button>
+            <div class="msg" id="cat-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="bank">
           <span class="accordion-title">بنك الأسئلة</span>
           <span class="accordion-icon">⌄</span>
@@ -618,6 +649,8 @@
                 <option value="study">مذاكرة فقط</option>
                 <option value="direct">مباشر فقط</option>
               </select>
+              <select id="bank-main-category"><option value="">كل التصنيفات الرئيسية</option></select>
+              <select id="bank-subcategory"><option value="">كل التصنيفات الفرعية</option></select>
               <button type="button" class="btn btn-secondary" id="bank-search-btn">بحث</button>
               <button type="button" class="btn btn-secondary" id="bank-refresh-btn">تحديث</button>
             </div>
@@ -676,6 +709,7 @@
         </select>
         <label for="edit-difficulty">الصعوبة</label><input id="edit-difficulty" type="text" maxlength="32" />
         <label for="edit-study">نص المذاكرة</label><textarea id="edit-study" maxlength="50000" rows="5"></textarea>
+        <label for="edit-subcategory">التصنيف الفرعي</label><select id="edit-subcategory"></select>
         <div class="btn-row">
           <button type="button" class="btn" id="edit-save-btn">حفظ</button>
           <button type="button" class="btn btn-secondary" id="edit-cancel-btn">إلغاء</button>
@@ -692,6 +726,47 @@
           });
         });
       })();
+
+      var categoriesCache = [];
+      async function loadCategoriesForUi(secretValue) {
+        if (!secretValue) return;
+        var r = await fetch("/api/admin/categories", { headers: { "X-Admin-Secret": secretValue } });
+        var j = await r.json();
+        if (!r.ok || !j.ok) return;
+        categoriesCache = j.categories || [];
+        var qSub = document.getElementById("q-subcategory");
+        var editSub = document.getElementById("edit-subcategory");
+        var bankMain = document.getElementById("bank-main-category");
+        var bankSub = document.getElementById("bank-subcategory");
+        var subMain = document.getElementById("cat-sub-main-id");
+        qSub.innerHTML = "";
+        editSub.innerHTML = "";
+        bankMain.innerHTML = '<option value="">كل التصنيفات الرئيسية</option>';
+        bankSub.innerHTML = '<option value="">كل التصنيفات الفرعية</option>';
+        subMain.innerHTML = "";
+        categoriesCache.forEach(function (m) {
+          var optM = document.createElement("option");
+          optM.value = m.mainKey;
+          optM.textContent = (m.icon || "📚") + " " + m.nameAr;
+          bankMain.appendChild(optM);
+          var subMainOpt = document.createElement("option");
+          subMainOpt.value = String(m.id);
+          subMainOpt.textContent = m.nameAr;
+          subMain.appendChild(subMainOpt);
+          (m.subcategories || []).forEach(function (s) {
+            var t = (m.nameAr + " / " + s.nameAr);
+            var optA = document.createElement("option");
+            optA.value = s.subcategoryKey;
+            optA.textContent = t;
+            qSub.appendChild(optA.cloneNode(true));
+            editSub.appendChild(optA.cloneNode(true));
+            var optB = document.createElement("option");
+            optB.value = s.subcategoryKey;
+            optB.textContent = t;
+            bankSub.appendChild(optB);
+          });
+        });
+      }
 
       (function () {
         var form = document.getElementById("q-form");
@@ -718,11 +793,13 @@
               document.getElementById("opt2").value.trim(),
               document.getElementById("opt3").value.trim()
             ],
-            correctIndex: parseInt(document.getElementById("correct").value, 10)
+            correctIndex: parseInt(document.getElementById("correct").value, 10),
+            subcategoryKey: document.getElementById("q-subcategory").value || "general_default"
           };
           var diff = document.getElementById("difficulty").value.trim();
           var study = document.getElementById("study-body").value.trim();
           if (!secret) return setMsg("أدخل مفتاح الإدارة.", false);
+          loadCategoriesForUi(secret).catch(function () {});
           if (!body.prompt || body.options.some(function (o) { return !o; })) return setMsg("أكمل الحقول المطلوبة.", false);
           if (diff) body.difficulty = diff;
           if (study) body.studyBody = study;
@@ -1026,7 +1103,44 @@
       })();
 
       (function () {
-        var bankState = { offset: 0, limit: 20, q: "", mode: "all", selected: {} };
+        var catMsg = document.getElementById("cat-msg");
+        function setCatMsg(t, ok) { catMsg.textContent = t || ""; catMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        document.getElementById("cat-main-save-btn").addEventListener("click", async function () {
+          var s = secret(); if (!s) return setCatMsg("أدخل مفتاح الإدارة.", false);
+          var body = {
+            mainKey: document.getElementById("cat-main-key").value.trim(),
+            nameAr: document.getElementById("cat-main-name").value.trim(),
+            icon: document.getElementById("cat-main-icon").value.trim() || "📚"
+          };
+          if (!body.mainKey || !body.nameAr) return setCatMsg("أكمل حقول الرئيسي.", false);
+          try {
+            var r = await fetch("/api/admin/categories/main", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": s }, body: JSON.stringify(body) });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) { setCatMsg("تم حفظ التصنيف الرئيسي.", true); await loadCategoriesForUi(s); }
+            else setCatMsg("تعذر حفظ الرئيسي.", false);
+          } catch (e) { setCatMsg("خطأ في الاتصال.", false); }
+        });
+        document.getElementById("cat-sub-save-btn").addEventListener("click", async function () {
+          var s = secret(); if (!s) return setCatMsg("أدخل مفتاح الإدارة.", false);
+          var body = {
+            mainCategoryId: parseInt(document.getElementById("cat-sub-main-id").value, 10),
+            subcategoryKey: document.getElementById("cat-sub-key").value.trim(),
+            nameAr: document.getElementById("cat-sub-name").value.trim(),
+            icon: document.getElementById("cat-sub-icon").value.trim() || "📘"
+          };
+          if (!body.mainCategoryId || !body.subcategoryKey || !body.nameAr) return setCatMsg("أكمل حقول الفرعي.", false);
+          try {
+            var r = await fetch("/api/admin/categories/sub", { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Secret": s }, body: JSON.stringify(body) });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) { setCatMsg("تم حفظ التصنيف الفرعي.", true); await loadCategoriesForUi(s); }
+            else setCatMsg("تعذر حفظ الفرعي.", false);
+          } catch (e) { setCatMsg("خطأ في الاتصال.", false); }
+        });
+      })();
+
+      (function () {
+        var bankState = { offset: 0, limit: 20, q: "", mode: "all", mainCategoryKey: "", subcategoryKey: "", selected: {} };
         var tbody = document.getElementById("bank-tbody");
         var bankMsg = document.getElementById("bank-msg");
         var totalEl = document.getElementById("total-display");
@@ -1047,11 +1161,14 @@
         }
         async function loadList() {
           var s = secret(); if (!s) return setBankMsg("أدخل مفتاح الإدارة.", false);
+          if (!categoriesCache.length) { try { await loadCategoriesForUi(s); } catch (e) {} }
           var qs =
             "?offset=" + bankState.offset +
             "&limit=" + bankState.limit +
             (bankState.q ? "&q=" + encodeURIComponent(bankState.q) : "") +
-            (bankState.mode && bankState.mode !== "all" ? "&mode=" + encodeURIComponent(bankState.mode) : "");
+            (bankState.mode && bankState.mode !== "all" ? "&mode=" + encodeURIComponent(bankState.mode) : "") +
+            (bankState.mainCategoryKey ? "&mainCategoryKey=" + encodeURIComponent(bankState.mainCategoryKey) : "") +
+            (bankState.subcategoryKey ? "&subcategoryKey=" + encodeURIComponent(bankState.subcategoryKey) : "");
           try {
             var r = await fetch("/api/admin/questions" + qs, { headers: { "X-Admin-Secret": s } });
             var j = await r.json();
@@ -1099,6 +1216,8 @@
         document.getElementById("bank-search-btn").onclick = function () {
           bankState.q = document.getElementById("bank-q").value.trim();
           bankState.mode = document.getElementById("bank-mode").value || "all";
+          bankState.mainCategoryKey = document.getElementById("bank-main-category").value || "";
+          bankState.subcategoryKey = document.getElementById("bank-subcategory").value || "";
           bankState.offset = 0;
           loadList();
         };
@@ -1155,6 +1274,7 @@
             document.getElementById("edit-correct").value = String(q.correctIndex);
             document.getElementById("edit-difficulty").value = q.difficulty || "";
             document.getElementById("edit-study").value = q.studyBody || "";
+            document.getElementById("edit-subcategory").value = q.subcategoryKey || "general_default";
             modal.hidden = false;
           } catch (e) { setBankMsg("خطأ في الاتصال.", false); }
         }
@@ -1171,7 +1291,8 @@
             ],
             correctIndex: parseInt(document.getElementById("edit-correct").value, 10),
             studyBody: document.getElementById("edit-study").value,
-            difficulty: document.getElementById("edit-difficulty").value.trim() || null
+            difficulty: document.getElementById("edit-difficulty").value.trim() || null,
+            subcategoryKey: document.getElementById("edit-subcategory").value || "general_default"
           };
           if (!body.prompt || body.options.some(function (o) { return !o; })) {
             em.textContent = "أكمل الحقول.";

@@ -15,6 +15,8 @@ const questionBodySchema = z.object({
   difficulty: z.string().trim().max(32).optional(),
   studyBody: z.string().max(50_000).optional(),
   study_body: z.string().max(50_000).optional(),
+  subcategoryKey: z.string().trim().min(1).max(120).optional(),
+  subcategory_key: z.string().trim().min(1).max(120).optional(),
 });
 
 const importItemSchema = z
@@ -26,6 +28,8 @@ const importItemSchema = z
     difficulty: z.string().trim().max(32).optional(),
     studyBody: z.string().max(50_000).optional(),
     study_body: z.string().max(50_000).optional(),
+    subcategoryKey: z.string().trim().min(1).max(120).optional(),
+    subcategory_key: z.string().trim().min(1).max(120).optional(),
   })
   .refine((d) => d.correctIndex !== undefined || d.correct_index !== undefined, {
     message: "correctIndex or correct_index required",
@@ -36,6 +40,7 @@ const importItemSchema = z
     correctIndex: (d.correctIndex ?? d.correct_index) as number,
     difficulty: d.difficulty,
     studyBody: (d.studyBody ?? d.study_body)?.trim() || null,
+    subcategoryKey: (d.subcategoryKey ?? d.subcategory_key)?.trim() || null,
   }));
 
 const importArraySchema = z.array(importItemSchema).min(1).max(200);
@@ -94,6 +99,25 @@ const questionPatchSchema = z.object({
   difficulty: z.string().trim().max(32).nullable().optional(),
   studyBody: z.string().max(50_000).nullable().optional(),
   study_body: z.string().max(50_000).nullable().optional(),
+  subcategoryKey: z.string().trim().min(1).max(120).optional(),
+  subcategory_key: z.string().trim().min(1).max(120).optional(),
+});
+
+const mainCategorySchema = z.object({
+  mainKey: z.string().trim().min(1).max(120),
+  nameAr: z.string().trim().min(1).max(120),
+  icon: z.string().trim().min(1).max(16).optional(),
+  sortOrder: z.number().int().min(0).max(10000).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const subCategorySchema = z.object({
+  mainCategoryId: z.number().int().positive(),
+  subcategoryKey: z.string().trim().min(1).max(120),
+  nameAr: z.string().trim().min(1).max(120),
+  icon: z.string().trim().min(1).max(16).optional(),
+  sortOrder: z.number().int().min(0).max(10000).optional(),
+  isActive: z.boolean().optional(),
 });
 
 const bulkDeleteSchema = z.object({
@@ -178,7 +202,89 @@ function mergedStudyBody(data: {
   return t.length === 0 ? null : t;
 }
 
+async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Array<{
+  id: number;
+  mainKey: string;
+  nameAr: string;
+  icon: string;
+  sortOrder: number;
+  isActive: boolean;
+  subcategories: Array<{
+    id: number;
+    subcategoryKey: string;
+    nameAr: string;
+    icon: string;
+    sortOrder: number;
+    isActive: boolean;
+  }>;
+}>> {
+  const mains = await pool.query<{
+    id: number;
+    main_key: string;
+    name_ar: string;
+    icon: string;
+    sort_order: number;
+    is_active: boolean;
+  }>(
+    `SELECT id, main_key, name_ar, icon, sort_order, is_active
+     FROM question_main_categories
+     ORDER BY sort_order ASC, id ASC`,
+  );
+  const subs = await pool.query<{
+    id: number;
+    main_category_id: number;
+    subcategory_key: string;
+    name_ar: string;
+    icon: string;
+    sort_order: number;
+    is_active: boolean;
+  }>(
+    `SELECT id, main_category_id, subcategory_key, name_ar, icon, sort_order, is_active
+     FROM question_subcategories
+     ORDER BY sort_order ASC, id ASC`,
+  );
+  const subsByMain = new Map<number, typeof subs.rows>();
+  for (const s of subs.rows) {
+    const arr = subsByMain.get(s.main_category_id) ?? [];
+    arr.push(s);
+    subsByMain.set(s.main_category_id, arr);
+  }
+  return mains.rows.map((m) => ({
+    id: m.id,
+    mainKey: m.main_key,
+    nameAr: m.name_ar,
+    icon: m.icon,
+    sortOrder: m.sort_order,
+    isActive: m.is_active,
+    subcategories: (subsByMain.get(m.id) ?? []).map((s) => ({
+      id: s.id,
+      subcategoryKey: s.subcategory_key,
+      nameAr: s.name_ar,
+      icon: s.icon,
+      sortOrder: s.sort_order,
+      isActive: s.is_active,
+    })),
+  }));
+}
+
 export function registerAdminRoutes(app: Express): void {
+  app.get("/api/categories", async (_req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const tree = await readCategoriesTree(pool);
+      res.json({
+        ok: true,
+        categories: tree
+          .filter((m) => m.isActive)
+          .map((m) => ({
+            ...m,
+            subcategories: m.subcategories.filter((s) => s.isActive),
+          })),
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
   app.get("/api/release-version", async (_req: Request, res: Response) => {
     try {
       const pool = getPool();
@@ -549,6 +655,64 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/admin/categories", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const pool = getPool();
+      res.json({ ok: true, categories: await readCategoriesTree(pool) });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.post("/api/admin/categories/main", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = mainCategorySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    try {
+      const pool = getPool();
+      const d = parsed.data;
+      await pool.query(
+        `INSERT INTO question_main_categories (main_key, name_ar, icon, sort_order, is_active)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (main_key) DO UPDATE
+         SET name_ar = EXCLUDED.name_ar, icon = EXCLUDED.icon,
+             sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active`,
+        [d.mainKey, d.nameAr, d.icon ?? "📚", d.sortOrder ?? 0, d.isActive ?? true],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/categories/sub", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = subCategorySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    try {
+      const pool = getPool();
+      const d = parsed.data;
+      await pool.query(
+        `INSERT INTO question_subcategories (main_category_id, subcategory_key, name_ar, icon, sort_order, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (subcategory_key) DO UPDATE
+         SET main_category_id = EXCLUDED.main_category_id, name_ar = EXCLUDED.name_ar,
+             icon = EXCLUDED.icon, sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active`,
+        [d.mainCategoryId, d.subcategoryKey, d.nameAr, d.icon ?? "📘", d.sortOrder ?? 0, d.isActive ?? true],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
   app.get("/api/admin/questions", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
     const offset = Math.max(0, Number(req.query.offset) || 0);
@@ -556,30 +720,43 @@ export function registerAdminRoutes(app: Express): void {
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     const modeRaw = typeof req.query.mode === "string" ? req.query.mode.trim() : "all";
     const mode = modeRaw === "study" || modeRaw === "direct" ? modeRaw : "all";
+    const mainCategoryKey =
+      typeof req.query.mainCategoryKey === "string" ? req.query.mainCategoryKey.trim() : "";
+    const subcategoryKey =
+      typeof req.query.subcategoryKey === "string" ? req.query.subcategoryKey.trim() : "";
     try {
       const pool = getPool();
       const params: unknown[] = [];
       const whereParts: string[] = [];
       if (q.length > 0) {
         params.push(`%${q}%`);
-        whereParts.push(`prompt ILIKE $${params.length}`);
+        whereParts.push(`q.prompt ILIKE $${params.length}`);
       }
       if (mode === "study") {
-        whereParts.push(`study_body IS NOT NULL AND btrim(study_body) <> ''`);
+        whereParts.push(`q.study_body IS NOT NULL AND btrim(q.study_body) <> ''`);
       } else if (mode === "direct") {
-        whereParts.push(`(study_body IS NULL OR btrim(study_body) = '')`);
+        whereParts.push(`(q.study_body IS NULL OR btrim(q.study_body) = '')`);
+      }
+      if (subcategoryKey) {
+        params.push(subcategoryKey);
+        whereParts.push(`q.subcategory_key = $${params.length}`);
+      } else if (mainCategoryKey) {
+        params.push(mainCategoryKey);
+        whereParts.push(`mc.main_key = $${params.length}`);
       }
       const where = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
       params.push(limit, offset);
       const limIdx = params.length - 1;
       const offIdx = params.length;
       const listSql = `
-        SELECT id,
-               LEFT(prompt, 160) AS prompt_preview,
-               (study_body IS NOT NULL AND btrim(study_body) <> '') AS has_study
-        FROM questions
+        SELECT q.id,
+               LEFT(q.prompt, 160) AS prompt_preview,
+               (q.study_body IS NOT NULL AND btrim(q.study_body) <> '') AS has_study
+        FROM questions q
+        LEFT JOIN question_subcategories sc ON sc.subcategory_key = q.subcategory_key
+        LEFT JOIN question_main_categories mc ON mc.id = sc.main_category_id
         ${where}
-        ORDER BY id DESC
+        ORDER BY q.id DESC
         LIMIT $${limIdx} OFFSET $${offIdx}
       `;
       const list = await pool.query<{
@@ -588,8 +765,12 @@ export function registerAdminRoutes(app: Express): void {
         has_study: boolean;
       }>(listSql, params);
 
-      const countSql = `SELECT COUNT(*)::text AS c FROM questions ${where}`;
-      const countParams = q.length > 0 ? [`%${q}%`] : [];
+      const countSql = `SELECT COUNT(*)::text AS c
+        FROM questions q
+        LEFT JOIN question_subcategories sc ON sc.subcategory_key = q.subcategory_key
+        LEFT JOIN question_main_categories mc ON mc.id = sc.main_category_id
+        ${where}`;
+      const countParams = [...params.slice(0, -2)];
       const c = await pool.query<{ c: string }>(countSql, countParams);
       const total = Number(c.rows[0]?.c ?? 0);
 
@@ -659,8 +840,9 @@ export function registerAdminRoutes(app: Express): void {
         correct_index: number;
         difficulty: string | null;
         study_body: string | null;
+        subcategory_key: string;
       }>(
-        `SELECT id, prompt, options, correct_index, difficulty, study_body
+        `SELECT id, prompt, options, correct_index, difficulty, study_body, subcategory_key
          FROM questions WHERE id = $1`,
         [id],
       );
@@ -681,6 +863,7 @@ export function registerAdminRoutes(app: Express): void {
           correctIndex: row.correct_index,
           difficulty: row.difficulty,
           studyBody: row.study_body ?? "",
+          subcategoryKey: row.subcategory_key,
         },
       });
     } catch {
@@ -714,8 +897,9 @@ export function registerAdminRoutes(app: Express): void {
         correct_index: number;
         difficulty: string | null;
         study_body: string | null;
+        subcategory_key: string;
       }>(
-        `SELECT prompt, options, correct_index, difficulty, study_body FROM questions WHERE id = $1`,
+        `SELECT prompt, options, correct_index, difficulty, study_body, subcategory_key FROM questions WHERE id = $1`,
         [id],
       );
       const row = cur.rows[0];
@@ -736,6 +920,9 @@ export function registerAdminRoutes(app: Express): void {
         correctIdx !== undefined ? correctIdx : row.correct_index;
       const nextDiff =
         d.difficulty !== undefined ? d.difficulty : row.difficulty;
+      const nextSubcategoryKey = String(
+        d.subcategoryKey ?? d.subcategory_key ?? row.subcategory_key,
+      ).trim();
 
       const rawBody = req.body as Record<string, unknown>;
       const studyPatchProvided =
@@ -755,14 +942,15 @@ export function registerAdminRoutes(app: Express): void {
       await pool.query(
         `UPDATE questions
          SET prompt = $1, options = $2::jsonb, correct_index = $3,
-             difficulty = $4, study_body = $5
-         WHERE id = $6`,
+             difficulty = $4, study_body = $5, subcategory_key = $6
+         WHERE id = $7`,
         [
           nextPrompt,
           JSON.stringify(nextOptions),
           nextCorrect,
           nextDiff,
           nextStudy,
+          nextSubcategoryKey || "general_default",
           id,
         ],
       );
@@ -811,12 +999,15 @@ export function registerAdminRoutes(app: Express): void {
       studyBody?: string | null;
       study_body?: string | null;
     });
+    const subcategoryKey = String(
+      parsed.data.subcategoryKey ?? parsed.data.subcategory_key ?? "general_default",
+    ).trim();
 
     try {
       const pool = getPool();
       const ins = await pool.query<{ id: number }>(
-        `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body)
-         VALUES ($1, $2::jsonb, $3, $4, $5)
+        `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key)
+         VALUES ($1, $2::jsonb, $3, $4, $5, $6)
          RETURNING id`,
         [
           prompt,
@@ -824,6 +1015,7 @@ export function registerAdminRoutes(app: Express): void {
           correctIndex,
           difficulty ?? null,
           studyBody,
+          subcategoryKey || "general_default",
         ],
       );
       const id = ins.rows[0]?.id;
@@ -869,14 +1061,17 @@ export function registerAdminRoutes(app: Express): void {
       await client.query("BEGIN");
       for (const row of rows) {
         await client.query(
-          `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body)
-           VALUES ($1, $2::jsonb, $3, $4, $5)`,
+          `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key)
+           VALUES ($1, $2::jsonb, $3, $4, $5, $6)`,
           [
             row.prompt,
             JSON.stringify(row.options),
             row.correctIndex,
             row.difficulty ?? null,
             row.studyBody,
+            String(
+              (row as { subcategoryKey?: string | null }).subcategoryKey ?? "general_default",
+            ).trim() || "general_default",
           ],
         );
       }

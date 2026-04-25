@@ -2,17 +2,41 @@ import "./style.css";
 import { io, type Socket } from "socket.io-client";
 
 type GameMode = "direct" | "study_then_quiz";
-type Phase = "name" | "matchmaking" | "countdown" | "studying" | "playing" | "result";
+type Phase =
+  | "name"
+  | "matchmaking"
+  | "countdown"
+  | "studying"
+  | "playing"
+  | "result";
+type NameFlowStep = "mode" | "main_categories" | "sub_categories";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
 let socket: Socket | null = null;
 let phase: Phase = "name";
+let nameFlowStep: NameFlowStep = "mode";
 let mySocketId: string | null = null;
 let currentQuestionId: number | null = null;
 let endsAt = 0;
 let timerHandle: number | null = null;
 let currentGameMode: GameMode | null = null;
+let selectedModeInName: GameMode = "direct";
+let selectedMainCategoryId: number | null = null;
+let selectedSubcategoryKey: string | null = null;
+let selectedSubcategoryLabel: string | null = null;
+let categoriesState: Array<{
+  id: number;
+  mainKey: string;
+  nameAr: string;
+  icon: string;
+  subcategories: Array<{
+    id: number;
+    subcategoryKey: string;
+    nameAr: string;
+    icon: string;
+  }>;
+}> = [];
 let lobbyNotice = "";
 const LOBBY_MSG_WAIT_NEXT =
   "مباراة جارية الآن بين مجموعة أخرى. أنت في قائمة انتظار الجولة التالية.";
@@ -104,6 +128,38 @@ function storePlayerName(name: string): void {
   } catch {
     /* ignore storage failures */
   }
+}
+
+async function fetchCategoriesState(): Promise<void> {
+  const res = await fetch("/api/categories", { cache: "no-store" });
+  const data = (await res.json()) as {
+    ok?: boolean;
+    categories?: Array<{
+      id: number;
+      mainKey: string;
+      nameAr: string;
+      icon: string;
+      subcategories?: Array<{
+        id: number;
+        subcategoryKey: string;
+        nameAr: string;
+        icon: string;
+      }>;
+    }>;
+  };
+  if (!res.ok || !data.ok) throw new Error("categories_failed");
+  categoriesState = (data.categories ?? []).map((c) => ({
+    id: c.id,
+    mainKey: c.mainKey,
+    nameAr: c.nameAr,
+    icon: c.icon || "📚",
+    subcategories: (c.subcategories ?? []).map((s) => ({
+      id: s.id,
+      subcategoryKey: s.subcategoryKey,
+      nameAr: s.nameAr,
+      icon: s.icon || "📘",
+    })),
+  }));
 }
 
 function getReleaseVersionFromUrl(): string | null {
@@ -314,7 +370,27 @@ function render(): void {
   app.innerHTML = "";
 
   if (phase === "name") {
-    let selectedMode: GameMode = "direct";
+    const renderModePicker = nameFlowStep === "mode";
+    const selectedMain = categoriesState.find((c) => c.id === selectedMainCategoryId) ?? null;
+    const subItems = selectedMain?.subcategories ?? [];
+    const mainCards = categoriesState
+      .map(
+        (c) => `
+        <button type="button" class="mode-option-btn" data-main-id="${c.id}">
+          <span class="mode-option-icon">${escapeHtml(c.icon || "📚")}</span>
+          <span class="mode-option-title">${escapeHtml(c.nameAr)}</span>
+        </button>`,
+      )
+      .join("");
+    const subCards = subItems
+      .map(
+        (s) => `
+        <button type="button" class="mode-option-btn" data-sub-key="${escapeHtml(s.subcategoryKey)}" data-sub-name="${escapeHtml(s.nameAr)}">
+          <span class="mode-option-icon">${escapeHtml(s.icon || "📘")}</span>
+          <span class="mode-option-title">${escapeHtml(s.nameAr)}</span>
+        </button>`,
+      )
+      .join("");
     app.append(
       el(`
         <div class="app-screen min-h-screen text-white flex flex-col items-center justify-center p-4">
@@ -324,20 +400,45 @@ function render(): void {
             <div class="app-card p-6 space-y-5">
               <label class="block text-right text-sm text-slate-400">اسمك في اللعبة</label>
               <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="app-input w-full px-4 py-3 text-right text-lg" />
-              <p class="text-sm text-slate-400 text-right m-0">اختر نمط اللعب</p>
-              <div class="mode-picker-grid" role="group" aria-label="نمط اللعب">
-                <button type="button" class="mode-option-btn mode-option-btn--selected" data-mode="direct" aria-pressed="true">
+              <p class="text-sm text-slate-400 text-right m-0">${
+                renderModePicker
+                  ? "اختر نمط اللعب"
+                  : nameFlowStep === "main_categories"
+                    ? "اختر التصنيف الرئيسي"
+                    : "اختر التصنيف الفرعي"
+              }</p>
+              <div class="mode-picker-grid" role="group" aria-label="اختيارات">
+                ${
+                  renderModePicker
+                    ? `
+                <button type="button" class="mode-option-btn ${
+                  selectedModeInName === "direct" ? "mode-option-btn--selected" : ""
+                }" data-mode="direct" aria-pressed="${selectedModeInName === "direct" ? "true" : "false"}">
                   <span class="mode-option-icon" aria-hidden="true">⚡</span>
                   <span class="mode-option-title">نمط مباشر</span>
                   <span class="mode-option-desc">أسئلة فورية متتالية بدون مراجعة مسبقة</span>
                 </button>
-                <button type="button" class="mode-option-btn" data-mode="study_then_quiz" aria-pressed="false">
+                <button type="button" class="mode-option-btn ${
+                  selectedModeInName === "study_then_quiz" ? "mode-option-btn--selected" : ""
+                }" data-mode="study_then_quiz" aria-pressed="${selectedModeInName === "study_then_quiz" ? "true" : "false"}">
                   <span class="mode-option-icon" aria-hidden="true">📚</span>
                   <span class="mode-option-title">مذاكرة ثم أسئلة</span>
                   <span class="mode-option-desc">بطاقة مراجعة لكل سؤال ثم كتلة أسئلة في الجولة</span>
                 </button>
+                `
+                    : nameFlowStep === "main_categories"
+                      ? mainCards
+                      : subCards
+                }
               </div>
-              <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg">ابدأ التحدي</button>
+              <div class="flex gap-2">
+                <button id="back-mode-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg ${
+                  renderModePicker ? "hidden" : ""
+                }">رجوع</button>
+                <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg">${
+                  renderModePicker ? "ابدأ التحدي" : nameFlowStep === "main_categories" ? "التالي" : "ابدأ التحدي"
+                }</button>
+              </div>
               <p id="join-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
             </div>
           </div>
@@ -350,20 +451,51 @@ function render(): void {
       input.value = storedName;
     }
     const btn = app.querySelector<HTMLButtonElement>("#join-btn")!;
+    const backBtn = app.querySelector<HTMLButtonElement>("#back-mode-btn");
     const err = app.querySelector<HTMLParagraphElement>("#join-err")!;
     const modeBtns = app.querySelectorAll<HTMLButtonElement>(".mode-option-btn");
-    modeBtns.forEach((b) => {
-      b.addEventListener("click", () => {
-        selectedMode =
-          b.dataset.mode === "study_then_quiz" ? "study_then_quiz" : "direct";
-        modeBtns.forEach((x) => {
-          const on = x === b;
-          x.classList.toggle("mode-option-btn--selected", on);
-          x.setAttribute("aria-pressed", on ? "true" : "false");
+    if (renderModePicker) {
+      modeBtns.forEach((b) => {
+        b.addEventListener("click", () => {
+          selectedModeInName =
+            b.dataset.mode === "study_then_quiz" ? "study_then_quiz" : "direct";
+          modeBtns.forEach((x) => {
+            const on = x === b;
+            x.classList.toggle("mode-option-btn--selected", on);
+            x.setAttribute("aria-pressed", on ? "true" : "false");
+          });
         });
       });
+    } else if (nameFlowStep === "main_categories") {
+      modeBtns.forEach((b) => {
+        b.addEventListener("click", () => {
+          const id = Number(b.dataset.mainId);
+          if (!Number.isInteger(id)) return;
+          selectedMainCategoryId = id;
+          modeBtns.forEach((x) => x.classList.toggle("mode-option-btn--selected", x === b));
+        });
+      });
+    } else {
+      modeBtns.forEach((b) => {
+        b.addEventListener("click", () => {
+          const key = b.dataset.subKey?.trim();
+          const label = b.dataset.subName?.trim();
+          if (!key) return;
+          selectedSubcategoryKey = key;
+          selectedSubcategoryLabel = label || key;
+          modeBtns.forEach((x) => x.classList.toggle("mode-option-btn--selected", x === b));
+        });
+      });
+    }
+    backBtn?.addEventListener("click", () => {
+      if (nameFlowStep === "sub_categories") {
+        nameFlowStep = "main_categories";
+      } else {
+        nameFlowStep = "mode";
+      }
+      render();
     });
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       if (btn.disabled) return;
       err.textContent = "";
       const name = input.value.trim();
@@ -373,12 +505,54 @@ function render(): void {
       }
       btn.disabled = true;
       btn.classList.add("btn-pending");
-      btn.textContent = "جاري الدخول...";
       storePlayerName(name);
+      if (nameFlowStep === "mode") {
+        if (selectedModeInName === "direct") {
+          btn.textContent = "جاري الدخول...";
+          phase = "matchmaking";
+          lobbyNotice = "جاري الاتصال بالخادم...";
+          render();
+          connectSocket(name, "direct");
+          return;
+        }
+        try {
+          btn.textContent = "جاري تحميل التصنيفات...";
+          await fetchCategoriesState();
+          nameFlowStep = "main_categories";
+          btn.disabled = false;
+          btn.classList.remove("btn-pending");
+          render();
+        } catch {
+          btn.disabled = false;
+          btn.classList.remove("btn-pending");
+          err.textContent = "تعذر تحميل التصنيفات.";
+        }
+        return;
+      }
+      if (nameFlowStep === "main_categories") {
+        if (!selectedMainCategoryId) {
+          btn.disabled = false;
+          btn.classList.remove("btn-pending");
+          err.textContent = "اختر تصنيفًا رئيسيًا.";
+          return;
+        }
+        nameFlowStep = "sub_categories";
+        btn.disabled = false;
+        btn.classList.remove("btn-pending");
+        render();
+        return;
+      }
+      if (!selectedSubcategoryKey) {
+        btn.disabled = false;
+        btn.classList.remove("btn-pending");
+        err.textContent = "اختر تصنيفًا فرعيًا.";
+        return;
+      }
+      btn.textContent = "جاري الدخول...";
       phase = "matchmaking";
-      lobbyNotice = "جاري الاتصال بالخادم...";
+      lobbyNotice = `جاري الاتصال بالخادم... (${selectedSubcategoryLabel ?? selectedSubcategoryKey})`;
       render();
-      connectSocket(name, selectedMode);
+      connectSocket(name, "study_then_quiz", selectedSubcategoryKey);
     });
     return;
   }
@@ -582,6 +756,10 @@ function render(): void {
     const again = app.querySelector<HTMLButtonElement>("#again")!;
     again.addEventListener("click", () => {
       phase = "name";
+      nameFlowStep = "mode";
+      selectedMainCategoryId = null;
+      selectedSubcategoryKey = null;
+      selectedSubcategoryLabel = null;
       socket?.disconnect();
       socket = null;
       mySocketId = null;
@@ -1111,7 +1289,7 @@ function bindPlayingAbilityUi(sk: Socket): void {
   refreshAbilityAffordability();
 }
 
-function connectSocket(name: string, mode: GameMode): void {
+function connectSocket(name: string, mode: GameMode, subcategoryKey?: string | null): void {
   const joinFlowStartMs = performance.now();
   socket?.removeAllListeners();
   socket?.disconnect();
@@ -1176,7 +1354,14 @@ function connectSocket(name: string, mode: GameMode): void {
       failBackToName("تأخر الاتصال. تحقق من الشبكة ثم حاول مرة أخرى.");
       socket?.disconnect();
     }, 8000);
-    s.emit("join_lobby", { name, mode }, (ack: { ok?: boolean }) => {
+    s.emit(
+      "join_lobby",
+      {
+        name,
+        mode,
+        ...(mode === "study_then_quiz" && subcategoryKey ? { subcategoryKey } : {}),
+      },
+      (ack: { ok?: boolean }) => {
       if (joinAckTimer) {
         window.clearTimeout(joinAckTimer);
         joinAckTimer = null;
@@ -1194,7 +1379,8 @@ function connectSocket(name: string, mode: GameMode): void {
         const noticeEl2 = app.querySelector<HTMLParagraphElement>("#lobby-notice");
         if (noticeEl2) noticeEl2.textContent = "تم الدخول بنجاح. جاري البحث عن منافسين...";
       }
-    });
+      },
+    );
   });
 
   s.on("connect_error", () => {
@@ -1309,7 +1495,7 @@ function connectSocket(name: string, mode: GameMode): void {
     startCountdownTicks(Math.max(1, payload.seconds));
   });
 
-  s.on("match_start_cancelled", () => {
+  s.on("match_start_cancelled", (payload?: { reason?: string; message?: string }) => {
     if (cdInterval) {
       window.clearInterval(cdInterval);
       cdInterval = null;
@@ -1317,7 +1503,10 @@ function connectSocket(name: string, mode: GameMode): void {
     if (phase === "countdown") {
       phase = "matchmaking";
     }
-    lobbyNotice = LOBBY_MSG_CANCELLED;
+    lobbyNotice =
+      payload?.reason === "not_enough_questions"
+        ? payload.message || "لا توجد أسئلة كافية في هذا التصنيف."
+        : LOBBY_MSG_CANCELLED;
     if (phase === "matchmaking") render();
   });
 
