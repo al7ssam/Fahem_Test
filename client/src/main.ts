@@ -749,10 +749,15 @@ function refreshAbilityAffordability(): void {
   const skip = document.querySelector<HTMLButtonElement>("#ab-skip");
   const attack = document.querySelector<HTMLButtonElement>("#ab-attack");
   const reveal = document.querySelector<HTMLButtonElement>("#ab-reveal");
-  boost?.classList.toggle("hidden", !boostVisible);
-  skip?.classList.toggle("hidden", !skipVisible);
-  attack?.classList.toggle("hidden", !attackVisible);
-  reveal?.classList.toggle("hidden", !revealVisible);
+  const setAbilityVisible = (el: HTMLButtonElement | null, visible: boolean): void => {
+    if (!el) return;
+    el.classList.toggle("hidden", !visible);
+    el.style.display = visible ? "" : "none";
+  };
+  setAbilityVisible(boost, boostVisible);
+  setAbilityVisible(skip, skipVisible);
+  setAbilityVisible(attack, attackVisible);
+  setAbilityVisible(reveal, revealVisible);
 
   boost?.classList.toggle("ability-btn--insufficient", boostVisible && k < c.skillBoost);
   skip?.classList.toggle("ability-btn--insufficient", skipVisible && k < c.skipQuestion);

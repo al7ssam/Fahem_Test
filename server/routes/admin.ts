@@ -6,6 +6,7 @@ import { z } from "zod";
 import { config } from "../config";
 import { getPool } from "../db/pool";
 import { getResultMessages } from "../db/resultCopy";
+import { Match } from "../game/Match";
 
 const questionBodySchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
@@ -410,6 +411,7 @@ export function registerAdminRoutes(app: Express): void {
           String(parsed.data.matchFillWindowSeconds),
         ],
       );
+      Match.invalidateRuntimeSettingsCache();
       res.json({ ok: true });
     } catch {
       res.status(500).json({ ok: false, error: "update_failed" });
@@ -540,6 +542,7 @@ export function registerAdminRoutes(app: Express): void {
           d.abilityRevealStudyEnabled ? "1" : "0",
         ],
       );
+      Match.invalidateRuntimeSettingsCache();
       res.json({ ok: true });
     } catch {
       res.status(500).json({ ok: false, error: "update_failed" });

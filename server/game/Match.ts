@@ -52,6 +52,9 @@ export class Match {
     loadedAtMs: number;
     map: Map<string, string>;
   } | null = null;
+  static invalidateRuntimeSettingsCache(): void {
+    Match.runtimeSettingsCache = null;
+  }
   readonly room: string;
   private readonly players = new Map<string, MatchPlayerState>();
   private usedQuestionIds: number[] = [];
