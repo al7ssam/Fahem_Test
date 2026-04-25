@@ -58,6 +58,51 @@
         margin: 0 0 1.2rem;
         font-size: 0.95rem;
       }
+      .admin-topbar {
+        position: sticky;
+        top: 0.65rem;
+        z-index: 30;
+        margin-bottom: 1rem;
+        border: 1px solid rgba(223, 187, 106, 0.28);
+        border-radius: 1rem;
+        background: linear-gradient(to bottom, rgba(20, 26, 48, 0.97), rgba(10, 14, 30, 0.97));
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+        backdrop-filter: blur(8px);
+        padding: 0.85rem;
+      }
+      .admin-topbar__row {
+        display: flex;
+        gap: 0.65rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .admin-topbar__field {
+        flex: 1;
+        min-width: 15rem;
+      }
+      .admin-topbar__field label {
+        margin-bottom: 0.28rem;
+        color: #f0dcae;
+      }
+      .admin-topbar__field input {
+        margin-bottom: 0;
+      }
+      .admin-topbar__actions {
+        display: flex;
+        gap: 0.55rem;
+        align-items: center;
+      }
+      .admin-topbar__actions .btn {
+        width: auto;
+        min-width: 11rem;
+        margin-top: 0;
+        white-space: nowrap;
+      }
+      .admin-topbar .msg {
+        margin-top: 0.55rem;
+        min-height: 1.35rem;
+        text-align: right;
+      }
       .stat {
         display: flex;
         justify-content: space-between;
@@ -357,12 +402,44 @@
         font-size: 1.4rem;
         cursor: pointer;
       }
+      @media (max-width: 720px) {
+        .admin-topbar {
+          top: 0;
+          border-radius: 0.9rem;
+        }
+        .admin-topbar__row {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .admin-topbar__field {
+          min-width: 0;
+          width: 100%;
+        }
+        .admin-topbar__actions {
+          width: 100%;
+        }
+        .admin-topbar__actions .btn {
+          width: 100%;
+        }
+      }
     </style>
   </head>
   <body>
     <div class="wrap">
       <h1>لوحة الإدارة</h1>
       <p class="subtitle">فاهم — إدارة الأسئلة والإعدادات</p>
+      <div class="admin-topbar" role="region" aria-label="أدوات الإدارة السريعة">
+        <div class="admin-topbar__row">
+          <div class="admin-topbar__field">
+            <label for="admin-secret">مفتاح الإدارة</label>
+            <input id="admin-secret" type="password" autocomplete="off" placeholder="ADMIN_SECRET" />
+          </div>
+          <div class="admin-topbar__actions">
+            <button type="button" class="btn" id="cb-run-btn">تحديث الكاش الآن</button>
+          </div>
+        </div>
+        <div class="msg" id="cb-msg"></div>
+      </div>
 
       <div class="stat">
         <span>إجمالي الأسئلة</span>
@@ -376,8 +453,6 @@
         </button>
         <div class="accordion-content">
           <form class="card" id="q-form" novalidate>
-            <label for="admin-secret">مفتاح الإدارة</label>
-            <input id="admin-secret" type="password" autocomplete="off" placeholder="ADMIN_SECRET" required />
             <label for="prompt">نص السؤال</label>
             <textarea id="prompt" required maxlength="2000"></textarea>
             <label for="opt0">الخيار 1</label><input id="opt0" type="text" required maxlength="500" />
@@ -405,37 +480,26 @@
 
       <div class="accordion-item">
         <button class="accordion-trigger" data-acc="json-guide">
-          <span class="accordion-title">إرشادات JSON لكل نمط</span>
+          <span class="accordion-title">إرشادات JSON لنمط المذاكرة</span>
           <span class="accordion-icon">⌄</span>
         </button>
         <div class="accordion-content">
           <div class="card">
             <div class="guide-block">
-              <h3 class="guide-title">نمط مباشر (Direct)</h3>
-              <p class="subtitle">مطلوب فقط: <code>prompt</code> + <code>options</code> + <code>correctIndex</code>.</p>
-              <pre class="example-pre">[
-  {
-    "prompt": "ما عاصمة السعودية؟",
-    "options": ["الرياض", "جدة", "أبها", "الدمام"],
-    "correctIndex": 0,
-    "difficulty": "easy"
-  }
-]</pre>
-            </div>
-            <div class="guide-block">
-              <h3 class="guide-title">نمط مذاكرة (Study)</h3>
-              <p class="subtitle">نفس صيغة المباشر + حقل <code>studyBody</code> كنص مذاكرة للسؤال.</p>
+              <h3 class="guide-title">صيغة سؤال المذاكرة مع التصنيف</h3>
+              <p class="subtitle">أضف <code>studyBody</code> كنص مذاكرة، وحدد التصنيف عبر <code>subcategoryKey</code> أو <code>subcategory_key</code>.</p>
               <pre class="example-pre">[
   {
     "prompt": "ما وظيفة الكلوروفيل في النبات؟",
     "options": ["نقل الماء", "امتصاص الضوء", "تخزين النشا", "حماية الجذور"],
     "correctIndex": 1,
     "studyBody": "الكلوروفيل صبغة خضراء تمتص الضوء لبدء عملية البناء الضوئي.",
+    "subcategoryKey": "general_science",
     "difficulty": "medium"
   }
 ]</pre>
             </div>
-            <p class="subtitle">يُقبل أيضًا <code>correct_index</code> بدل <code>correctIndex</code> و <code>study_body</code> بدل <code>studyBody</code>.</p>
+            <p class="subtitle">يُقبل أيضًا <code>correct_index</code> بدل <code>correctIndex</code> و <code>study_body</code> بدل <code>studyBody</code> و <code>subcategory_key</code> بدل <code>subcategoryKey</code>.</p>
           </div>
         </div>
       </div>
@@ -462,12 +526,6 @@
         </button>
         <div class="accordion-content">
           <div class="card">
-            <label for="ai-prompt-direct">برومبت النمط المباشر</label>
-            <textarea id="ai-prompt-direct" rows="8"></textarea>
-            <div class="btn-row">
-              <button type="button" class="btn btn-secondary" id="copy-direct-btn">نسخ النص</button>
-            </div>
-
             <label for="ai-prompt-study">برومبت نمط المذاكرة</label>
             <textarea id="ai-prompt-study" rows="8"></textarea>
             <div class="btn-row">
@@ -533,22 +591,6 @@
               <button type="button" class="btn" id="gs-save-btn">حفظ</button>
             </div>
             <div class="msg" id="gs-msg"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="accordion-item">
-        <button class="accordion-trigger" data-acc="cache-bust">
-          <span class="accordion-title">تحديث الكاش</span>
-          <span class="accordion-icon">⌄</span>
-        </button>
-        <div class="accordion-content">
-          <div class="card">
-            <p class="subtitle">استخدم هذا الزر لفرض تحديث العملاء للنسخة الجديدة دون مسح كاش يدوي.</p>
-            <div class="btn-row">
-              <button type="button" class="btn" id="cb-run-btn">تحديث الكاش الآن</button>
-            </div>
-            <div class="msg" id="cb-msg"></div>
           </div>
         </div>
       </div>
@@ -695,7 +737,6 @@
               <select id="bank-mode">
                 <option value="all">كل الأنماط</option>
                 <option value="study">مذاكرة فقط</option>
-                <option value="direct">مباشر فقط</option>
               </select>
               <select id="bank-main-category"><option value="">كل التصنيفات الرئيسية</option></select>
               <select id="bank-subcategory"><option value="">كل التصنيفات الفرعية</option></select>
@@ -907,9 +948,7 @@
         var aiMsg = document.getElementById("ai-msg");
         var loadBtn = document.getElementById("ai-load-btn");
         var saveBtn = document.getElementById("ai-save-btn");
-        var copyDirect = document.getElementById("copy-direct-btn");
         var copyStudy = document.getElementById("copy-study-btn");
-        var direct = document.getElementById("ai-prompt-direct");
         var study = document.getElementById("ai-prompt-study");
         function setAiMsg(text, ok) { aiMsg.textContent = text || ""; aiMsg.className = "msg " + (ok ? "ok" : "err"); }
         function secret() { return document.getElementById("admin-secret").value.trim(); }
@@ -917,7 +956,6 @@
           try { await navigator.clipboard.writeText(v); setAiMsg("تم النسخ.", true); }
           catch (e) { setAiMsg("تعذر النسخ. المتصفح منع العملية.", false); }
         }
-        copyDirect.addEventListener("click", function () { copyText(direct.value || ""); });
         copyStudy.addEventListener("click", function () { copyText(study.value || ""); });
         loadBtn.addEventListener("click", async function () {
           var s = secret(); if (!s) return setAiMsg("أدخل مفتاح الإدارة.", false);
@@ -926,7 +964,6 @@
             var r = await fetch("/api/admin/ai-prompts", { headers: { "X-Admin-Secret": s } });
             var j = await r.json();
             if (r.ok && j.ok) {
-              direct.value = j.promptDirect || "";
               study.value = j.promptStudy || "";
               setAiMsg("تم تحميل البرومبتات.", true);
             } else setAiMsg("تعذر التحميل.", false);
@@ -935,8 +972,8 @@
         });
         saveBtn.addEventListener("click", async function () {
           var s = secret(); if (!s) return setAiMsg("أدخل مفتاح الإدارة.", false);
-          var body = { promptDirect: direct.value.trim(), promptStudy: study.value.trim() };
-          if (!body.promptDirect || !body.promptStudy) return setAiMsg("الحقول مطلوبة.", false);
+          var body = { promptStudy: study.value.trim() };
+          if (!body.promptStudy) return setAiMsg("الحقول مطلوبة.", false);
           saveBtn.disabled = true;
           try {
             var r = await fetch("/api/admin/ai-prompts", {

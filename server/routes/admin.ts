@@ -55,7 +55,6 @@ const resultMessagesPatchSchema = z.object({
 });
 
 const aiPromptsPatchSchema = z.object({
-  promptDirect: z.string().trim().min(20).max(12_000),
   promptStudy: z.string().trim().min(20).max(12_000),
 });
 
@@ -503,12 +502,11 @@ export function registerAdminRoutes(app: Express): void {
       const rows = await pool.query<{ key: string; value: string }>(
         `SELECT key, value
          FROM app_settings
-         WHERE key IN ('prompt_direct', 'prompt_study')`,
+         WHERE key IN ('prompt_study')`,
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
       res.json({
         ok: true,
-        promptDirect: map.get("prompt_direct") ?? "",
         promptStudy: map.get("prompt_study") ?? "",
       });
     } catch {
@@ -531,9 +529,9 @@ export function registerAdminRoutes(app: Express): void {
       const pool = getPool();
       await pool.query(
         `INSERT INTO app_settings (key, value)
-         VALUES ('prompt_direct', $1), ('prompt_study', $2)
+         VALUES ('prompt_study', $1)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        [parsed.data.promptDirect, parsed.data.promptStudy],
+        [parsed.data.promptStudy],
       );
       res.json({ ok: true });
     } catch {
@@ -1037,7 +1035,7 @@ export function registerAdminRoutes(app: Express): void {
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
     const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
     const modeRaw = typeof req.query.mode === "string" ? req.query.mode.trim() : "all";
-    const mode = modeRaw === "study" || modeRaw === "direct" ? modeRaw : "all";
+    const mode = modeRaw === "study" ? "study" : "all";
     const mainCategoryKey =
       typeof req.query.mainCategoryKey === "string" ? req.query.mainCategoryKey.trim() : "";
     const subcategoryKey =
@@ -1052,8 +1050,6 @@ export function registerAdminRoutes(app: Express): void {
       }
       if (mode === "study") {
         whereParts.push(`q.study_body IS NOT NULL AND btrim(q.study_body) <> ''`);
-      } else if (mode === "direct") {
-        whereParts.push(`(q.study_body IS NULL OR btrim(q.study_body) = '')`);
       }
       if (subcategoryKey) {
         params.push(subcategoryKey);
