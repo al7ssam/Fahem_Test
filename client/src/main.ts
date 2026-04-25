@@ -911,6 +911,8 @@ function bindPlayingAbilityUi(sk: Socket): void {
         if (eventName === "ability_reveal_keys") {
           const revealQuestions = Number.isFinite(ack.revealQuestions) ? Math.max(1, Math.floor(ack.revealQuestions ?? 1)) : 1;
           showGameToast(`تم كشف مفاتيح الخصوم لمدة ${revealQuestions} اسئلة`);
+        } else if (eventName === "ability_skill_boost") {
+          showGameToast("تم تفعيل قدرة تعزيز نقاط المهارة");
         } else if (eventName === "ability_skip_question") {
           showGameToast("تم تجاوز السؤال");
         }
