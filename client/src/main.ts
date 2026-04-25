@@ -74,6 +74,9 @@ let studyCards: Array<{
 }> = [];
 
 const DEFAULT_RESULT_MESSAGES = {
+  winnerTitle: "فزت!",
+  loserTitle: "لقد خسرت يا فاشل",
+  tieTitle: "تعادل كامل",
   winner: "أحسنت — بقيت حتى النهاية.",
   loser: "انتهت الجولة لصالح لاعب آخر.",
   tie: "تعادل أو لا فائز — حاول مرة أخرى!",
@@ -382,22 +385,12 @@ function render(): void {
           </div>
           <div class="study-content-stack">
           <button id="round-ready-btn" type="button" class="ui-btn ui-btn--primary w-full py-2 text-sm">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
-          <p id="study-hint" class="text-right text-slate-300/90 text-sm min-h-[1.25rem] leading-relaxed"></p>
           <p id="study-ready-state" class="text-right text-amber-200/90 text-xs min-h-[1.1rem] leading-relaxed"></p>
           <div id="study-cards" class="study-cards-container flex-1 space-y-4 overflow-y-auto pb-2"></div>
-          <p id="study-keys-line" class="study-reveal-bar text-right text-sm text-amber-100/90 font-semibold">مفاتيحك: 0</p>
-          <button type="button" id="study-reveal-btn" class="study-reveal-btn">🔍 كشف مفاتيح الجميع (للبلوك الحالي)</button>
           </div>
         </div>
       `),
     );
-    const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
-    if (hint) {
-      hint.textContent =
-        studyPhaseState === "study_content" && hasCards
-          ? "اقرأ نص المذاكرة لكل سؤال — البطاقات تختفي عند انتهاء الوقت."
-          : "جاري بدء الجولة…";
-    }
     const container = app.querySelector<HTMLDivElement>("#study-cards");
     const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
     const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
@@ -441,7 +434,6 @@ function render(): void {
     }
     startStudyTimer();
     refreshKeysBadge();
-    if (socket) bindStudyRevealUi(socket);
     return;
   }
   if (phase === "playing") {
@@ -520,6 +512,7 @@ function render(): void {
           <p id="res-body" class="result-screen__body text-lg leading-relaxed"></p>
           <button id="continue-watch" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base hidden">متابعة الجولة كمشاهد</button>
           <div id="res-leaderboard" class="w-full text-right"></div>
+          <div id="res-stats" class="result-screen__stats hidden"></div>
           <button id="again" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-lg">العب مجدداً</button>
         </div>
       `),
@@ -724,7 +717,6 @@ function flashKeysBadgeReward(): void {
     window.setTimeout(done, 1100);
   };
   run(document.querySelector("#keys-badge"));
-  run(document.querySelector("#study-keys-line"));
 }
 
 function showInsufficientAbilityTip(anchor: HTMLElement, fullAbilityName: string): void {
@@ -746,8 +738,6 @@ function showInsufficientAbilityTip(anchor: HTMLElement, fullAbilityName: string
 function refreshKeysBadge(): void {
   const el = document.querySelector<HTMLSpanElement>("#keys-badge");
   if (el) el.textContent = `🔑 ${myKeysCount()}`;
-  const studyKeys = document.querySelector<HTMLParagraphElement>("#study-keys-line");
-  if (studyKeys) studyKeys.textContent = `مفاتيحك: ${myKeysCount()}`;
 }
 
 function flashKeysBadge(): void {
@@ -757,7 +747,7 @@ function flashKeysBadge(): void {
   }, 600);
 }
 
-/** اهتزاز أحمر لشارة المفاتيح (وفي المذاكرة لسطر المفاتيح) بعد فشل القدرة وRollback */
+/** اهتزاز أحمر لشارة المفاتيح بعد فشل القدرة وRollback */
 function shakeKeysBadgeError(): void {
   const run = (el: Element | null): void => {
     if (!el) return;
@@ -769,7 +759,6 @@ function shakeKeysBadgeError(): void {
     }, 620);
   };
   run(document.querySelector("#keys-badge"));
-  run(document.querySelector("#study-keys-line"));
 }
 
 function showGameToast(message: string): void {
@@ -1033,53 +1022,6 @@ function bindPlayingAbilityUi(sk: Socket): void {
   refreshAbilityAffordability();
 }
 
-function bindStudyRevealUi(sk: Socket): void {
-  const oldBtn = document.querySelector<HTMLButtonElement>("#study-reveal-btn");
-  if (!oldBtn || currentGameMode !== "study_then_quiz") return;
-  oldBtn.replaceWith(oldBtn.cloneNode(true));
-  const b = document.querySelector<HTMLButtonElement>("#study-reveal-btn");
-  if (b) b.classList.toggle("hidden", !abilityTogglesState.reveal);
-  b?.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    if (b.disabled) return;
-    if (!abilityTogglesState.reveal) {
-      showGameToast("قدرة كشف مفاتيح الجميع معطّلة في هذا النمط.");
-      return;
-    }
-    const cost = abilityCostsState.reveal;
-    if (myKeysCount() < cost) {
-      showInsufficientAbilityTip(b, ABILITY_FULL_NAMES.reveal);
-      return;
-    }
-    b.disabled = true;
-    const prev = myKeysCount();
-    patchMyKeysCount(prev - cost);
-    flashKeysBadge();
-    const tmr = window.setTimeout(() => {
-      b.disabled = false;
-    }, 4800);
-    sk.emit(
-      "ability_reveal_keys",
-      {},
-      (ack: { ok?: boolean; error?: string; keys?: number; revealQuestions?: number }) => {
-      window.clearTimeout(tmr);
-      b.disabled = false;
-      if (ack?.ok) {
-        if (typeof ack.keys === "number") {
-          patchMyKeysCount(ack.keys);
-        }
-        const revealQuestions = Number.isFinite(ack.revealQuestions) ? Math.max(1, Math.floor(ack.revealQuestions ?? 1)) : 1;
-        showGameToast(`تم كشف مفاتيح الخصوم لمدة ${revealQuestions} اسئلة`);
-        return;
-      }
-      patchMyKeysCount(prev);
-      shakeKeysBadgeError();
-      showGameToast(abilityErrorMessage(ack?.error ?? "unknown"));
-      },
-    );
-  });
-}
-
 function connectSocket(name: string, mode: GameMode): void {
   socket?.removeAllListeners();
   socket?.disconnect();
@@ -1333,11 +1275,6 @@ function connectSocket(name: string, mode: GameMode): void {
       studyStartsAt = payload.startsAt ?? payload.serverNow ?? nowSynced();
       studyDurationMs = Math.max(1000, studyEndsAt - studyStartsAt);
       if (!app.querySelector("#study-cards")) render();
-      const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
-      if (hint) {
-        hint.textContent =
-          "جاري انتظار جاهزية اللاعبين للجولة — يمكن تخطي العداد إذا ضغط الجميع جاهز.";
-      }
       const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
       const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyBtn) {
@@ -1377,15 +1314,6 @@ function connectSocket(name: string, mode: GameMode): void {
       studyPhaseState = "study_content";
       if (!app.querySelector("#study-cards")) render();
       const container = app.querySelector<HTMLDivElement>("#study-cards");
-      const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
-      if (hint) {
-        const full =
-          payload.scope === "match_start"
-            ? "مراجعة لدفعة الأسئلة في المباراة — اقرأ كل نصوص المذاكرة قبل أول سؤال."
-            : "اقرأ نصوص المذاكرة قبل متابعة الأسئلة.";
-        hint.textContent =
-          studyCards.length > 0 ? full : "جاري تجهيز الجولة…";
-      }
       const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
       const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyBtn) {
@@ -1431,10 +1359,6 @@ function connectSocket(name: string, mode: GameMode): void {
       if (!isCurrentStudyRound(payload.roundToken, payload.macroRound)) return;
       studyPhaseState = "transition_to_question";
       readyBtnState = "closed";
-      const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
-      if (hint && phase === "studying") {
-        hint.textContent = "انتهت المراجعة — تبدأ الأسئلة الآن.";
-      }
       const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyStateEl && phase === "studying") {
         readyStateEl.textContent = "أُغلقت نافذة الجاهزية.";
@@ -1653,7 +1577,14 @@ function connectSocket(name: string, mode: GameMode): void {
         isSpectator?: boolean;
       }[];
       reason?: string;
-      resultMessages?: { winner: string; loser: string; tie: string };
+      resultMessages?: {
+        winnerTitle?: string;
+        loserTitle?: string;
+        tieTitle?: string;
+        winner: string;
+        loser: string;
+        tie: string;
+      };
       leaderboard?: Array<{
         rank: number;
         name: string;
@@ -1674,15 +1605,22 @@ function connectSocket(name: string, mode: GameMode): void {
       const title = app.querySelector<HTMLHeadingElement>("#res-title");
       const body = app.querySelector<HTMLParagraphElement>("#res-body");
       const kicker = app.querySelector<HTMLParagraphElement>("#res-kicker");
+      const stats = app.querySelector<HTMLDivElement>("#res-stats");
+      const againBtn = app.querySelector<HTMLButtonElement>("#again");
       if (!title || !body) return;
+      if (kicker) kicker.hidden = true;
       const rm = payload.resultMessages;
+      const winTitle = rm?.winnerTitle?.trim() || DEFAULT_RESULT_MESSAGES.winnerTitle;
+      const loseTitle = rm?.loserTitle?.trim() || DEFAULT_RESULT_MESSAGES.loserTitle;
+      const tieTitle = rm?.tieTitle?.trim() || DEFAULT_RESULT_MESSAGES.tieTitle;
       const winCopy = rm?.winner?.trim() || DEFAULT_RESULT_MESSAGES.winner;
       const loseCopy = rm?.loser?.trim() || DEFAULT_RESULT_MESSAGES.loser;
       const tieCopy = rm?.tie?.trim() || DEFAULT_RESULT_MESSAGES.tie;
       if (payload.reason === "no_questions" || payload.outcomeType === "no_questions") {
-        if (kicker) kicker.textContent = "";
         title.textContent = "لا توجد أسئلة";
         body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
+        if (stats) stats.classList.add("hidden");
+        if (againBtn) againBtn.textContent = "العودة والمحاولة لاحقًا";
         applyResultScreenPresentation("empty", "");
         return;
       }
@@ -1694,32 +1632,37 @@ function connectSocket(name: string, mode: GameMode): void {
         kind = "win";
         emojiForFallback = "🎉";
         if (winners.length > 1) {
-          if (kicker) kicker.textContent = "فوز مشترك في الصدارة";
-          title.textContent = "فزت (تعادل صدارة)!";
+          title.textContent = winTitle;
           body.textContent = `${winCopy} — فائزون معك: ${winners.map((w) => w.name).join("، ")}`;
         } else {
-          if (kicker) kicker.textContent = "مبروك — أداء يستحق الاحتفال";
-          title.textContent = "فزت!";
+          title.textContent = winTitle;
           body.textContent = winCopy;
         }
+        if (againBtn) againBtn.textContent = "العب مجددًا";
       } else if (winners.length > 0) {
         kind = "lose";
         emojiForFallback = "💔";
-        if (kicker) kicker.textContent = "نهاية الجولة";
-        title.textContent = "انتهت الجولة";
+        title.textContent = loseTitle;
         body.textContent =
           winners.length === 1
             ? `${loseCopy} (الفائز: ${winners[0]?.name ?? "-"})`
             : `${loseCopy} (فائزون مشتركون: ${winners.map((w) => w.name).join("، ")})`;
+        if (againBtn) againBtn.textContent = "حاول مرة أخرى";
       } else {
         kind = "tie";
         emojiForFallback = "🤝";
-        if (kicker) kicker.textContent = "لا غالب ولا مغلوب";
-        title.textContent = "تعادل كامل";
+        title.textContent = tieTitle;
         body.textContent = tieCopy;
+        if (againBtn) againBtn.textContent = "جولة جديدة";
       }
-      if (me) {
-        body.textContent += ` — قلوبك المتبقية: ${me.hearts} — نقاطك: ${me.skillPoints ?? 0}`;
+      if (stats) {
+        if (me) {
+          stats.innerHTML = `<span class="result-screen__stat-chip">❤️ القلوب: ${me.hearts}</span><span class="result-screen__stat-chip">⭐ النقاط: ${me.skillPoints ?? 0}</span>`;
+          stats.classList.remove("hidden");
+        } else {
+          stats.classList.add("hidden");
+          stats.innerHTML = "";
+        }
       }
       renderLeaderboard();
       applyResultScreenPresentation(kind, emojiForFallback);
@@ -1806,10 +1749,15 @@ function connectSocket(name: string, mode: GameMode): void {
     const title = app.querySelector<HTMLHeadingElement>("#res-title");
     const body = app.querySelector<HTMLParagraphElement>("#res-body");
     const kicker = app.querySelector<HTMLParagraphElement>("#res-kicker");
+    const stats = app.querySelector<HTMLDivElement>("#res-stats");
     const continueWatch = app.querySelector<HTMLButtonElement>("#continue-watch");
-    if (kicker) kicker.textContent = "تم إقصاؤك من الإجابة";
+    if (kicker) kicker.hidden = true;
     if (title) title.textContent = "خرجت من الجولة";
     if (body) body.textContent = "يمكنك متابعة المباراة كمشاهد حتى النهاية.";
+    if (stats) {
+      stats.classList.add("hidden");
+      stats.innerHTML = "";
+    }
     if (continueWatch) continueWatch.classList.remove("hidden");
     applyResultScreenPresentation("lose", "💔");
   });
@@ -1823,14 +1771,6 @@ function connectSocket(name: string, mode: GameMode): void {
       totalActive: number;
     }) => {
       if (!isCurrentStudyRound(p.roundToken, p.macroRound)) return;
-      const hint = app.querySelector<HTMLParagraphElement>("#study-hint");
-      if (hint && phase === "studying") {
-        const prefix =
-          studyPhaseState === "study_content"
-            ? "المذاكرة جارية"
-            : "انتظار جاهزية اللاعبين للجولة";
-        hint.textContent = `${prefix} — جاهزون: ${p.readySocketIds.length}/${p.totalActive}`;
-      }
       const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyStateEl && phase === "studying") {
         readyStateEl.textContent = `جاهزية اللاعبين: ${p.readySocketIds.length}/${p.totalActive}`;

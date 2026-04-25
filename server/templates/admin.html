@@ -488,6 +488,12 @@
         </button>
         <div class="accordion-content">
           <div class="card">
+            <label for="rm-winner-title">عنوان الفوز الكبير</label>
+            <input id="rm-winner-title" maxlength="200" type="text" />
+            <label for="rm-loser-title">عنوان الخسارة الكبير</label>
+            <input id="rm-loser-title" maxlength="200" type="text" />
+            <label for="rm-tie-title">عنوان التعادل الكبير</label>
+            <input id="rm-tie-title" maxlength="200" type="text" />
             <label for="rm-winner">نص الفائز</label>
             <textarea id="rm-winner" maxlength="500" rows="2"></textarea>
             <label for="rm-loser">نص الخاسر</label>
@@ -814,6 +820,9 @@
             var r = await fetch("/api/admin/result-messages", { headers: { "X-Admin-Secret": s } });
             var j = await r.json();
             if (r.ok && j.ok) {
+              document.getElementById("rm-winner-title").value = j.winnerTitle || "";
+              document.getElementById("rm-loser-title").value = j.loserTitle || "";
+              document.getElementById("rm-tie-title").value = j.tieTitle || "";
               document.getElementById("rm-winner").value = j.winnerText || "";
               document.getElementById("rm-loser").value = j.loserText || "";
               document.getElementById("rm-tie").value = j.tieText || "";
@@ -825,6 +834,9 @@
         rmSave.addEventListener("click", async function () {
           var s = secret(); if (!s) return setRmMsg("أدخل مفتاح الإدارة.", false);
           var body = {
+            winnerTitle: document.getElementById("rm-winner-title").value.trim(),
+            loserTitle: document.getElementById("rm-loser-title").value.trim(),
+            tieTitle: document.getElementById("rm-tie-title").value.trim(),
             winnerText: document.getElementById("rm-winner").value.trim(),
             loserText: document.getElementById("rm-loser").value.trim(),
             tieText: document.getElementById("rm-tie").value.trim()

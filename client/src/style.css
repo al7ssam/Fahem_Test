@@ -734,6 +734,7 @@ body {
 
 .result-screen__body {
   color: rgba(203, 213, 225, 0.95);
+  max-width: 36ch;
 }
 
 .result-screen--win .result-screen__body {
@@ -746,6 +747,42 @@ body {
 
 .result-screen--tie .result-screen__body {
   color: rgba(199, 210, 254, 0.9);
+}
+
+.result-screen__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  justify-content: center;
+  width: 100%;
+}
+
+.result-screen__stat-chip {
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(15, 23, 42, 0.45);
+  color: #e2e8f0;
+}
+
+.result-screen--win .result-screen__stat-chip {
+  border-color: rgba(250, 204, 21, 0.5);
+  background: rgba(120, 53, 15, 0.35);
+  color: #fef3c7;
+}
+
+.result-screen--lose .result-screen__stat-chip {
+  border-color: rgba(248, 113, 113, 0.5);
+  background: rgba(127, 29, 29, 0.3);
+  color: #fecaca;
+}
+
+.result-screen--tie .result-screen__stat-chip {
+  border-color: rgba(129, 140, 248, 0.5);
+  background: rgba(49, 46, 129, 0.3);
+  color: #c7d2fe;
 }
 
 .result-screen__again {
@@ -856,8 +893,7 @@ body {
   animation: keys-badge-flash 0.55s ease-out;
 }
 
-.keys-badge--reward-glow,
-#study-keys-line.keys-badge--reward-glow {
+.keys-badge--reward-glow {
   animation: keys-badge-reward-glow 0.95s ease-out;
 }
 
@@ -1184,20 +1220,3 @@ body {
   }
 }
 
-.study-reveal-bar {
-  margin-top: auto;
-  padding-top: 0.5rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.study-reveal-btn {
-  width: 100%;
-  border-radius: 0.9rem;
-  padding: 0.55rem;
-  font-weight: 800;
-  font-size: 0.95rem;
-  border: 1px solid rgba(167, 139, 250, 0.45);
-  background: rgba(88, 28, 135, 0.35);
-  color: #e9d5ff;
-  box-shadow: 0 0 14px rgba(167, 139, 250, 0.25);
-}

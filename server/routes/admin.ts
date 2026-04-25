@@ -40,6 +40,9 @@ const importItemSchema = z
 const importArraySchema = z.array(importItemSchema).min(1).max(200);
 
 const resultMessagesPatchSchema = z.object({
+  winnerTitle: z.string().trim().min(1).max(200),
+  loserTitle: z.string().trim().min(1).max(200),
+  tieTitle: z.string().trim().min(1).max(200),
   winnerText: z.string().trim().min(1).max(500),
   loserText: z.string().trim().min(1).max(500),
   tieText: z.string().trim().min(1).max(500),
@@ -227,6 +230,9 @@ export function registerAdminRoutes(app: Express): void {
       const m = await getResultMessages(pool);
       res.json({
         ok: true,
+        winnerTitle: m.winnerTitle,
+        loserTitle: m.loserTitle,
+        tieTitle: m.tieTitle,
         winnerText: m.winner,
         loserText: m.loser,
         tieText: m.tie,
@@ -247,14 +253,15 @@ export function registerAdminRoutes(app: Express): void {
       });
       return;
     }
-    const { winnerText, loserText, tieText } = parsed.data;
+    const { winnerTitle, loserTitle, tieTitle, winnerText, loserText, tieText } = parsed.data;
     try {
       const pool = getPool();
       await pool.query(
         `UPDATE game_result_copy
-         SET winner_text = $1, loser_text = $2, tie_text = $3
+         SET winner_title = $1, loser_title = $2, tie_title = $3,
+             winner_text = $4, loser_text = $5, tie_text = $6
          WHERE id = 1`,
-        [winnerText, loserText, tieText],
+        [winnerTitle, loserTitle, tieTitle, winnerText, loserText, tieText],
       );
       res.json({ ok: true });
     } catch {
