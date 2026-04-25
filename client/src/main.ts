@@ -27,7 +27,13 @@ let currentMatchPlayers: Array<{
   isSpectator?: boolean;
   skillPoints?: number;
   lastAward?: number;
+  keys?: number;
+  skillBoostStacks?: number;
+  /** نتيجة آخر جولة معروضة في اللوحة (من question_result) */
+  lastRoundResult?: "skipped" | "correct" | "wrong";
 }> = [];
+let revealKeysActiveState = false;
+let keysAttacksEnabledState = true;
 let studyCards: Array<{
   id: number;
   questionId?: number;
@@ -338,7 +344,9 @@ function render(): void {
           <button id="round-ready-btn" type="button" class="w-full rounded-xl bg-indigo-600/80 hover:bg-indigo-500 py-2 text-sm font-bold">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
           <p id="study-hint" class="text-right text-slate-300/90 text-sm min-h-[1.25rem] leading-relaxed"></p>
           <p id="study-ready-state" class="text-right text-amber-200/90 text-xs min-h-[1.1rem] leading-relaxed"></p>
-          <div id="study-cards" class="flex-1 space-y-4 overflow-y-auto max-h-[72vh] pb-4"></div>
+          <div id="study-cards" class="flex-1 space-y-4 overflow-y-auto max-h-[60vh] pb-2"></div>
+          <p id="study-keys-line" class="study-reveal-bar text-right text-sm text-amber-100/90 font-semibold">مفاتيحك: 0</p>
+          <button type="button" id="study-reveal-btn" class="study-reveal-btn">🔮 كشف مفاتيح الجميع (للبلوك الحالي)</button>
         </div>
       `),
     );
@@ -391,29 +399,56 @@ function render(): void {
       });
     }
     startStudyTimer();
+    refreshKeysBadge();
+    if (socket) bindStudyRevealUi(socket);
     return;
   }
   if (phase === "playing") {
     app.append(
       el(`
-        <div class="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950 text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
-          <div class="flex items-center justify-between gap-2">
-            <div id="hearts" class="flex gap-1 text-2xl"></div>
-            <div id="clock" class="text-xl font-mono font-bold text-amber-300 tabular-nums">—</div>
+        <div class="playing-shell min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-indigo-950 text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
+          <div id="toast-root" class="toast-root"></div>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div id="hearts" class="flex gap-1 text-2xl shrink-0"></div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span id="keys-badge" class="keys-badge" aria-live="polite">🔑 0</span>
+              <div id="clock" class="text-xl font-mono font-bold text-amber-300 tabular-nums">—</div>
+            </div>
           </div>
-          <div id="players-panel" class="players-panel"></div>
-          <div id="q-card" class="rounded-2xl bg-white/5 border border-white/10 p-5 flex-1 flex flex-col gap-4 shadow-xl">
+          <details class="rivals-details rounded-xl overflow-hidden">
+            <summary class="px-3 py-2 text-sm font-bold text-amber-200 cursor-pointer select-none">المنافسون</summary>
+            <div id="players-panel" class="players-panel border-0 rounded-none"></div>
+          </details>
+          <div id="q-card" class="rounded-2xl bg-white/5 border border-white/10 p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0">
             <p id="q-text" class="text-right text-xl font-semibold leading-relaxed min-h-[4rem]"></p>
             <div id="opts" class="grid gap-2"></div>
           </div>
           <p id="status" class="text-center text-slate-400 text-sm min-h-[1.25rem]"></p>
           <p id="spectator-badge" class="text-center text-amber-200 text-sm min-h-[1.25rem]"></p>
+          <div id="attack-overlay" class="attack-overlay" hidden>
+            <div class="attack-overlay__panel">
+              <p class="text-center font-bold text-amber-200 mb-1">اختر من تريد استهداف قلبه</p>
+              <div id="attack-bubbles" class="attack-bubbles"></div>
+              <button type="button" id="attack-close" class="w-full rounded-xl bg-slate-700 py-2 text-sm font-bold">إلغاء</button>
+            </div>
+          </div>
+          <div class="ability-dock" aria-label="قدرات">
+            <div class="ability-dock__inner">
+              <button type="button" id="ab-boost" class="ability-btn ability-btn--boost" title="تعزيز نقاط المهارة" aria-label="تعزيز">⚡</button>
+              <button type="button" id="ab-skip" class="ability-btn ability-btn--skip" title="تجاوز السؤال دون قلب أو نقاط" aria-label="تجاوز">🛡️</button>
+              <button type="button" id="ab-attack" class="ability-btn ability-btn--attack" title="هجوم على قلب" aria-label="هجوم">⚔️</button>
+              <button type="button" id="ab-reveal" class="ability-btn ability-btn--reveal" title="كشف مفاتيح الجميع" aria-label="كشف">🔮</button>
+            </div>
+          </div>
         </div>
       `),
     );
-    renderHearts(3);
+    const meH = currentMatchPlayers.find((p) => p.socketId === mySocketId)?.hearts ?? 3;
+    renderHearts(meH);
     renderPlayingPlayersPanel();
+    refreshKeysBadge();
     startQuestionTimer();
+    if (socket) bindPlayingAbilityUi(socket);
     return;
   }
 
@@ -516,7 +551,16 @@ function renderPlayingPlayersPanel(): void {
     row.className = `players-panel__row ${isMe ? "players-panel__row--me" : ""}`;
     const points = p.skillPoints ?? 0;
     const bonus = p.lastAward && p.lastAward > 0 ? ` <span class="players-panel__award">+${p.lastAward}</span>` : "";
-    row.innerHTML = `<span>${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}</span><span>${p.eliminated ? "خرج" : "نشط"} · ❤️ ${p.hearts} · ⭐ ${points}${bonus}</span>`;
+    const roundTag =
+      p.lastRoundResult === "skipped"
+        ? ` <span class="players-panel__round-tag players-panel__round-tag--skipped">تخطّى</span>`
+        : p.lastRoundResult === "wrong"
+          ? ` <span class="players-panel__round-tag players-panel__round-tag--wrong">خطأ</span>`
+          : "";
+    const k = p.keys ?? 0;
+    const keysShown = isMe || revealKeysActiveState ? `🔑${k}` : "🔑؟";
+    const stacks = (p.skillBoostStacks ?? 0) > 0 && isMe ? ` · ⚡×${p.skillBoostStacks}` : "";
+    row.innerHTML = `<span>${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}</span><span>${p.eliminated ? "خرج" : "نشط"} · ❤️ ${p.hearts} · ⭐ ${points} · ${keysShown}${stacks}${roundTag}${bonus}</span>`;
     panel.appendChild(row);
   }
 }
@@ -554,6 +598,280 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function abilityErrorMessage(code: string): string {
+  const m: Record<string, string> = {
+    not_enough_keys: "لا تكفي المفاتيح.",
+    question_closed: "انتهى وقت السؤال أو السؤال غير نشط.",
+    attacks_disabled: "هجمات القلب معطّلة في هذه الجولة.",
+    invalid_target: "هدف غير صالح.",
+    not_eligible: "لا يمكنك استخدام القدرة الآن.",
+    not_in_match: "أنت خارج المباراة.",
+    already_answered: "أرسلت إجابة بالفعل.",
+    already_skipped: "استخدمت التجاوز لهذا السؤال.",
+    reveal_disabled_direct: "كشف المفاتيح غير مفعّل في النمط المباشر.",
+    reveal_not_available: "الكشف غير متاح الآن.",
+    reveal_already_active: "الكشف مفعّل بالفعل لهذا البلوك.",
+    match_finished: "انتهت المباراة.",
+    invalid_body: "طلب غير صالح.",
+  };
+  return m[code] ?? "تعذر تنفيذ القدرة.";
+}
+
+function myKeysCount(): number {
+  return currentMatchPlayers.find((p) => p.socketId === mySocketId)?.keys ?? 0;
+}
+
+function patchMyKeysCount(next: number): void {
+  currentMatchPlayers = currentMatchPlayers.map((p) =>
+    p.socketId === mySocketId ? { ...p, keys: Math.max(0, next) } : p,
+  );
+  refreshKeysBadge();
+}
+
+function refreshKeysBadge(): void {
+  const el = document.querySelector<HTMLSpanElement>("#keys-badge");
+  if (el) el.textContent = `🔑 ${myKeysCount()}`;
+  const studyKeys = document.querySelector<HTMLParagraphElement>("#study-keys-line");
+  if (studyKeys) studyKeys.textContent = `مفاتيحك: ${myKeysCount()}`;
+}
+
+function flashKeysBadge(): void {
+  document.querySelector("#keys-badge")?.classList.add("keys-badge--flash");
+  window.setTimeout(() => {
+    document.querySelector("#keys-badge")?.classList.remove("keys-badge--flash");
+  }, 600);
+}
+
+/** اهتزاز أحمر لشارة المفاتيح (وفي المذاكرة لسطر المفاتيح) بعد فشل القدرة وRollback */
+function shakeKeysBadgeError(): void {
+  const run = (el: Element | null): void => {
+    if (!el) return;
+    el.classList.remove("keys-error-shake");
+    void (el as HTMLElement).offsetWidth;
+    el.classList.add("keys-error-shake");
+    window.setTimeout(() => {
+      el.classList.remove("keys-error-shake");
+    }, 620);
+  };
+  run(document.querySelector("#keys-badge"));
+  run(document.querySelector("#study-keys-line"));
+}
+
+function showGameToast(message: string): void {
+  const root = document.querySelector<HTMLDivElement>("#toast-root");
+  if (!root) return;
+  const t = document.createElement("div");
+  t.className = "toast-item";
+  t.textContent = message;
+  root.appendChild(t);
+  window.setTimeout(() => {
+    t.remove();
+  }, 3200);
+}
+
+function mergeKeysFromServerList(
+  list: Array<{
+    socketId: string;
+    name?: string;
+    hearts?: number;
+    eliminated?: boolean;
+    isSpectator?: boolean;
+    skillPoints?: number;
+    lastAward?: number;
+    keys?: number;
+    skillBoostStacks?: number;
+  }>,
+): void {
+  currentMatchPlayers = currentMatchPlayers.map((old) => {
+    const n = list.find((x) => x.socketId === old.socketId);
+    if (!n) return old;
+    return {
+      ...old,
+      ...(n.name !== undefined ? { name: n.name } : {}),
+      ...(n.hearts !== undefined ? { hearts: n.hearts } : {}),
+      ...(n.eliminated !== undefined ? { eliminated: n.eliminated } : {}),
+      ...(n.isSpectator !== undefined ? { isSpectator: n.isSpectator } : {}),
+      ...(n.skillPoints !== undefined ? { skillPoints: n.skillPoints } : {}),
+      ...(n.lastAward !== undefined ? { lastAward: n.lastAward } : {}),
+      ...(n.keys !== undefined ? { keys: n.keys } : {}),
+      ...(n.skillBoostStacks !== undefined ? { skillBoostStacks: n.skillBoostStacks } : {}),
+    };
+  });
+  refreshKeysBadge();
+}
+
+/**
+ * دمج حالة المفاتيح/الكشف من `keys_room_state` أو من `question_result`.
+ * `skipPanelRender`: عند دمج `question_result` مع `lastRoundResult` يُؤجَّل الرسم لإطار واحد.
+ */
+function applyKeysRoomSlice(payload: {
+  revealKeysActive?: boolean;
+  keysAttacksEnabled?: boolean;
+  players?: Array<{
+    socketId: string;
+    name?: string;
+    hearts?: number;
+    eliminated?: boolean;
+    isSpectator?: boolean;
+    skillPoints?: number;
+    lastAward?: number;
+    keys?: number;
+    skillBoostStacks?: number;
+  }>;
+}, options?: { skipPanelRender?: boolean }): void {
+  if (typeof payload.revealKeysActive === "boolean") {
+    revealKeysActiveState = payload.revealKeysActive;
+  }
+  if (typeof payload.keysAttacksEnabled === "boolean") {
+    keysAttacksEnabledState = payload.keysAttacksEnabled;
+  }
+  if (payload.players) mergeKeysFromServerList(payload.players);
+  if (!options?.skipPanelRender && phase === "playing") renderPlayingPlayersPanel();
+}
+
+function bindPlayingAbilityUi(sk: Socket): void {
+  const boost = document.querySelector<HTMLButtonElement>("#ab-boost");
+  const skip = document.querySelector<HTMLButtonElement>("#ab-skip");
+  const attack = document.querySelector<HTMLButtonElement>("#ab-attack");
+  const reveal = document.querySelector<HTMLButtonElement>("#ab-reveal");
+  const overlay = document.querySelector<HTMLDivElement>("#attack-overlay");
+  const bubbles = document.querySelector<HTMLDivElement>("#attack-bubbles");
+  const attackClose = document.querySelector<HTMLButtonElement>("#attack-close");
+
+  if (attack) {
+    attack.classList.toggle("hidden", !keysAttacksEnabledState);
+  }
+
+  const runAbility = (
+    btn: HTMLButtonElement | null,
+    eventName: string,
+    payload: unknown,
+    optimisticDelta: number | null,
+  ): void => {
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    btn.classList.add("ability-btn--busy");
+    const prev = myKeysCount();
+    if (optimisticDelta !== null) {
+      patchMyKeysCount(prev + optimisticDelta);
+      flashKeysBadge();
+    }
+    const tmr = window.setTimeout(() => {
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+      btn.classList.remove("ability-btn--busy");
+    }, 4800);
+    sk.emit(eventName, payload ?? {}, (ack: { ok?: boolean; error?: string; keys?: number; skillBoostStacks?: number }) => {
+      window.clearTimeout(tmr);
+      btn.classList.remove("ability-btn--busy");
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+      if (ack?.ok && typeof ack.keys === "number") {
+        patchMyKeysCount(ack.keys);
+        if (typeof ack.skillBoostStacks === "number") {
+          currentMatchPlayers = currentMatchPlayers.map((p) =>
+            p.socketId === mySocketId ? { ...p, skillBoostStacks: ack.skillBoostStacks } : p,
+          );
+        }
+        return;
+      }
+      if (optimisticDelta !== null) {
+        patchMyKeysCount(prev);
+        shakeKeysBadgeError();
+      }
+      showGameToast(abilityErrorMessage(ack?.error ?? "unknown"));
+    });
+  };
+
+  boost?.replaceWith(boost.cloneNode(true));
+  skip?.replaceWith(skip.cloneNode(true));
+  attack?.replaceWith(attack.cloneNode(true));
+  reveal?.replaceWith(reveal.cloneNode(true));
+  attackClose?.replaceWith(attackClose.cloneNode(true));
+
+  const b1 = document.querySelector<HTMLButtonElement>("#ab-boost");
+  const s1 = document.querySelector<HTMLButtonElement>("#ab-skip");
+  const a1 = document.querySelector<HTMLButtonElement>("#ab-attack");
+  const r1 = document.querySelector<HTMLButtonElement>("#ab-reveal");
+  const c1 = document.querySelector<HTMLButtonElement>("#attack-close");
+
+  b1?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    runAbility(b1, "ability_skill_boost", {}, -1);
+  });
+  s1?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    runAbility(s1, "ability_skip_question", {}, -1);
+  });
+  r1?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    runAbility(r1, "ability_reveal_keys", {}, -2);
+  });
+
+  a1?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (!overlay || !bubbles) return;
+    bubbles.innerHTML = "";
+    for (const p of currentMatchPlayers) {
+      if (p.socketId === mySocketId) continue;
+      if (p.eliminated || p.hearts <= 0) continue;
+      const wrap = document.createElement("button");
+      wrap.type = "button";
+      wrap.className = "attack-bubble";
+      const circle = document.createElement("span");
+      circle.className = "attack-bubble__circle";
+      circle.textContent = (p.name || "?").slice(0, 2);
+      const hearts = document.createElement("span");
+      hearts.textContent = `❤️×${p.hearts}`;
+      wrap.appendChild(circle);
+      wrap.appendChild(hearts);
+      wrap.addEventListener("click", () => {
+        wrap.classList.add("attack-bubble--pop");
+        window.setTimeout(() => {
+          overlay.hidden = true;
+          runAbility(a1, "ability_heart_attack", { targetSocketId: p.socketId }, -2);
+        }, 380);
+      });
+      bubbles.appendChild(wrap);
+    }
+    overlay.hidden = false;
+  });
+
+  c1?.addEventListener("click", () => {
+    if (overlay) overlay.hidden = true;
+  });
+}
+
+function bindStudyRevealUi(sk: Socket): void {
+  const oldBtn = document.querySelector<HTMLButtonElement>("#study-reveal-btn");
+  if (!oldBtn || currentGameMode !== "study_then_quiz") return;
+  oldBtn.replaceWith(oldBtn.cloneNode(true));
+  const b = document.querySelector<HTMLButtonElement>("#study-reveal-btn");
+  b?.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (b.disabled) return;
+    b.disabled = true;
+    const prev = myKeysCount();
+    patchMyKeysCount(prev - 2);
+    flashKeysBadge();
+    const tmr = window.setTimeout(() => {
+      b.disabled = false;
+    }, 4800);
+    sk.emit("ability_reveal_keys", {}, (ack: { ok?: boolean; error?: string; keys?: number }) => {
+      window.clearTimeout(tmr);
+      b.disabled = false;
+      if (ack?.ok && typeof ack.keys === "number") {
+        patchMyKeysCount(ack.keys);
+        return;
+      }
+      patchMyKeysCount(prev);
+      shakeKeysBadgeError();
+      showGameToast(abilityErrorMessage(ack?.error ?? "unknown"));
+    });
+  });
 }
 
 function connectSocket(name: string, mode: GameMode): void {
@@ -734,11 +1052,18 @@ function connectSocket(name: string, mode: GameMode): void {
     (payload: {
       matchId?: string;
       gameMode?: GameMode;
+      revealKeysActive?: boolean;
+      keysAttacksEnabled?: boolean;
       players?: Array<{
         socketId: string;
         name: string;
         hearts: number;
         eliminated: boolean;
+        isSpectator?: boolean;
+        skillPoints?: number;
+        lastAward?: number;
+        keys?: number;
+        skillBoostStacks?: number;
       }>;
     }) => {
       if (cdInterval) {
@@ -746,9 +1071,17 @@ function connectSocket(name: string, mode: GameMode): void {
         cdInterval = null;
       }
       if (payload.gameMode) currentGameMode = payload.gameMode;
+      revealKeysActiveState = Boolean(payload.revealKeysActive);
+      keysAttacksEnabledState = payload.keysAttacksEnabled !== false;
       lobbyNotice = "";
       if (payload.players) {
-        currentMatchPlayers = payload.players.map((p) => ({ ...p }));
+        currentMatchPlayers = payload.players.map((p) => ({
+          ...p,
+          keys: p.keys ?? 0,
+          skillBoostStacks: p.skillBoostStacks ?? 0,
+          skillPoints: p.skillPoints ?? 0,
+          lastAward: p.lastAward ?? 0,
+        }));
       }
       spectatorEligible = false;
       spectatorFollowing = false;
@@ -933,11 +1266,23 @@ function connectSocket(name: string, mode: GameMode): void {
       options: string[];
       endsAt: number;
       serverNow?: number;
+      revealKeysActive?: boolean;
+      keysAttacksEnabled?: boolean;
     }) => {
       syncClock(q.serverNow);
       if (spectatorEligible && !spectatorFollowing) return;
       currentQuestionId = q.questionId;
       endsAt = q.endsAt;
+      currentMatchPlayers = currentMatchPlayers.map((p) => {
+        const { lastRoundResult: _lr, ...rest } = p;
+        return rest;
+      });
+      if (typeof q.revealKeysActive === "boolean") {
+        revealKeysActiveState = q.revealKeysActive;
+      }
+      if (typeof q.keysAttacksEnabled === "boolean") {
+        keysAttacksEnabledState = q.keysAttacksEnabled;
+      }
       phase = "playing";
       if (!app.querySelector("#q-text")) render();
       const text = app.querySelector<HTMLParagraphElement>("#q-text");
@@ -972,12 +1317,26 @@ function connectSocket(name: string, mode: GameMode): void {
         spectatorBadge.textContent = spectatorFollowing ? "وضع المشاهد: يمكنك المتابعة بدون إجابة." : "";
       }
       startQuestionTimer();
+      if (app.querySelector("#ab-boost")) {
+        renderPlayingPlayersPanel();
+        if (socket) bindPlayingAbilityUi(socket);
+      }
     },
   );
 
   s.on(
     "question_result",
     (payload: {
+      revealKeysActive?: boolean;
+      keysAttacksEnabled?: boolean;
+      results?: Array<{
+        socketId: string;
+        correct: boolean;
+        skipped?: boolean;
+        pointsAward?: number;
+        hearts: number;
+        eliminated: boolean;
+      }>;
       players: {
         socketId: string;
         hearts: number;
@@ -985,23 +1344,48 @@ function connectSocket(name: string, mode: GameMode): void {
         skillPoints?: number;
         lastAward?: number;
         isSpectator?: boolean;
+        keys?: number;
+        skillBoostStacks?: number;
       }[];
     }) => {
+      applyKeysRoomSlice(
+        {
+          revealKeysActive: payload.revealKeysActive,
+          keysAttacksEnabled: payload.keysAttacksEnabled,
+          players: payload.players,
+        },
+        { skipPanelRender: true },
+      );
       const me = payload.players.find((p) => p.socketId === mySocketId);
       if (me && phase === "playing") renderHearts(me.hearts);
+      const results = payload.results ?? [];
       currentMatchPlayers = currentMatchPlayers.map((player) => {
         const next = payload.players.find((p) => p.socketId === player.socketId);
-        return next
-          ? {
-              ...player,
-              hearts: next.hearts,
-              eliminated: next.eliminated,
-              skillPoints: next.skillPoints ?? player.skillPoints ?? 0,
-              lastAward: next.lastAward ?? 0,
-              isSpectator: next.isSpectator ?? player.isSpectator ?? false,
-            }
-          : player;
+        const rr = results.find((r) => r.socketId === player.socketId);
+        const lastRoundResult = rr
+          ? rr.skipped
+            ? ("skipped" as const)
+            : rr.correct
+              ? ("correct" as const)
+              : ("wrong" as const)
+          : undefined;
+        if (!next) {
+          const { lastRoundResult: _lr, ...rest } = player;
+          return rest;
+        }
+        return {
+          ...player,
+          hearts: next.hearts,
+          eliminated: next.eliminated,
+          skillPoints: next.skillPoints ?? player.skillPoints ?? 0,
+          lastAward: next.lastAward ?? 0,
+          isSpectator: next.isSpectator ?? player.isSpectator ?? false,
+          keys: next.keys ?? player.keys ?? 0,
+          skillBoostStacks: next.skillBoostStacks ?? player.skillBoostStacks ?? 0,
+          lastRoundResult,
+        };
       });
+      refreshKeysBadge();
       renderPlayingPlayersPanel();
       const status = app.querySelector<HTMLParagraphElement>("#status");
       if (status) status.textContent = "جاري السؤال التالي…";
@@ -1097,9 +1481,63 @@ function connectSocket(name: string, mode: GameMode): void {
     },
   );
 
-  s.on("player_eliminated", (p: { name: string; reason?: string }) => {
+  s.on(
+    "keys_room_state",
+    (payload: {
+      revealKeysActive?: boolean;
+      players?: Array<{
+        socketId: string;
+        name: string;
+        hearts: number;
+        eliminated: boolean;
+        isSpectator?: boolean;
+        skillPoints?: number;
+        lastAward?: number;
+        keys?: number;
+        skillBoostStacks?: number;
+      }>;
+    }) => {
+      applyKeysRoomSlice({
+        revealKeysActive: payload.revealKeysActive,
+        players: payload.players,
+      });
+    },
+  );
+
+  s.on(
+    "ability_heart_resolved",
+    (payload: {
+      attackerSocketId?: string;
+      attackerName?: string;
+      victimSocketId?: string;
+      victimName?: string;
+      outcome?: "hit" | "blocked";
+      shieldCost?: number;
+    }) => {
+      const meId = mySocketId;
+      const aName = payload.attackerName ?? "لاعب";
+      const vName = payload.victimName ?? "لاعب";
+      if (payload.victimSocketId === meId) {
+        if (payload.outcome === "blocked") {
+          showGameToast(`${aName} أطلق عليك صاروخاً — تصدّيت بمفاتيح!`);
+        } else {
+          showGameToast(`${aName} أطلق عليك صاروخاً — خسرت قلباً!`);
+        }
+      } else if (payload.attackerSocketId === meId) {
+        if (payload.outcome === "blocked") {
+          showGameToast(`${vName} تصدّى بمفاتيح (${payload.shieldCost ?? 2} مفتاحاً).`);
+        } else {
+          showGameToast(`أصبت ${vName} — خسر قلباً.`);
+        }
+      }
+    },
+  );
+
+  s.on("player_eliminated", (p: { name: string; socketId?: string; reason?: string }) => {
     currentMatchPlayers = currentMatchPlayers.map((x) =>
-      x.name === p.name ? { ...x, eliminated: true, hearts: 0 } : x,
+      (p.socketId && x.socketId === p.socketId) || (!p.socketId && x.name === p.name)
+        ? { ...x, eliminated: true, hearts: 0 }
+        : x,
     );
     renderPlayingPlayersPanel();
     const status = app.querySelector<HTMLParagraphElement>("#status");

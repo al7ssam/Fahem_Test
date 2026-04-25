@@ -14,6 +14,10 @@ const answerSchema = z.object({
   choiceIndex: z.number().int().min(0).max(3),
 });
 
+const abilityHeartSchema = z.object({
+  targetSocketId: z.string().min(1),
+});
+
 const DEFAULT_MATCH_FILL_WINDOW_SECONDS = 5;
 const DEFAULT_MAX_PLAYERS_PER_MATCH = 10;
 
@@ -168,6 +172,51 @@ export class GameManager {
     socket.on("continue_as_spectator", (_raw, cb) => {
       const match = this.socketToMatch.get(socket.id);
       cb?.({ ok: Boolean(match) });
+    });
+
+    socket.on("ability_skill_boost", (_raw, cb) => {
+      const match = this.socketToMatch.get(socket.id);
+      if (!match) {
+        cb?.({ ok: false, error: "not_in_match" });
+        return;
+      }
+      const r = match.tryAbilitySkillBoost(socket.id);
+      cb?.(r);
+    });
+
+    socket.on("ability_skip_question", (_raw, cb) => {
+      const match = this.socketToMatch.get(socket.id);
+      if (!match) {
+        cb?.({ ok: false, error: "not_in_match" });
+        return;
+      }
+      const r = match.tryAbilitySkipQuestion(socket.id);
+      cb?.(r);
+    });
+
+    socket.on("ability_heart_attack", (raw, cb) => {
+      const match = this.socketToMatch.get(socket.id);
+      if (!match) {
+        cb?.({ ok: false, error: "not_in_match" });
+        return;
+      }
+      const parsed = abilityHeartSchema.safeParse(raw);
+      if (!parsed.success) {
+        cb?.({ ok: false, error: "invalid_body" });
+        return;
+      }
+      const r = match.tryAbilityHeartAttack(socket.id, parsed.data.targetSocketId);
+      cb?.(r);
+    });
+
+    socket.on("ability_reveal_keys", (_raw, cb) => {
+      const match = this.socketToMatch.get(socket.id);
+      if (!match) {
+        cb?.({ ok: false, error: "not_in_match" });
+        return;
+      }
+      const r = match.tryAbilityRevealKeys(socket.id);
+      cb?.(r);
     });
 
     socket.on("disconnect", () => {

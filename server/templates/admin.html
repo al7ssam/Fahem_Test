@@ -507,6 +507,45 @@
       </div>
 
       <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="keys-settings">
+          <span class="accordion-title">المفاتيح والقدرات</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <label for="ks-streak">صحيحة متتالية لكل مفتاح (+1)</label>
+            <input id="ks-streak" type="text" inputmode="numeric" value="5" />
+            <label for="ks-mega-streak">صحيحة متتالية للمكافأة الكبرى</label>
+            <input id="ks-mega-streak" type="text" inputmode="numeric" value="8" />
+            <label for="ks-mega-reward">عدد مفاتيح المكافأة الكبرى</label>
+            <input id="ks-mega-reward" type="text" inputmode="numeric" value="5" />
+            <label for="ks-max">الحد الأقصى للمفاتيح للاعب</label>
+            <input id="ks-max" type="text" inputmode="numeric" value="20" />
+            <label for="ks-boost-pct">نسبة تعزيز نقاط المهارة (%)</label>
+            <input id="ks-boost-pct" type="text" inputmode="numeric" value="30" />
+            <label for="ks-boost-cap">سقف مضاعف التعزيز (مرات الأساس)</label>
+            <input id="ks-boost-cap" type="text" inputmode="numeric" value="3" />
+            <label for="ks-attack-cost">تكلفة هجوم القلب (مفاتيح)</label>
+            <input id="ks-attack-cost" type="text" inputmode="numeric" value="2" />
+            <label for="ks-shield-cost">تكلفة التصدي للضحية (مفاتيح)</label>
+            <input id="ks-shield-cost" type="text" inputmode="numeric" value="2" />
+            <label for="ks-reveal-cost">تكلفة كشف المفاتيح (مفاتيح)</label>
+            <input id="ks-reveal-cost" type="text" inputmode="numeric" value="2" />
+            <label for="ks-drop">معدل منح المفاتيح (معامل 0–5)</label>
+            <input id="ks-drop" type="text" inputmode="decimal" value="1" />
+            <label for="ks-direct-reveal">كشف المفاتيح في النمط المباشر: عدد الأسئلة (0 = معطّل)</label>
+            <input id="ks-direct-reveal" type="text" inputmode="numeric" value="0" />
+            <label><input type="checkbox" id="ks-attacks-on" checked /> تفعيل هجمات القلب (وضع حربي)</label>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="ks-load-btn">تحميل</button>
+              <button type="button" class="btn" id="ks-save-btn">حفظ</button>
+            </div>
+            <div class="msg" id="ks-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="bank">
           <span class="accordion-title">بنك الأسئلة</span>
           <span class="accordion-icon">⌄</span>
@@ -814,6 +853,71 @@
             else setGsMsg("تعذر الحفظ.", false);
           } catch (e) { setGsMsg("خطأ في الاتصال.", false); }
           finally { gsSave.disabled = false; }
+        });
+      })();
+
+      (function () {
+        var ksLoad = document.getElementById("ks-load-btn");
+        var ksSave = document.getElementById("ks-save-btn");
+        var ksMsg = document.getElementById("ks-msg");
+        function setKsMsg(t, ok) { ksMsg.textContent = t || ""; ksMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        ksLoad.addEventListener("click", async function () {
+          var s = secret(); if (!s) return setKsMsg("أدخل مفتاح الإدارة.", false);
+          ksLoad.disabled = true;
+          try {
+            var r = await fetch("/api/admin/keys-settings", { headers: { "X-Admin-Secret": s } });
+            var j = await r.json();
+            if (r.ok && j.ok) {
+              document.getElementById("ks-streak").value = String(j.keysStreakPerKey ?? 5);
+              document.getElementById("ks-mega-streak").value = String(j.keysMegaStreak ?? 8);
+              document.getElementById("ks-mega-reward").value = String(j.keysMegaReward ?? 5);
+              document.getElementById("ks-max").value = String(j.keysMaxPerPlayer ?? 20);
+              document.getElementById("ks-boost-pct").value = String(j.keysSkillBoostPercent ?? 30);
+              document.getElementById("ks-boost-cap").value = String(j.keysSkillBoostMaxMultiplier ?? 3);
+              document.getElementById("ks-attack-cost").value = String(j.keysHeartAttackCost ?? 2);
+              document.getElementById("ks-shield-cost").value = String(j.keysShieldCost ?? 2);
+              document.getElementById("ks-reveal-cost").value = String(j.keysRevealCost ?? 2);
+              document.getElementById("ks-drop").value = String(j.keysDropRate ?? 1);
+              document.getElementById("ks-direct-reveal").value = String(j.keysRevealDirectQuestionSpan ?? 0);
+              document.getElementById("ks-attacks-on").checked = Boolean(j.keysAttacksEnabled);
+              setKsMsg("تم التحميل.", true);
+            } else setKsMsg("تعذر التحميل.", false);
+          } catch (e) { setKsMsg("خطأ في الاتصال.", false); }
+          finally { ksLoad.disabled = false; }
+        });
+        ksSave.addEventListener("click", async function () {
+          var s = secret(); if (!s) return setKsMsg("أدخل مفتاح الإدارة.", false);
+          var body = {
+            keysStreakPerKey: parseInt(document.getElementById("ks-streak").value, 10),
+            keysMegaStreak: parseInt(document.getElementById("ks-mega-streak").value, 10),
+            keysMegaReward: parseInt(document.getElementById("ks-mega-reward").value, 10),
+            keysMaxPerPlayer: parseInt(document.getElementById("ks-max").value, 10),
+            keysSkillBoostPercent: parseInt(document.getElementById("ks-boost-pct").value, 10),
+            keysSkillBoostMaxMultiplier: parseFloat(document.getElementById("ks-boost-cap").value),
+            keysHeartAttackCost: parseInt(document.getElementById("ks-attack-cost").value, 10),
+            keysShieldCost: parseInt(document.getElementById("ks-shield-cost").value, 10),
+            keysRevealCost: parseInt(document.getElementById("ks-reveal-cost").value, 10),
+            keysAttacksEnabled: document.getElementById("ks-attacks-on").checked,
+            keysDropRate: parseFloat(document.getElementById("ks-drop").value),
+            keysRevealDirectQuestionSpan: parseInt(document.getElementById("ks-direct-reveal").value, 10)
+          };
+          var nums = [body.keysStreakPerKey, body.keysMegaStreak, body.keysMegaReward, body.keysMaxPerPlayer, body.keysSkillBoostPercent, body.keysHeartAttackCost, body.keysShieldCost, body.keysRevealCost, body.keysDropRate, body.keysRevealDirectQuestionSpan, body.keysSkillBoostMaxMultiplier];
+          if (nums.some(function (v) { return typeof v !== "number" || !isFinite(v); })) {
+            return setKsMsg("تحقق من القيم الرقمية.", false);
+          }
+          ksSave.disabled = true;
+          try {
+            var r = await fetch("/api/admin/keys-settings", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s },
+              body: JSON.stringify(body)
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) setKsMsg("تم الحفظ.", true);
+            else setKsMsg("تعذر الحفظ.", false);
+          } catch (e) { setKsMsg("خطأ في الاتصال.", false); }
+          finally { ksSave.disabled = false; }
         });
       })();
 

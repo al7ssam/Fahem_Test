@@ -8,6 +8,8 @@ import {
 import { getResultMessages, type ResultMessages } from "../db/resultCopy";
 
 const QUESTION_MS = 15_000;
+/** بعد انتهاء الإجابات يبقى استقبال القدرات مفعّلاً لهذا الوقت (تخفيف سباق الشبكة مع finishRound). */
+const ABILITY_GRACE_MS = 500;
 const MAX_ROUNDS = 50;
 const DEFAULT_MAX_STUDY_ROUNDS = 3;
 const DEFAULT_STUDY_ROUND_SIZE = 8;
@@ -24,6 +26,8 @@ export type MatchPlayerPublic = {
   isSpectator: boolean;
   skillPoints: number;
   lastAward: number;
+  keys: number;
+  skillBoostStacks: number;
 };
 
 type MatchPlayerState = {
@@ -33,7 +37,14 @@ type MatchPlayerState = {
   isSpectator: boolean;
   skillPoints: number;
   lastAward: number;
+  keys: number;
+  correctStreak: number;
+  skillBoostStacks: number;
 };
+
+export type AbilityAck =
+  | { ok: true; keys: number; skillBoostStacks?: number }
+  | { ok: false; error: string };
 
 export class Match {
   readonly room: string;
@@ -47,6 +58,7 @@ export class Match {
   private pendingAnswers = new Map<string, number>();
   private answerTimes = new Map<string, number>();
   private questionTimer: ReturnType<typeof setTimeout> | null = null;
+  private abilityGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private roundClosed = false;
   private resolveRound: (() => void) | null = null;
   private finished = false;
@@ -61,6 +73,22 @@ export class Match {
   private roundReady = new Set<string>();
   private roundReadyResolve: (() => void) | null = null;
   private roundReadyTimer: ReturnType<typeof setTimeout> | null = null;
+  private skipSocketsForQuestion = new Set<string>();
+  private revealKeysActive = false;
+  private revealKeysForMacroRound: number | null = null;
+  private directRevealRemaining = 0;
+  private keysStreakPerKey = 5;
+  private keysMegaStreak = 8;
+  private keysMegaReward = 5;
+  private keysMaxPerPlayer = 20;
+  private keysSkillBoostPercent = 30;
+  private keysSkillBoostMaxMultiplier = 3;
+  private keysHeartAttackCost = 2;
+  private keysShieldCost = 2;
+  private keysRevealCost = 2;
+  private keysAttacksEnabled = true;
+  private keysDropRate = 1;
+  private keysRevealDirectQuestionSpan = 0;
 
   constructor(
     private readonly io: Server,
@@ -77,6 +105,9 @@ export class Match {
         isSpectator: false,
         skillPoints: 0,
         lastAward: 0,
+        keys: 0,
+        correctStreak: 0,
+        skillBoostStacks: 0,
       });
     }
   }
@@ -90,7 +121,17 @@ export class Match {
       isSpectator: p.isSpectator,
       skillPoints: p.skillPoints,
       lastAward: p.lastAward,
+      keys: p.keys,
+      skillBoostStacks: p.skillBoostStacks,
     }));
+  }
+
+  private emitKeysRoomState(): void {
+    this.io.to(this.room).emit("keys_room_state", {
+      revealKeysActive: this.revealKeysActive,
+      macroRound: this.macroRound,
+      players: this.snapshotPlayers(),
+    });
   }
 
   private countActive(): number {
@@ -107,6 +148,76 @@ export class Match {
       if (!this.pendingAnswers.has(id)) return false;
     }
     return true;
+  }
+
+  /** نافذة القدرات (أوسع من الإجابة بـ ABILITY_GRACE_MS بعد answerDeadline). */
+  private isAbilityWindowOpen(): boolean {
+    return (
+      !this.finished &&
+      !this.roundClosed &&
+      this.currentQuestionId !== null &&
+      Date.now() <= this.answerDeadline + ABILITY_GRACE_MS
+    );
+  }
+
+  private clearQuestionTimers(): void {
+    if (this.questionTimer) {
+      clearTimeout(this.questionTimer);
+      this.questionTimer = null;
+    }
+    if (this.abilityGraceTimer) {
+      clearTimeout(this.abilityGraceTimer);
+      this.abilityGraceTimer = null;
+    }
+  }
+
+  private clearRevealIfNewMacro(): void {
+    if (
+      this.revealKeysForMacroRound !== null &&
+      this.macroRound > this.revealKeysForMacroRound
+    ) {
+      this.revealKeysActive = false;
+      this.revealKeysForMacroRound = null;
+      this.emitKeysRoomState();
+    }
+  }
+
+  private applyKeyGrants(p: MatchPlayerState): void {
+    const streak = p.correctStreak;
+    if (streak <= 0) return;
+    let add = 0;
+    if (streak % this.keysStreakPerKey === 0) add += 1;
+    if (streak % this.keysMegaStreak === 0) add += this.keysMegaReward;
+    if (add <= 0) return;
+    const scaled = Math.floor(add * this.keysDropRate);
+    if (scaled <= 0) return;
+    p.keys = Math.min(this.keysMaxPerPlayer, p.keys + scaled);
+  }
+
+  private applySkillBoostToAward(base: number, stacks: number): number {
+    if (base <= 0 || stacks <= 0) return base;
+    const mult = Math.min(
+      this.keysSkillBoostMaxMultiplier,
+      2 ** stacks * (this.keysSkillBoostPercent / 100),
+    );
+    return Math.round(base * (1 + mult));
+  }
+
+  private damageHeart(socketId: string, p: MatchPlayerState): void {
+    p.hearts = Math.max(0, p.hearts - 1);
+    if (p.hearts === 0) {
+      p.eliminated = true;
+      p.isSpectator = true;
+      this.io.to(this.room).emit("player_eliminated", {
+        socketId,
+        name: p.name,
+        reason: "hearts",
+      });
+      this.io.to(socketId).emit("spectator_offer", {
+        socketId,
+        reason: "hearts",
+      });
+    }
   }
 
   markRoundReady(socketId: string): void {
@@ -160,16 +271,14 @@ export class Match {
     if (this.finished || this.roundClosed) return;
     if (this.currentQuestionId !== questionId) return;
     if (Date.now() > this.answerDeadline) return;
+    if (this.skipSocketsForQuestion.has(socketId)) return;
     const p = this.players.get(socketId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) return;
     if (this.pendingAnswers.has(socketId)) return;
     this.pendingAnswers.set(socketId, choiceIndex);
     this.answerTimes.set(socketId, Date.now());
     if (this.allActiveAnswered()) {
-      if (this.questionTimer) {
-        clearTimeout(this.questionTimer);
-        this.questionTimer = null;
-      }
+      this.clearQuestionTimers();
       this.finishRound();
     }
   }
@@ -186,10 +295,7 @@ export class Match {
       reason: "disconnect",
     });
     if (this.countActive() <= 1 && !this.finished) {
-      if (this.questionTimer) {
-        clearTimeout(this.questionTimer);
-        this.questionTimer = null;
-      }
+      this.clearQuestionTimers();
       this.clearStudyWait();
       this.roundClosed = true;
       this.currentQuestionId = null;
@@ -207,7 +313,6 @@ export class Match {
     this.roundReady.clear();
     this.clearRoundReadyWait();
     const now = Date.now();
-    // نافذة الجاهزية يجب أن تبقى متاحة حتى نهاية وقت المذاكرة الكامل.
     const readyWindowMs = this.studyPhaseMs;
     const readyStartsAt = now;
     const studyStartsAt = now;
@@ -257,8 +362,6 @@ export class Match {
       }, Math.max(0, studyEndsAt - Date.now()));
     });
 
-    // نهاية المذاكرة لا تتبع انتهاء نافذة الجاهزية.
-    // الانتقال المبكر يحدث فقط إذا أصبح كل اللاعبين النشطين "جاهزين".
     await Promise.race([waitReady, waitStudy]);
     this.clearRoundReadyWait();
     this.clearStudyWait();
@@ -278,7 +381,13 @@ export class Match {
       const rows = await pool.query<{ key: string; value: string }>(
         `SELECT key, value
          FROM app_settings
-         WHERE key IN ('game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms')`,
+         WHERE key IN (
+           'game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms',
+           'keys_streak_per_key', 'keys_mega_streak', 'keys_mega_reward', 'keys_max_per_player',
+           'keys_skill_boost_percent', 'keys_skill_boost_max_multiplier',
+           'keys_heart_attack_cost', 'keys_shield_cost', 'keys_reveal_cost',
+           'keys_attacks_enabled', 'keys_drop_rate', 'keys_reveal_direct_question_span'
+         )`,
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
       const maxRounds = Number(map.get("game_max_study_rounds") ?? DEFAULT_MAX_STUDY_ROUNDS);
@@ -287,6 +396,20 @@ export class Match {
       this.maxStudyRounds = Math.min(10, Math.max(1, Number.isFinite(maxRounds) ? maxRounds : DEFAULT_MAX_STUDY_ROUNDS));
       this.studyRoundSize = Math.min(30, Math.max(1, Number.isFinite(roundSize) ? roundSize : DEFAULT_STUDY_ROUND_SIZE));
       this.studyPhaseMs = Math.min(300_000, Math.max(5_000, Number.isFinite(phaseMs) ? phaseMs : DEFAULT_STUDY_PHASE_MS));
+
+      this.keysStreakPerKey = Math.min(50, Math.max(1, Number(map.get("keys_streak_per_key") ?? 5)));
+      this.keysMegaStreak = Math.min(50, Math.max(1, Number(map.get("keys_mega_streak") ?? 8)));
+      this.keysMegaReward = Math.min(50, Math.max(0, Number(map.get("keys_mega_reward") ?? 5)));
+      this.keysMaxPerPlayer = Math.min(100, Math.max(1, Number(map.get("keys_max_per_player") ?? 20)));
+      this.keysSkillBoostPercent = Math.min(200, Math.max(1, Number(map.get("keys_skill_boost_percent") ?? 30)));
+      this.keysSkillBoostMaxMultiplier = Math.min(5, Math.max(1, Number(map.get("keys_skill_boost_max_multiplier") ?? 3)));
+      this.keysHeartAttackCost = Math.min(20, Math.max(1, Number(map.get("keys_heart_attack_cost") ?? 2)));
+      this.keysShieldCost = Math.min(20, Math.max(1, Number(map.get("keys_shield_cost") ?? 2)));
+      this.keysRevealCost = Math.min(20, Math.max(1, Number(map.get("keys_reveal_cost") ?? 2)));
+      const atk = String(map.get("keys_attacks_enabled") ?? "1").trim();
+      this.keysAttacksEnabled = atk === "1" || atk.toLowerCase() === "true";
+      this.keysDropRate = Math.min(5, Math.max(0, Number(map.get("keys_drop_rate") ?? 1)));
+      this.keysRevealDirectQuestionSpan = Math.min(30, Math.max(0, Math.floor(Number(map.get("keys_reveal_direct_question_span") ?? 0))));
     } catch {
       this.maxStudyRounds = DEFAULT_MAX_STUDY_ROUNDS;
       this.studyRoundSize = DEFAULT_STUDY_ROUND_SIZE;
@@ -300,7 +423,10 @@ export class Match {
       matchId: this.matchId,
       gameMode: this.gameMode,
       players: this.snapshotPlayers(),
+      revealKeysActive: this.revealKeysActive,
+      keysAttacksEnabled: this.keysAttacksEnabled,
     });
+    this.emitKeysRoomState();
 
     const pool = getPool();
     this.resultMessages = await getResultMessages(pool);
@@ -337,6 +463,9 @@ export class Match {
       this.countActive() > 1 &&
       this.macroRound < this.maxStudyRounds
     ) {
+      this.macroRound += 1;
+      this.clearRevealIfNewMacro();
+
       const block: QuestionRow[] = [];
       const exclude = new Set<number>(this.usedQuestionIds);
       for (let i = 0; i < blockSize; i++) {
@@ -349,7 +478,6 @@ export class Match {
         block.push(q);
       }
 
-      this.macroRound += 1;
       const blockIds = block.map((q) => q.id);
       const cards = await getStudyPhaseCardsFromQuestionIds(
         pool,
@@ -394,9 +522,11 @@ export class Match {
     q: QuestionRow,
   ): Promise<void> {
     void pool;
+    this.clearQuestionTimers();
     this.usedQuestionIds.push(q.id);
     this.round++;
     this.roundClosed = false;
+    this.skipSocketsForQuestion.clear();
     this.currentQuestionId = q.id;
     this.currentCorrectIndex = q.correct_index;
     this.questionStartedAt = Date.now();
@@ -413,11 +543,22 @@ export class Match {
       prompt: q.prompt,
       options: q.options,
       endsAt: this.answerDeadline,
+      abilityGraceEndsAt: this.answerDeadline + ABILITY_GRACE_MS,
       serverNow: Date.now(),
       round: this.round,
+      macroRound: this.macroRound,
+      revealKeysActive: this.revealKeysActive,
+      keysAttacksEnabled: this.keysAttacksEnabled,
     });
 
-    this.questionTimer = setTimeout(() => this.finishRound(), QUESTION_MS);
+    this.questionTimer = setTimeout(() => {
+      this.questionTimer = null;
+      if (this.roundClosed || this.finished) return;
+      this.abilityGraceTimer = setTimeout(() => {
+        this.abilityGraceTimer = null;
+        this.finishRound();
+      }, ABILITY_GRACE_MS);
+    }, QUESTION_MS);
     await waitRound;
 
     if (this.countActive() <= 1 && !this.finished) {
@@ -428,10 +569,7 @@ export class Match {
   private finishRound(): void {
     if (this.roundClosed || this.finished) return;
     this.roundClosed = true;
-    if (this.questionTimer) {
-      clearTimeout(this.questionTimer);
-      this.questionTimer = null;
-    }
+    this.clearQuestionTimers();
 
     const questionId = this.currentQuestionId;
     const correctIndex = this.currentCorrectIndex ?? 0;
@@ -441,6 +579,7 @@ export class Match {
     const results: Array<{
       socketId: string;
       correct: boolean;
+      skipped?: boolean;
       pointsAward: number;
       hearts: number;
       eliminated: boolean;
@@ -448,22 +587,40 @@ export class Match {
 
     for (const [socketId, p] of this.players) {
       if (p.eliminated || p.hearts <= 0) continue;
+
+      if (this.skipSocketsForQuestion.has(socketId)) {
+        p.lastAward = 0;
+        results.push({
+          socketId,
+          correct: false,
+          skipped: true,
+          pointsAward: 0,
+          hearts: p.hearts,
+          eliminated: p.eliminated,
+        });
+        continue;
+      }
+
       const choice = this.pendingAnswers.get(socketId);
       const answered = choice !== undefined;
       const correct = answered && choice === correctIndex;
       let pointsAward = 0;
+
       if (correct) {
+        p.correctStreak += 1;
+        this.applyKeyGrants(p);
         const answeredAt = this.answerTimes.get(socketId) ?? this.answerDeadline;
         const totalWindow = Math.max(1, this.answerDeadline - this.questionStartedAt);
         const progress = Math.min(
           1,
           Math.max(0, (answeredAt - this.questionStartedAt) / totalWindow),
         );
-        pointsAward = Math.round(100 - progress * 99);
+        const base = Math.round(100 - progress * 99);
+        pointsAward = this.applySkillBoostToAward(base, p.skillBoostStacks);
         p.skillPoints += pointsAward;
-      }
-      p.lastAward = pointsAward;
-      if (!correct) {
+      } else {
+        p.correctStreak = 0;
+        p.lastAward = 0;
         p.hearts = Math.max(0, p.hearts - 1);
         if (p.hearts === 0) {
           p.eliminated = true;
@@ -478,14 +635,31 @@ export class Match {
             reason: "hearts",
           });
         }
+        results.push({
+          socketId,
+          correct: false,
+          pointsAward: 0,
+          hearts: p.hearts,
+          eliminated: p.eliminated,
+        });
+        continue;
       }
+
+      p.lastAward = pointsAward;
       results.push({
         socketId,
-        correct,
+        correct: true,
         pointsAward,
         hearts: p.hearts,
         eliminated: p.eliminated,
       });
+    }
+
+    if (this.gameMode === "direct" && this.revealKeysActive && this.directRevealRemaining > 0) {
+      this.directRevealRemaining -= 1;
+      if (this.directRevealRemaining <= 0) {
+        this.revealKeysActive = false;
+      }
     }
 
     this.io.to(this.room).emit("question_result", {
@@ -493,6 +667,9 @@ export class Match {
       correctIndex,
       results,
       players: this.snapshotPlayers(),
+      revealKeysActive: this.revealKeysActive,
+      macroRound: this.macroRound,
+      keysAttacksEnabled: this.keysAttacksEnabled,
     });
 
     this.resolveRound?.();
@@ -507,10 +684,7 @@ export class Match {
     if (this.finished) return;
     this.finished = true;
     this.clearStudyWait();
-    if (this.questionTimer) {
-      clearTimeout(this.questionTimer);
-      this.questionTimer = null;
-    }
+    this.clearQuestionTimers();
 
     const bySkillDesc = [...this.players.entries()]
       .map(([socketId, p]) => ({
@@ -572,5 +746,112 @@ export class Match {
       resultMessages: rm,
       leaderboard,
     });
+  }
+
+  tryAbilitySkillBoost(socketId: string): AbilityAck {
+    if (this.finished) return { ok: false, error: "match_finished" };
+    const p = this.players.get(socketId);
+    if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
+      return { ok: false, error: "not_eligible" };
+    }
+    if (!this.isAbilityWindowOpen()) return { ok: false, error: "question_closed" };
+    if (p.keys < 1) return { ok: false, error: "not_enough_keys" };
+    p.keys -= 1;
+    p.skillBoostStacks += 1;
+    this.emitKeysRoomState();
+    return { ok: true, keys: p.keys, skillBoostStacks: p.skillBoostStacks };
+  }
+
+  tryAbilitySkipQuestion(socketId: string): AbilityAck {
+    if (this.finished) return { ok: false, error: "match_finished" };
+    const p = this.players.get(socketId);
+    if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
+      return { ok: false, error: "not_eligible" };
+    }
+    if (!this.isAbilityWindowOpen()) return { ok: false, error: "question_closed" };
+    if (this.pendingAnswers.has(socketId)) return { ok: false, error: "already_answered" };
+    if (this.skipSocketsForQuestion.has(socketId)) return { ok: false, error: "already_skipped" };
+    if (p.keys < 1) return { ok: false, error: "not_enough_keys" };
+    p.keys -= 1;
+    this.skipSocketsForQuestion.add(socketId);
+    this.emitKeysRoomState();
+    return { ok: true, keys: p.keys };
+  }
+
+  tryAbilityHeartAttack(attackerId: string, victimId: string): AbilityAck {
+    if (!this.keysAttacksEnabled) return { ok: false, error: "attacks_disabled" };
+    if (this.finished) return { ok: false, error: "match_finished" };
+    if (!this.isAbilityWindowOpen()) return { ok: false, error: "question_closed" };
+    if (attackerId === victimId) return { ok: false, error: "invalid_target" };
+    const attacker = this.players.get(attackerId);
+    const victim = this.players.get(victimId);
+    if (!attacker || !victim) return { ok: false, error: "invalid_target" };
+    if (attacker.eliminated || attacker.hearts <= 0 || attacker.isSpectator) {
+      return { ok: false, error: "not_eligible" };
+    }
+    if (victim.eliminated || victim.hearts <= 0 || victim.isSpectator) {
+      return { ok: false, error: "invalid_target" };
+    }
+    if (attacker.keys < this.keysHeartAttackCost) {
+      return { ok: false, error: "not_enough_keys" };
+    }
+    attacker.keys -= this.keysHeartAttackCost;
+
+    let outcome: "hit" | "blocked" = "hit";
+    if (victim.keys >= this.keysShieldCost) {
+      victim.keys -= this.keysShieldCost;
+      outcome = "blocked";
+    } else {
+      this.damageHeart(victimId, victim);
+    }
+
+    this.io.to(this.room).emit("ability_heart_resolved", {
+      attackerSocketId: attackerId,
+      attackerName: attacker.name,
+      victimSocketId: victimId,
+      victimName: victim.name,
+      outcome,
+      shieldCost: this.keysShieldCost,
+    });
+    this.emitKeysRoomState();
+
+    if (this.countActive() <= 1 && !this.finished) {
+      this.declareWinner();
+    }
+    return { ok: true, keys: attacker.keys };
+  }
+
+  tryAbilityRevealKeys(socketId: string): AbilityAck {
+    if (this.finished) return { ok: false, error: "match_finished" };
+    const p = this.players.get(socketId);
+    if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
+      return { ok: false, error: "not_eligible" };
+    }
+    if (p.keys < this.keysRevealCost) return { ok: false, error: "not_enough_keys" };
+
+    if (this.gameMode === "study_then_quiz") {
+      if (this.macroRound <= 0) return { ok: false, error: "reveal_not_available" };
+      if (this.revealKeysActive && this.revealKeysForMacroRound === this.macroRound) {
+        return { ok: false, error: "reveal_already_active" };
+      }
+      p.keys -= this.keysRevealCost;
+      this.revealKeysActive = true;
+      this.revealKeysForMacroRound = this.macroRound;
+      this.directRevealRemaining = 0;
+    } else {
+      if (this.keysRevealDirectQuestionSpan <= 0) {
+        return { ok: false, error: "reveal_disabled_direct" };
+      }
+      if (this.revealKeysActive && this.directRevealRemaining > 0) {
+        return { ok: false, error: "reveal_already_active" };
+      }
+      p.keys -= this.keysRevealCost;
+      this.revealKeysActive = true;
+      this.revealKeysForMacroRound = null;
+      this.directRevealRemaining = this.keysRevealDirectQuestionSpan;
+    }
+
+    this.emitKeysRoomState();
+    return { ok: true, keys: p.keys };
   }
 }

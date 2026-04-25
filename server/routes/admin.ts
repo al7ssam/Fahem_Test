@@ -58,6 +58,21 @@ const gameSettingsPatchSchema = z.object({
   matchFillWindowSeconds: z.number().int().min(1).max(120),
 });
 
+const keysSettingsPatchSchema = z.object({
+  keysStreakPerKey: z.number().int().min(1).max(50),
+  keysMegaStreak: z.number().int().min(1).max(50),
+  keysMegaReward: z.number().int().min(0).max(50),
+  keysMaxPerPlayer: z.number().int().min(1).max(100),
+  keysSkillBoostPercent: z.number().int().min(1).max(200),
+  keysSkillBoostMaxMultiplier: z.number().min(1).max(5),
+  keysHeartAttackCost: z.number().int().min(1).max(20),
+  keysShieldCost: z.number().int().min(1).max(20),
+  keysRevealCost: z.number().int().min(1).max(20),
+  keysAttacksEnabled: z.boolean(),
+  keysDropRate: z.number().min(0).max(5),
+  keysRevealDirectQuestionSpan: z.number().int().min(0).max(30),
+});
+
 const questionPatchSchema = z.object({
   prompt: z.string().trim().min(1).max(2000).optional(),
   options: z.array(z.string().trim().min(1).max(500)).length(4).optional(),
@@ -347,6 +362,102 @@ export function registerAdminRoutes(app: Express): void {
           String(parsed.data.studyPhaseMs),
           String(parsed.data.maxPlayersPerMatch),
           String(parsed.data.matchFillWindowSeconds),
+        ],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.get("/api/admin/keys-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const keys = [
+      "keys_streak_per_key",
+      "keys_mega_streak",
+      "keys_mega_reward",
+      "keys_max_per_player",
+      "keys_skill_boost_percent",
+      "keys_skill_boost_max_multiplier",
+      "keys_heart_attack_cost",
+      "keys_shield_cost",
+      "keys_reveal_cost",
+      "keys_attacks_enabled",
+      "keys_drop_rate",
+      "keys_reveal_direct_question_span",
+    ] as const;
+    try {
+      const pool = getPool();
+      const rows = await pool.query<{ key: string; value: string }>(
+        `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+        [keys],
+      );
+      const map = new Map(rows.rows.map((r) => [r.key, r.value]));
+      const num = (k: string, d: string) => Number(map.get(k) ?? d);
+      const attacksRaw = String(map.get("keys_attacks_enabled") ?? "1").trim();
+      const keysAttacksEnabled = attacksRaw === "1" || attacksRaw.toLowerCase() === "true";
+      res.json({
+        ok: true,
+        keysStreakPerKey: Math.min(50, Math.max(1, num("keys_streak_per_key", "5"))),
+        keysMegaStreak: Math.min(50, Math.max(1, num("keys_mega_streak", "8"))),
+        keysMegaReward: Math.min(50, Math.max(0, num("keys_mega_reward", "5"))),
+        keysMaxPerPlayer: Math.min(100, Math.max(1, num("keys_max_per_player", "20"))),
+        keysSkillBoostPercent: Math.min(200, Math.max(1, num("keys_skill_boost_percent", "30"))),
+        keysSkillBoostMaxMultiplier: Math.min(5, Math.max(1, num("keys_skill_boost_max_multiplier", "3"))),
+        keysHeartAttackCost: Math.min(20, Math.max(1, num("keys_heart_attack_cost", "2"))),
+        keysShieldCost: Math.min(20, Math.max(1, num("keys_shield_cost", "2"))),
+        keysRevealCost: Math.min(20, Math.max(1, num("keys_reveal_cost", "2"))),
+        keysAttacksEnabled,
+        keysDropRate: Math.min(5, Math.max(0, num("keys_drop_rate", "1"))),
+        keysRevealDirectQuestionSpan: Math.min(30, Math.max(0, Math.floor(num("keys_reveal_direct_question_span", "0")))),
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/keys-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = keysSettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    const d = parsed.data;
+    try {
+      const pool = getPool();
+      await pool.query(
+        `INSERT INTO app_settings (key, value) VALUES
+           ('keys_streak_per_key', $1),
+           ('keys_mega_streak', $2),
+           ('keys_mega_reward', $3),
+           ('keys_max_per_player', $4),
+           ('keys_skill_boost_percent', $5),
+           ('keys_skill_boost_max_multiplier', $6),
+           ('keys_heart_attack_cost', $7),
+           ('keys_shield_cost', $8),
+           ('keys_reveal_cost', $9),
+           ('keys_attacks_enabled', $10),
+           ('keys_drop_rate', $11),
+           ('keys_reveal_direct_question_span', $12)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [
+          String(d.keysStreakPerKey),
+          String(d.keysMegaStreak),
+          String(d.keysMegaReward),
+          String(d.keysMaxPerPlayer),
+          String(d.keysSkillBoostPercent),
+          String(d.keysSkillBoostMaxMultiplier),
+          String(d.keysHeartAttackCost),
+          String(d.keysShieldCost),
+          String(d.keysRevealCost),
+          d.keysAttacksEnabled ? "1" : "0",
+          String(d.keysDropRate),
+          String(d.keysRevealDirectQuestionSpan),
         ],
       );
       res.json({ ok: true });
