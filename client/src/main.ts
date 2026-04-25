@@ -780,12 +780,19 @@ function flashKeysBadgeReward(): void {
   run(document.querySelector("#keys-badge"));
 }
 
-function showInsufficientAbilityTip(anchor: HTMLElement, requiredKeys: number): void {
+function showInsufficientAbilityTip(
+  anchor: HTMLElement,
+  currentKeys: number,
+  abilityCost: number,
+  abilityName: string,
+): void {
   document.querySelectorAll(".ability-insufficient-tip").forEach((el) => el.remove());
   const tip = document.createElement("div");
   tip.className = "ability-insufficient-tip";
   tip.setAttribute("role", "status");
-  tip.textContent = `تحتاج الى ${Math.max(1, Math.floor(requiredKeys))} مفتاح`;
+  const missingKeys = Math.max(1, Math.floor(abilityCost - currentKeys));
+  const name = abilityName.trim() || "هذه القدرة";
+  tip.textContent = `تحتاج إلى ${missingKeys} مفتاح إضافي لاستخدام ${name}`;
   document.body.appendChild(tip);
   const r = anchor.getBoundingClientRect();
   tip.style.position = "fixed";
@@ -1001,7 +1008,12 @@ function bindPlayingAbilityUi(sk: Socket): void {
       return;
     }
     if (myKeysCount() < abilityCostsState.skillBoost) {
-      showInsufficientAbilityTip(b1, abilityCostsState.skillBoost);
+      showInsufficientAbilityTip(
+        b1,
+        myKeysCount(),
+        abilityCostsState.skillBoost,
+        b1.title || "تعزيز نقاط المهارة",
+      );
       return;
     }
     runAbility(b1, "ability_skill_boost", {}, -abilityCostsState.skillBoost);
@@ -1013,7 +1025,12 @@ function bindPlayingAbilityUi(sk: Socket): void {
       return;
     }
     if (myKeysCount() < abilityCostsState.skipQuestion) {
-      showInsufficientAbilityTip(s1, abilityCostsState.skipQuestion);
+      showInsufficientAbilityTip(
+        s1,
+        myKeysCount(),
+        abilityCostsState.skipQuestion,
+        s1.title || "تجاوز السؤال دون قلب أو نقاط",
+      );
       return;
     }
     runAbility(s1, "ability_skip_question", {}, -abilityCostsState.skipQuestion);
@@ -1025,7 +1042,12 @@ function bindPlayingAbilityUi(sk: Socket): void {
       return;
     }
     if (myKeysCount() < abilityCostsState.reveal) {
-      showInsufficientAbilityTip(r1, abilityCostsState.reveal);
+      showInsufficientAbilityTip(
+        r1,
+        myKeysCount(),
+        abilityCostsState.reveal,
+        r1.title || "كشف مفاتيح الجميع",
+      );
       return;
     }
     runAbility(r1, "ability_reveal_keys", {}, -abilityCostsState.reveal);
@@ -1038,7 +1060,12 @@ function bindPlayingAbilityUi(sk: Socket): void {
       return;
     }
     if (myKeysCount() < abilityCostsState.heartAttack) {
-      showInsufficientAbilityTip(a1, abilityCostsState.heartAttack);
+      showInsufficientAbilityTip(
+        a1,
+        myKeysCount(),
+        abilityCostsState.heartAttack,
+        a1.title || "هجوم على قلب",
+      );
       return;
     }
     if (!overlay || !bubbles) return;
@@ -1058,7 +1085,12 @@ function bindPlayingAbilityUi(sk: Socket): void {
       wrap.appendChild(hearts);
       wrap.addEventListener("click", () => {
         if (myKeysCount() < abilityCostsState.heartAttack) {
-          showInsufficientAbilityTip(a1, abilityCostsState.heartAttack);
+          showInsufficientAbilityTip(
+            a1,
+            myKeysCount(),
+            abilityCostsState.heartAttack,
+            a1.title || "هجوم على قلب",
+          );
           return;
         }
         wrap.classList.add("attack-bubble--pop");
