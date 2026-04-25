@@ -764,8 +764,13 @@ function shakeKeysBadgeError(): void {
 }
 
 function showGameToast(message: string): void {
-  const root = document.querySelector<HTMLDivElement>("#toast-root");
-  if (!root) return;
+  let root = document.querySelector<HTMLDivElement>("#toast-root");
+  if (!root) {
+    root = document.createElement("div");
+    root.id = "toast-root";
+    root.className = "toast-root";
+    document.body.appendChild(root);
+  }
   const t = document.createElement("div");
   t.className = "toast-item";
   t.textContent = message;
@@ -894,8 +899,10 @@ function bindPlayingAbilityUi(sk: Socket): void {
       btn.classList.remove("ability-btn--busy");
       btn.disabled = false;
       btn.removeAttribute("aria-busy");
-      if (ack?.ok && typeof ack.keys === "number") {
-        patchMyKeysCount(ack.keys);
+      if (ack?.ok) {
+        if (typeof ack.keys === "number") {
+          patchMyKeysCount(ack.keys);
+        }
         if (typeof ack.skillBoostStacks === "number") {
           currentMatchPlayers = currentMatchPlayers.map((p) =>
             p.socketId === mySocketId ? { ...p, skillBoostStacks: ack.skillBoostStacks } : p,
@@ -1046,8 +1053,10 @@ function bindStudyRevealUi(sk: Socket): void {
       (ack: { ok?: boolean; error?: string; keys?: number; revealQuestions?: number }) => {
       window.clearTimeout(tmr);
       b.disabled = false;
-      if (ack?.ok && typeof ack.keys === "number") {
-        patchMyKeysCount(ack.keys);
+      if (ack?.ok) {
+        if (typeof ack.keys === "number") {
+          patchMyKeysCount(ack.keys);
+        }
         const revealQuestions = Number.isFinite(ack.revealQuestions) ? Math.max(1, Math.floor(ack.revealQuestions ?? 1)) : 1;
         showGameToast(`تم كشف مفاتيح الخصوم لمدة ${revealQuestions} اسئلة`);
         return;
