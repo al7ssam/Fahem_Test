@@ -1,3 +1,9 @@
+import {
+  GoogleGenerativeAI,
+  GoogleGenerativeAIFetchError,
+  GoogleGenerativeAIResponseError,
+} from "@google/generative-ai";
+import type { GenerationConfig } from "@google/generative-ai";
 import { getPool } from "../../db/pool";
 import { sleep } from "./utils";
 import type { FactoryLayer, FactoryReasoningLevel, LayerModelConfig } from "./types";
@@ -39,18 +45,93 @@ class RateLimitError extends Error {
   }
 }
 
-function getEnvValue(name: string): string {
-  return String(process.env[name] ?? "").trim();
+const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
+
+/** Strip accidental `models/` prefix so the SDK path is not doubled. */
+function normalizeGeminiModelId(raw: string): string {
+  let s = String(raw ?? "").trim();
+  if (s.startsWith("models/")) {
+    s = s.slice("models/".length).trim();
+  }
+  return s;
 }
 
-function parseRetryAfterMs(headers: Headers): number {
-  const retryAfter = headers.get("retry-after");
-  if (!retryAfter) return 0;
-  const n = Number(retryAfter);
-  if (Number.isFinite(n) && n >= 0) return n * 1000;
-  const parsedDate = Date.parse(retryAfter);
-  if (!Number.isNaN(parsedDate)) return Math.max(0, parsedDate - Date.now());
-  return 0;
+function logGeminiRequestUrl(apiVersion: string, modelId: string): void {
+  const path = `${GEMINI_API_BASE}/${apiVersion}/models/${encodeURIComponent(modelId)}:generateContent?key=REDACTED`;
+  console.log("[callGemini] POST", path);
+}
+
+function isQuotaOrRateLimitMessage(msg: string): boolean {
+  const m = msg.toLowerCase();
+  if (m.includes("resource_exhausted")) return true;
+  if (m.includes("resource exhausted")) return true;
+  if (m.includes("too many requests")) return true;
+  if (m.includes("rate limit")) return true;
+  if (m.includes("quota") && (m.includes("exceeded") || m.includes("exhausted"))) return true;
+  return false;
+}
+
+function mapUnknownErrorToProviderError(error: unknown): Error {
+  const msg = error instanceof Error ? error.message : String(error);
+  const short = msg.length > 220 ? `${msg.slice(0, 220)}…` : msg;
+  return new Error(`provider_error:${short}`);
+}
+
+/**
+ * Maps SDK / HTTP failures to RateLimitError where backoff helps, else a short Error for last_error.
+ * @google/generative-ai is legacy; Google recommends @google/genai for long-term support.
+ */
+function mapGeminiProviderError(error: unknown): Error {
+  if (error instanceof RateLimitError) return error;
+
+  if (error instanceof GoogleGenerativeAIFetchError) {
+    const status = error.status ?? 0;
+    if (status === 429) {
+      return new RateLimitError("provider_429", 2000);
+    }
+    if (status === 503) {
+      return new RateLimitError("provider_503", 2000);
+    }
+    if (status === 404) {
+      return new Error("provider_404_model_or_version");
+    }
+    if (status === 401 || status === 403) {
+      return new Error("provider_401_403_auth");
+    }
+    if (isQuotaOrRateLimitMessage(error.message)) {
+      return new RateLimitError("provider_quota_or_rate_limit", 3000);
+    }
+    return new Error(`provider_http_${status}`);
+  }
+
+  if (error instanceof GoogleGenerativeAIResponseError) {
+    const msg = error.message ?? "";
+    if (isQuotaOrRateLimitMessage(msg)) {
+      return new RateLimitError("provider_quota_or_rate_limit", 3000);
+    }
+    const short = msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
+    return new Error(`provider_response:${short || "blocked_or_invalid"}`);
+  }
+
+  if (error instanceof Error && isQuotaOrRateLimitMessage(error.message)) {
+    return new RateLimitError("provider_quota_or_rate_limit", 3000);
+  }
+
+  return mapUnknownErrorToProviderError(error);
+}
+
+function isNonRetryableLayerError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.startsWith("provider_404") ||
+    error.message.startsWith("provider_401_403") ||
+    error.message.startsWith("unsupported_") ||
+    error.message.startsWith("missing_")
+  );
+}
+
+function getEnvValue(name: string): string {
+  return String(process.env[name] ?? "").trim();
 }
 
 async function readLayerConfig(layer: FactoryLayer): Promise<LayerModelConfig> {
@@ -165,46 +246,41 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
   if (!apiKey) {
     throw new Error(`missing_api_key_env_${config.apiKeyEnv}`);
   }
-  const model = encodeURIComponent(config.modelName);
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const generationConfig: Record<string, unknown> = {
+
+  const normalizedId = normalizeGeminiModelId(config.modelName);
+  const needsThinking = supportsThinkingLevel(normalizedId) && config.reasoningLevel !== "none";
+  const apiVersion = needsThinking ? "v1beta" : "v1";
+
+  logGeminiRequestUrl(apiVersion, normalizedId);
+
+  const generationConfig: GenerationConfig & { thinkingConfig?: { thinkingLevel: string; includeThoughts: boolean } } = {
     temperature: config.temperature,
     maxOutputTokens: config.maxOutputTokens,
   };
-  if (supportsThinkingLevel(config.modelName) && config.reasoningLevel !== "none") {
+  if (needsThinking) {
     generationConfig.thinkingConfig = {
       thinkingLevel: config.reasoningLevel,
       includeThoughts: true,
     };
   }
-  const payload = {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig,
-  };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (res.status === 429) {
-    throw new RateLimitError("provider_rate_limited", parseRetryAfterMs(res.headers));
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: normalizedId, generationConfig }, { apiVersion });
+
+  try {
+    const result = await model.generateContent(prompt);
+    const text = String(result.response.text() ?? "").trim();
+    if (!text) {
+      throw new Error("provider_empty_response");
+    }
+    return {
+      text,
+      modelName: config.modelName,
+      provider: config.provider,
+    };
+  } catch (error) {
+    throw mapGeminiProviderError(error);
   }
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`provider_http_${res.status}:${txt.slice(0, 500)}`);
-  }
-  const data = (await res.json()) as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  };
-  const text = String(data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "").trim();
-  if (!text) {
-    throw new Error("provider_empty_response");
-  }
-  return {
-    text,
-    modelName: config.modelName,
-    provider: config.provider,
-  };
 }
 
 export async function runLayerModel(layer: FactoryLayer, prompt: string): Promise<ModelCallResult> {
@@ -219,6 +295,9 @@ export async function runLayerModel(layer: FactoryLayer, prompt: string): Promis
       }
       return await callGemini(config, prompt);
     } catch (error) {
+      if (isNonRetryableLayerError(error)) {
+        throw error;
+      }
       if (error instanceof RateLimitError) {
         const backoffMs = Math.max(error.retryAfterMs, waitMs);
         await sleep(backoffMs);

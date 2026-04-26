@@ -427,7 +427,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         lastError: errMessage,
       });
     }
-    throw error;
+    return;
   }
 }
 
