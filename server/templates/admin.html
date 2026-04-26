@@ -378,6 +378,34 @@
         font-size: 0.9rem;
         padding: 1.2rem 0.4rem;
       }
+      .factory-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+      }
+      .factory-progress {
+        margin-top: 0.65rem;
+        height: 0.9rem;
+        border-radius: 999px;
+        background: rgba(223, 187, 106, 0.14);
+        overflow: hidden;
+      }
+      .factory-progress > span {
+        display: block;
+        height: 100%;
+        background: linear-gradient(to left, #10b981, #34d399);
+        width: 0%;
+      }
+      .factory-log-box {
+        margin-top: 0.7rem;
+        max-height: 14rem;
+        overflow: auto;
+        border: 1px solid rgba(223, 187, 106, 0.2);
+        border-radius: 0.7rem;
+        padding: 0.55rem;
+        background: rgba(6, 10, 20, 0.88);
+        font-size: 0.84rem;
+      }
       .guide-title {
         margin: 0 0 0.4rem;
         font-weight: 800;
@@ -787,6 +815,77 @@
               <button type="button" class="btn btn-danger" id="cl-run-btn">حذف الأسئلة القديمة الآن</button>
             </div>
             <div class="msg" id="cl-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="ai-factory">
+          <span class="accordion-title">مصنع المحتوى الذكي</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <label>إعدادات الجدولة</label>
+            <div class="factory-grid">
+              <div>
+                <label for="af-enabled">تفعيل المصنع</label>
+                <input id="af-enabled" type="checkbox" />
+              </div>
+              <div>
+                <label for="af-batch-size">Batch Size</label>
+                <input id="af-batch-size" type="text" inputmode="numeric" value="20" />
+              </div>
+              <div>
+                <label for="af-interval">Interval (دقائق)</label>
+                <input id="af-interval" type="text" inputmode="numeric" value="30" />
+              </div>
+              <div>
+                <label for="af-target-default">Target Count (افتراضي)</label>
+                <input id="af-target-default" type="text" inputmode="numeric" value="200" />
+              </div>
+            </div>
+            <label style="margin-top:0.7rem">اختيار النموذج لكل طبقة</label>
+            <div class="factory-grid">
+              <div><label for="af-model-architect">Architect</label><input id="af-model-architect" type="text" value="gemini-1.5-pro" /></div>
+              <div><label for="af-model-creator">Creator</label><input id="af-model-creator" type="text" value="gemini-1.5-pro" /></div>
+              <div><label for="af-model-auditor">Auditor</label><input id="af-model-auditor" type="text" value="gemini-1.5-pro" /></div>
+              <div><label for="af-model-refiner">Refiner</label><input id="af-model-refiner" type="text" value="gemini-1.5-pro" /></div>
+            </div>
+            <div class="factory-grid" style="margin-top:0.4rem">
+              <div><label for="af-key-env">API Key Env</label><input id="af-key-env" type="text" value="GEMINI_API_KEY" /></div>
+              <div><label for="af-temp">Temperature</label><input id="af-temp" type="text" inputmode="decimal" value="0.4" /></div>
+              <div><label for="af-max-tokens">Max Tokens</label><input id="af-max-tokens" type="text" inputmode="numeric" value="8192" /></div>
+            </div>
+            <label style="margin-top:0.7rem">تشغيل يدوي</label>
+            <div class="factory-grid">
+              <div><label for="af-run-subcategory">المفتاح الفرعي</label><input id="af-run-subcategory" type="text" placeholder="math_geometry" /></div>
+              <div><label for="af-run-difficulty">الصعوبة</label>
+                <select id="af-run-difficulty">
+                  <option value="mix">مزيج</option>
+                  <option value="easy">سهل</option>
+                  <option value="medium">متوسط</option>
+                  <option value="hard">صعب</option>
+                </select>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="af-load-btn">تحميل</button>
+              <button type="button" class="btn" id="af-save-btn">حفظ الإعدادات</button>
+              <button type="button" class="btn" id="af-model-save-btn">حفظ النماذج</button>
+              <button type="button" class="btn btn-secondary" id="af-run-btn">توليد يدوي الآن</button>
+              <button type="button" class="btn btn-secondary" id="af-refresh-jobs-btn">تحديث السجل</button>
+            </div>
+            <div class="factory-progress"><span id="af-progress-bar"></span></div>
+            <div class="stat" style="margin-top:0.7rem">
+              <span>Queued: <b id="af-queued">0</b></span>
+              <span>Running: <b id="af-running">0</b></span>
+              <span>نجاح 24س: <b id="af-succeeded">0</b></span>
+              <span>فشل 24س: <b id="af-failed">0</b></span>
+            </div>
+            <div class="factory-log-box" id="af-jobs-log"></div>
+            <div class="factory-log-box" id="af-job-details"></div>
+            <div class="msg" id="af-msg"></div>
           </div>
         </div>
       </div>
@@ -2348,6 +2447,190 @@
           document.getElementById(id).addEventListener("input", syncEditCorrectFromInputs);
         });
         window.openEditModal = openEditModal;
+      })();
+
+      (function () {
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        function hdr() { return { "Content-Type": "application/json", "X-Admin-Secret": secret() }; }
+        function msg(t, ok) {
+          var el = document.getElementById("af-msg");
+          el.textContent = t || "";
+          el.className = "msg " + (ok ? "ok" : "err");
+        }
+        function val(id) { return document.getElementById(id).value.trim(); }
+        function setStatus(runtime) {
+          runtime = runtime || {};
+          document.getElementById("af-queued").textContent = String(runtime.queued || 0);
+          document.getElementById("af-running").textContent = String(runtime.running || 0);
+          document.getElementById("af-succeeded").textContent = String(runtime.succeeded24h || 0);
+          document.getElementById("af-failed").textContent = String(runtime.failed24h || 0);
+          var total = (runtime.queued || 0) + (runtime.running || 0) + (runtime.succeeded24h || 0) + (runtime.failed24h || 0);
+          var done = (runtime.succeeded24h || 0);
+          var pct = total > 0 ? Math.max(0, Math.min(100, Math.round((done / total) * 100))) : 0;
+          document.getElementById("af-progress-bar").style.width = String(pct) + "%";
+        }
+        function applySettings(s) {
+          if (!s) return;
+          document.getElementById("af-enabled").checked = !!s.enabled;
+          document.getElementById("af-batch-size").value = String(s.batchSize || 20);
+          document.getElementById("af-interval").value = String(s.intervalMinutes || 30);
+          document.getElementById("af-target-default").value = String(s.defaultTargetCount || 200);
+        }
+        function applyModels(models) {
+          if (!Array.isArray(models)) return;
+          models.forEach(function (m) {
+            if (!m || !m.layerName) return;
+            var id = "af-model-" + m.layerName;
+            var el = document.getElementById(id);
+            if (el) el.value = String(m.modelName || "");
+            if (m.layerName === "architect") {
+              document.getElementById("af-key-env").value = String(m.apiKeyEnv || "GEMINI_API_KEY");
+              document.getElementById("af-temp").value = String(m.temperature ?? 0.4);
+              document.getElementById("af-max-tokens").value = String(m.maxOutputTokens ?? 8192);
+            }
+          });
+        }
+        async function loadFactory() {
+          if (!secret()) return;
+          try {
+            var [stRes, modelRes, statusRes, jobsRes] = await Promise.all([
+              fetch("/api/admin/ai-factory/settings", { headers: { "X-Admin-Secret": secret() } }),
+              fetch("/api/admin/ai-factory/models", { headers: { "X-Admin-Secret": secret() } }),
+              fetch("/api/admin/ai-factory/status", { headers: { "X-Admin-Secret": secret() } }),
+              fetch("/api/admin/ai-factory/jobs?limit=30", { headers: { "X-Admin-Secret": secret() } }),
+            ]);
+            var st = await stRes.json();
+            var md = await modelRes.json();
+            var status = await statusRes.json();
+            var jobs = await jobsRes.json();
+            if (stRes.ok && st.ok) applySettings(st);
+            if (modelRes.ok && md.ok) applyModels(md.models);
+            if (statusRes.ok && status.ok) setStatus(status.runtime);
+            if (jobsRes.ok && jobs.ok) renderJobs(jobs.items || []);
+            msg("تم تحميل بيانات المصنع.", true);
+          } catch (e) {
+            msg("تعذر تحميل بيانات المصنع.", false);
+          }
+        }
+        function modelPayload(layerName) {
+          return {
+            layerName: layerName,
+            provider: "gemini",
+            modelName: val("af-model-" + layerName) || "gemini-1.5-pro",
+            apiKeyEnv: val("af-key-env") || "GEMINI_API_KEY",
+            temperature: Number(val("af-temp") || "0.4"),
+            maxOutputTokens: Number(val("af-max-tokens") || "8192"),
+            isEnabled: true
+          };
+        }
+        async function saveFactorySettingsUi() {
+          try {
+            var body = {
+              enabled: !!document.getElementById("af-enabled").checked,
+              batchSize: Number(val("af-batch-size") || "20"),
+              intervalMinutes: Number(val("af-interval") || "30"),
+              defaultTargetCount: Number(val("af-target-default") || "200")
+            };
+            var r = await fetch("/api/admin/ai-factory/settings", { method: "PATCH", headers: hdr(), body: JSON.stringify(body) });
+            var j = await r.json();
+            if (!r.ok || !j.ok) throw new Error("save_failed");
+            applySettings(j);
+            msg("تم حفظ إعدادات المصنع.", true);
+          } catch (e) {
+            msg("تعذر حفظ الإعدادات.", false);
+          }
+        }
+        async function saveModelsUi() {
+          try {
+            var body = {
+              models: [
+                modelPayload("architect"),
+                modelPayload("creator"),
+                modelPayload("auditor"),
+                modelPayload("refiner")
+              ]
+            };
+            var r = await fetch("/api/admin/ai-factory/models", { method: "PATCH", headers: hdr(), body: JSON.stringify(body) });
+            var j = await r.json();
+            if (!r.ok || !j.ok) throw new Error("save_models_failed");
+            msg("تم حفظ إعدادات النماذج.", true);
+          } catch (e) {
+            msg("تعذر حفظ النماذج.", false);
+          }
+        }
+        async function runNowUi() {
+          try {
+            var body = {
+              subcategoryKey: val("af-run-subcategory"),
+              difficultyMode: document.getElementById("af-run-difficulty").value || "mix"
+            };
+            if (!body.subcategoryKey) return msg("أدخل المفتاح الفرعي أولاً.", false);
+            var r = await fetch("/api/admin/ai-factory/run-now", { method: "POST", headers: hdr(), body: JSON.stringify(body) });
+            var j = await r.json();
+            if (!r.ok || !j.ok) throw new Error("run_now_failed");
+            msg("تم إنشاء Job يدوي برقم: " + j.jobId, true);
+            await refreshJobs();
+          } catch (e) {
+            msg("فشل التشغيل اليدوي.", false);
+          }
+        }
+        function renderJobs(items) {
+          var box = document.getElementById("af-jobs-log");
+          box.innerHTML = "";
+          if (!items || !items.length) {
+            box.textContent = "لا توجد وظائف بعد.";
+            return;
+          }
+          items.forEach(function (j) {
+            var row = document.createElement("div");
+            row.style.padding = "0.35rem 0";
+            row.style.borderBottom = "1px solid rgba(223, 187, 106, 0.12)";
+            row.style.cursor = "pointer";
+            row.textContent = "#" + j.id + " | " + j.status + " | " + j.subcategoryKey + " | layer: " + (j.currentLayer || "-");
+            row.addEventListener("click", function () { loadJobLogs(j.id); });
+            box.appendChild(row);
+          });
+        }
+        async function refreshJobs() {
+          try {
+            var statusRes = await fetch("/api/admin/ai-factory/status", { headers: { "X-Admin-Secret": secret() } });
+            var jobsRes = await fetch("/api/admin/ai-factory/jobs?limit=30", { headers: { "X-Admin-Secret": secret() } });
+            var status = await statusRes.json();
+            var jobs = await jobsRes.json();
+            if (statusRes.ok && status.ok) setStatus(status.runtime);
+            if (jobsRes.ok && jobs.ok) renderJobs(jobs.items || []);
+          } catch (e) {}
+        }
+        async function loadJobLogs(id) {
+          try {
+            var r = await fetch("/api/admin/ai-factory/jobs/" + id + "/logs", { headers: { "X-Admin-Secret": secret() } });
+            var j = await r.json();
+            var box = document.getElementById("af-job-details");
+            box.innerHTML = "";
+            if (!r.ok || !j.ok || !Array.isArray(j.logs)) {
+              box.textContent = "تعذر جلب تفاصيل job.";
+              return;
+            }
+            if (!j.logs.length) {
+              box.textContent = "لا توجد logs لهذا job.";
+              return;
+            }
+            j.logs.forEach(function (log) {
+              var line = document.createElement("div");
+              line.style.padding = "0.2rem 0";
+              line.style.borderBottom = "1px solid rgba(223, 187, 106, 0.10)";
+              var details = log.details ? " | " + JSON.stringify(log.details) : "";
+              line.textContent = "[" + (log.level || "info") + "] " + (log.layerName || "-") + " :: " + (log.message || "") + details;
+              box.appendChild(line);
+            });
+          } catch (e) {}
+        }
+        document.getElementById("af-load-btn").addEventListener("click", loadFactory);
+        document.getElementById("af-save-btn").addEventListener("click", saveFactorySettingsUi);
+        document.getElementById("af-model-save-btn").addEventListener("click", saveModelsUi);
+        document.getElementById("af-run-btn").addEventListener("click", runNowUi);
+        document.getElementById("af-refresh-jobs-btn").addEventListener("click", refreshJobs);
+        setInterval(refreshJobs, 10000);
       })();
     </script>
   </body>

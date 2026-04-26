@@ -5,6 +5,7 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { GameManager } from "./game/GameManager";
 import { maybeRunStartupCleanup, performCleanup } from "./services/cleanup";
+import { aiFactoryRuntime } from "./services/aiFactory/runtime";
 
 if (!config.databaseUrl) {
   console.error("DATABASE_URL is required");
@@ -42,10 +43,28 @@ async function startServer(): Promise<void> {
   } catch {
     // detailed log is emitted inside cleanup service
   }
+  await aiFactoryRuntime.start();
 
   scheduleCleanupCron();
   httpServer.listen(config.port, () => {
     console.log(`Fahem server listening on port ${config.port}`);
+  });
+
+  const shutdown = async () => {
+    try {
+      await aiFactoryRuntime.stop();
+    } catch {
+      // ignore
+    }
+    httpServer.close(() => {
+      process.exit(0);
+    });
+  };
+  process.on("SIGINT", () => {
+    void shutdown();
+  });
+  process.on("SIGTERM", () => {
+    void shutdown();
   });
 }
 

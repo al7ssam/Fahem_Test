@@ -13,6 +13,10 @@ import {
   performCleanup,
   updateCleanupSettings,
 } from "../services/cleanup";
+import { listModelConfigs, saveModelConfig } from "../services/aiFactory/modelManager";
+import { getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
+import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
+import type { FactoryLayer } from "../services/aiFactory/types";
 
 const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
 const questionOptionsSchema = z
@@ -122,6 +126,30 @@ const keysSettingsPatchSchema = z.object({
 const cleanupSettingsPatchSchema = z.object({
   autoDeleteEnabled: z.boolean(),
   deletionThresholdDays: z.number().int().min(1).max(3650),
+});
+
+const factorySettingsPatchSchema = z.object({
+  enabled: z.boolean(),
+  batchSize: z.number().int().min(1).max(200),
+  intervalMinutes: z.number().int().min(1).max(1440),
+  defaultTargetCount: z.number().int().min(1).max(100000),
+});
+
+const factoryRunNowSchema = z.object({
+  subcategoryKey: z.string().trim().min(1).max(120),
+  difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
+  targetCount: z.number().int().min(1).max(100000).optional(),
+  batchSize: z.number().int().min(1).max(200).optional(),
+});
+
+const factoryModelPatchSchema = z.object({
+  layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
+  provider: z.string().trim().min(1).max(50),
+  modelName: z.string().trim().min(1).max(120),
+  apiKeyEnv: z.string().trim().min(1).max(120),
+  temperature: z.number().min(0).max(2),
+  maxOutputTokens: z.number().int().min(256).max(65536),
+  isEnabled: z.boolean(),
 });
 
 const questionPatchSchema = z.object({
@@ -732,6 +760,144 @@ export function registerAdminRoutes(app: Express): void {
       });
     } catch {
       res.status(500).json({ ok: false, error: "cleanup_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-factory/settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await readFactorySettings();
+      res.json({ ok: true, ...settings });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/ai-factory/settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = factorySettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const settings = await saveFactorySettings(parsed.data);
+      res.json({ ok: true, ...settings });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-factory/models", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const models = await listModelConfigs();
+      res.json({ ok: true, models });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/ai-factory/models", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const body = req.body as { models?: unknown } | undefined;
+    const list = Array.isArray(body?.models) ? body?.models : [req.body];
+    const parsed: Array<z.infer<typeof factoryModelPatchSchema>> = [];
+    for (const item of list) {
+      const one = factoryModelPatchSchema.safeParse(item);
+      if (!one.success) {
+        res.status(400).json({
+          ok: false,
+          error: "invalid_body",
+          issues: zodIssuesSummary(one.error),
+        });
+        return;
+      }
+      parsed.push(one.data);
+    }
+    try {
+      for (const m of parsed) {
+        await saveModelConfig({
+          layerName: m.layerName as FactoryLayer,
+          provider: m.provider,
+          modelName: m.modelName,
+          apiKeyEnv: m.apiKeyEnv,
+          temperature: m.temperature,
+          maxOutputTokens: m.maxOutputTokens,
+          isEnabled: m.isEnabled,
+        });
+      }
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/ai-factory/run-now", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = factoryRunNowSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const settings = await readFactorySettings();
+      const result = await aiFactoryRuntime.runNow({
+        subcategoryKey: parsed.data.subcategoryKey,
+        difficultyMode: parsed.data.difficultyMode,
+        targetCount: parsed.data.targetCount ?? settings.defaultTargetCount,
+        batchSize: parsed.data.batchSize ?? settings.batchSize,
+      });
+      res.json({ ok: true, jobId: result.jobId });
+    } catch {
+      res.status(500).json({ ok: false, error: "run_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-factory/status", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const [settings, runtime] = await Promise.all([
+        readFactorySettings(),
+        aiFactoryRuntime.getStatus(),
+      ]);
+      res.json({ ok: true, settings, runtime });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-factory/jobs", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+    try {
+      const items = await listFactoryJobs(limit);
+      res.json({ ok: true, items });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-factory/jobs/:id/logs", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const logs = await getFactoryJobLogs(id);
+      res.json({ ok: true, logs });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
 
