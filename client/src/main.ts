@@ -28,6 +28,7 @@ let selectedMainCategoryId: number | null = null;
 let selectedSubcategoryKey: string | null = null;
 let selectedSubcategoryLabel: string | null = null;
 let playerNameDraft = "";
+let searchFlowToken = 0;
 let categoriesState: Array<{
   id: number;
   mainKey: string;
@@ -355,6 +356,35 @@ function nowSynced(): number {
   return Date.now() + clockOffsetMs;
 }
 
+function disconnectSearchSocket(): void {
+  searchFlowToken += 1;
+  socket?.removeAllListeners();
+  socket?.disconnect();
+  socket = null;
+  mySocketId = null;
+  currentGameMode = null;
+  lobbyNotice = "";
+  lobbyPlayersList = [];
+}
+
+function returnToDifficultyFromSearch(): void {
+  disconnectSearchSocket();
+  phase = "name";
+  nameFlowStep = "difficulty";
+  render();
+}
+
+function returnToHomeFromSearch(): void {
+  disconnectSearchSocket();
+  phase = "name";
+  nameFlowStep = "mode";
+  selectedDifficultyMode = "mix";
+  selectedMainCategoryId = null;
+  selectedSubcategoryKey = null;
+  selectedSubcategoryLabel = null;
+  render();
+}
+
 function isCurrentStudyRound(token?: string | null, macroRound?: number): boolean {
   if (!token || !activeStudyRoundToken) return false;
   if (token !== activeStudyRoundToken) return false;
@@ -670,6 +700,10 @@ function render(): void {
             <div class="h-14 w-14 rounded-full border-4 border-amber-400/25 border-t-amber-400 animate-spin shrink-0" role="status" aria-label="جاري البحث"></div>
             <p id="mm-status" class="text-center text-slate-200 text-lg font-medium px-2 leading-relaxed"></p>
             <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem] max-w-md"></p>
+            <div class="w-full flex flex-col sm:flex-row gap-3">
+              <button id="cancel-search-btn" type="button" class="ui-btn ui-btn--ghost w-full py-3 text-base">إلغاء البحث</button>
+              <button id="home-search-btn" type="button" class="ui-btn ui-btn--primary w-full py-3 text-base">الصفحة الرئيسية</button>
+            </div>
           </div>
         </div>
       `),
@@ -678,6 +712,8 @@ function render(): void {
     updateLobbyModeLabel();
     const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
     if (noticeEl) noticeEl.textContent = lobbyNotice;
+    app.querySelector<HTMLButtonElement>("#cancel-search-btn")?.addEventListener("click", returnToDifficultyFromSearch);
+    app.querySelector<HTMLButtonElement>("#home-search-btn")?.addEventListener("click", returnToHomeFromSearch);
     syncMatchmakingStatusText();
     return;
   }
@@ -1396,6 +1432,7 @@ function connectSocket(
   subcategoryKey?: string | null,
   difficultyMode: DifficultyMode = "mix",
 ): void {
+  const flowToken = ++searchFlowToken;
   const joinFlowStartMs = performance.now();
   socket?.removeAllListeners();
   socket?.disconnect();
@@ -1411,6 +1448,7 @@ function connectSocket(
   let joinCompleted = false;
 
   const failBackToName = (msg: string): void => {
+    if (flowToken !== searchFlowToken) return;
     if (joinAckTimer) {
       window.clearTimeout(joinAckTimer);
       joinAckTimer = null;
@@ -1469,6 +1507,7 @@ function connectSocket(
         difficultyMode,
       },
       (ack: { ok?: boolean }) => {
+      if (flowToken !== searchFlowToken) return;
       if (joinAckTimer) {
         window.clearTimeout(joinAckTimer);
         joinAckTimer = null;
