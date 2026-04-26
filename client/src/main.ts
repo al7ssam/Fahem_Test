@@ -2,6 +2,7 @@ import "./style.css";
 import { io, type Socket } from "socket.io-client";
 
 type GameMode = "direct" | "study_then_quiz";
+type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 type Phase =
   | "name"
   | "matchmaking"
@@ -9,7 +10,7 @@ type Phase =
   | "studying"
   | "playing"
   | "result";
-type NameFlowStep = "mode" | "main_categories" | "sub_categories";
+type NameFlowStep = "mode" | "main_categories" | "sub_categories" | "difficulty";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -22,6 +23,7 @@ let endsAt = 0;
 let timerHandle: number | null = null;
 let currentGameMode: GameMode | null = null;
 let selectedModeInName: GameMode = "direct";
+let selectedDifficultyMode: DifficultyMode = "mix";
 let selectedMainCategoryId: number | null = null;
 let selectedSubcategoryKey: string | null = null;
 let selectedSubcategoryLabel: string | null = null;
@@ -35,8 +37,6 @@ let categoriesState: Array<{
     subcategoryKey: string;
     nameAr: string;
     icon: string;
-    difficultyLevel?: string;
-    difficultyLabelAr?: string;
   }>;
 }> = [];
 let lobbyNotice = "";
@@ -132,10 +132,11 @@ function storePlayerName(name: string): void {
   }
 }
 
-function difficultyLabelAr(level: string | undefined): string {
-  if (level === "beginner") return "مبتدئ";
-  if (level === "advanced") return "متقدم";
-  return "متوسط";
+function difficultyModeLabelAr(mode: DifficultyMode): string {
+  if (mode === "easy") return "سهل";
+  if (mode === "medium") return "متوسط";
+  if (mode === "hard") return "متقدم";
+  return "مزيج";
 }
 
 async function fetchCategoriesState(): Promise<void> {
@@ -152,8 +153,6 @@ async function fetchCategoriesState(): Promise<void> {
         subcategoryKey: string;
         nameAr: string;
         icon: string;
-        difficultyLevel?: string;
-        difficultyLabelAr?: string;
       }>;
     }>;
   };
@@ -168,8 +167,6 @@ async function fetchCategoriesState(): Promise<void> {
       subcategoryKey: s.subcategoryKey,
       nameAr: s.nameAr,
       icon: s.icon || "📘",
-      difficultyLevel: s.difficultyLevel,
-      difficultyLabelAr: s.difficultyLabelAr ?? difficultyLabelAr(s.difficultyLevel),
     })),
   }));
 }
@@ -383,6 +380,7 @@ function render(): void {
 
   if (phase === "name") {
     const renderModePicker = nameFlowStep === "mode";
+    const renderDifficultyPicker = nameFlowStep === "difficulty";
     const selectedMain = categoriesState.find((c) => c.id === selectedMainCategoryId) ?? null;
     const subItems = selectedMain?.subcategories ?? [];
     const mainCards = categoriesState
@@ -400,7 +398,22 @@ function render(): void {
         <button type="button" class="mode-option-btn" data-sub-key="${escapeHtml(s.subcategoryKey)}" data-sub-name="${escapeHtml(s.nameAr)}">
           <span class="mode-option-icon">${escapeHtml(s.icon || "📘")}</span>
           <span class="mode-option-title">${escapeHtml(s.nameAr)}</span>
-          <span class="mode-option-level">${escapeHtml(s.difficultyLabelAr ?? difficultyLabelAr(s.difficultyLevel))}</span>
+        </button>`,
+      )
+      .join("");
+    const difficultyCards = [
+      { key: "mix", label: "مزيج", desc: "أسئلة من جميع مستويات الصعوبة" },
+      { key: "easy", label: "سهل", desc: "أسئلة مصنفة بمستوى سهل فقط" },
+      { key: "medium", label: "متوسط", desc: "أسئلة مصنفة بمستوى متوسط فقط" },
+      { key: "hard", label: "متقدم", desc: "أسئلة مصنفة بمستوى متقدم فقط" },
+    ]
+      .map(
+        (d) => `
+        <button type="button" class="mode-option-btn ${
+          selectedDifficultyMode === d.key ? "mode-option-btn--selected" : ""
+        }" data-difficulty-mode="${d.key}" aria-pressed="${selectedDifficultyMode === d.key ? "true" : "false"}">
+          <span class="mode-option-title">${escapeHtml(d.label)}</span>
+          <span class="mode-option-desc">${escapeHtml(d.desc)}</span>
         </button>`,
       )
       .join("");
@@ -418,7 +431,9 @@ function render(): void {
                   ? "اختر نمط اللعب"
                   : nameFlowStep === "main_categories"
                     ? "اختر التصنيف الرئيسي"
-                    : "اختر التصنيف الفرعي"
+                    : nameFlowStep === "sub_categories"
+                      ? "اختر التصنيف الفرعي"
+                      : "اختر مستوى الصعوبة"
               }</p>
               <div class="mode-picker-grid" role="group" aria-label="اختيارات">
                 ${
@@ -441,7 +456,9 @@ function render(): void {
                 `
                     : nameFlowStep === "main_categories"
                       ? mainCards
-                      : subCards
+                      : nameFlowStep === "sub_categories"
+                        ? subCards
+                        : difficultyCards
                 }
               </div>
               <div class="flex gap-2">
@@ -449,7 +466,11 @@ function render(): void {
                   renderModePicker ? "hidden" : ""
                 }">رجوع</button>
                 <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg">${
-                  renderModePicker ? "ابدأ التحدي" : nameFlowStep === "main_categories" ? "التالي" : "ابدأ التحدي"
+                  renderModePicker || renderDifficultyPicker
+                    ? "ابدأ التحدي"
+                    : nameFlowStep === "main_categories"
+                      ? "التالي"
+                      : "التالي"
                 }</button>
               </div>
               <p id="join-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
@@ -488,7 +509,7 @@ function render(): void {
           modeBtns.forEach((x) => x.classList.toggle("mode-option-btn--selected", x === b));
         });
       });
-    } else {
+    } else if (nameFlowStep === "sub_categories") {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
           const key = b.dataset.subKey?.trim();
@@ -499,9 +520,24 @@ function render(): void {
           modeBtns.forEach((x) => x.classList.toggle("mode-option-btn--selected", x === b));
         });
       });
+    } else {
+      modeBtns.forEach((b) => {
+        b.addEventListener("click", () => {
+          const value = (b.dataset.difficultyMode ?? "mix").trim() as DifficultyMode;
+          selectedDifficultyMode =
+            value === "easy" || value === "medium" || value === "hard" ? value : "mix";
+          modeBtns.forEach((x) => {
+            const on = x === b;
+            x.classList.toggle("mode-option-btn--selected", on);
+            x.setAttribute("aria-pressed", on ? "true" : "false");
+          });
+        });
+      });
     }
     backBtn?.addEventListener("click", () => {
-      if (nameFlowStep === "sub_categories") {
+      if (nameFlowStep === "difficulty") {
+        nameFlowStep = selectedModeInName === "direct" ? "mode" : "sub_categories";
+      } else if (nameFlowStep === "sub_categories") {
         nameFlowStep = "main_categories";
       } else {
         nameFlowStep = "mode";
@@ -521,11 +557,10 @@ function render(): void {
       storePlayerName(name);
       if (nameFlowStep === "mode") {
         if (selectedModeInName === "direct") {
-          btn.textContent = "جاري الدخول...";
-          phase = "matchmaking";
-          lobbyNotice = "جاري الاتصال بالخادم...";
+          nameFlowStep = "difficulty";
+          btn.disabled = false;
+          btn.classList.remove("btn-pending");
           render();
-          connectSocket(name, "direct");
           return;
         }
         try {
@@ -555,17 +590,30 @@ function render(): void {
         render();
         return;
       }
-      if (!selectedSubcategoryKey) {
+      if (nameFlowStep === "sub_categories") {
+        if (!selectedSubcategoryKey) {
+          btn.disabled = false;
+          btn.classList.remove("btn-pending");
+          err.textContent = "اختر تصنيفًا فرعيًا.";
+          return;
+        }
+        nameFlowStep = "difficulty";
         btn.disabled = false;
         btn.classList.remove("btn-pending");
-        err.textContent = "اختر تصنيفًا فرعيًا.";
+        render();
         return;
       }
       btn.textContent = "جاري الدخول...";
       phase = "matchmaking";
-      lobbyNotice = `جاري الاتصال بالخادم... (${selectedSubcategoryLabel ?? selectedSubcategoryKey})`;
+      if (selectedModeInName === "direct") {
+        lobbyNotice = `جاري الاتصال بالخادم... (${difficultyModeLabelAr(selectedDifficultyMode)})`;
+        render();
+        connectSocket(name, "direct", null, selectedDifficultyMode);
+        return;
+      }
+      lobbyNotice = `جاري الاتصال بالخادم... (${selectedSubcategoryLabel ?? selectedSubcategoryKey} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
       render();
-      connectSocket(name, "study_then_quiz", selectedSubcategoryKey);
+      connectSocket(name, "study_then_quiz", selectedSubcategoryKey, selectedDifficultyMode);
     });
     return;
   }
@@ -770,6 +818,7 @@ function render(): void {
     again.addEventListener("click", () => {
       phase = "name";
       nameFlowStep = "mode";
+      selectedDifficultyMode = "mix";
       selectedMainCategoryId = null;
       selectedSubcategoryKey = null;
       selectedSubcategoryLabel = null;
@@ -1302,7 +1351,12 @@ function bindPlayingAbilityUi(sk: Socket): void {
   refreshAbilityAffordability();
 }
 
-function connectSocket(name: string, mode: GameMode, subcategoryKey?: string | null): void {
+function connectSocket(
+  name: string,
+  mode: GameMode,
+  subcategoryKey?: string | null,
+  difficultyMode: DifficultyMode = "mix",
+): void {
   const joinFlowStartMs = performance.now();
   socket?.removeAllListeners();
   socket?.disconnect();
@@ -1373,6 +1427,7 @@ function connectSocket(name: string, mode: GameMode, subcategoryKey?: string | n
         name,
         mode,
         ...(mode === "study_then_quiz" && subcategoryKey ? { subcategoryKey } : {}),
+        difficultyMode,
       },
       (ack: { ok?: boolean }) => {
       if (joinAckTimer) {
@@ -1518,7 +1573,7 @@ function connectSocket(name: string, mode: GameMode, subcategoryKey?: string | n
     }
     lobbyNotice =
       payload?.reason === "not_enough_questions"
-        ? payload.message || "لا توجد أسئلة كافية في هذا التصنيف."
+        ? payload.message || "لا توجد أسئلة كافية في مستوى الصعوبة هذا أو هذا التصنيف."
         : LOBBY_MSG_CANCELLED;
     if (phase === "matchmaking") render();
   });

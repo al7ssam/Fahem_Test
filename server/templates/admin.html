@@ -466,8 +466,13 @@
               <option value="2">الخيار 3</option>
               <option value="3">الخيار 4</option>
             </select>
-            <label for="difficulty">الصعوبة (اختياري)</label>
-            <input id="difficulty" type="text" maxlength="32" placeholder="easy / medium / hard" />
+            <label for="difficulty">الصعوبة <span style="color:#f87171">*</span></label>
+            <select id="difficulty" required>
+              <option value="">اختر الصعوبة</option>
+              <option value="easy">سهل (easy)</option>
+              <option value="medium">متوسط (medium)</option>
+              <option value="hard">متقدم (hard)</option>
+            </select>
             <label for="study-body">نص المذاكرة (اختياري)</label>
             <textarea id="study-body" maxlength="50000" rows="4"></textarea>
             <label for="q-subcategory">التصنيف الفرعي</label>
@@ -548,13 +553,20 @@
         </button>
         <div class="accordion-content">
           <div class="card">
-            <p class="subtitle">اختر التصنيف والعدد، وسيتم إدراج مفتاح الفرعي ووصفه ومستواه داخل البرومبت تلقائيًا.</p>
+            <p class="subtitle">اختر التصنيف والعدد والصعوبة، وسيتم إدراج مفتاح الفرعي ووصفه والصعوبة المطلوبة داخل البرومبت تلقائيًا.</p>
             <label for="prompt-main-category">التصنيف الرئيسي</label>
             <select id="prompt-main-category"></select>
             <label for="prompt-subcategory">التصنيف الفرعي</label>
             <select id="prompt-subcategory"></select>
             <label for="prompt-question-count">عدد الأسئلة المطلوب توليدها</label>
             <input id="prompt-question-count" type="text" inputmode="numeric" value="20" />
+            <label for="prompt-difficulty">الصعوبة المطلوبة للأسئلة</label>
+            <select id="prompt-difficulty">
+              <option value="" selected>اختر الصعوبة</option>
+              <option value="easy">سهل (easy)</option>
+              <option value="medium">متوسط (medium)</option>
+              <option value="hard">متقدم (hard)</option>
+            </select>
             <label for="prompt-topic">موضوع أدق داخل التصنيف (اختياري)</label>
             <textarea id="prompt-topic" rows="2" maxlength="500" placeholder="مثال: عجائب الدنيا / جسم الإنسان"></textarea>
             <div class="btn-row">
@@ -701,12 +713,6 @@
             <input id="cat-sub-icon" type="text" value="📘" />
             <label for="cat-sub-desc">الوصف الداخلي للفرعي (لا يظهر للاعبين)</label>
             <textarea id="cat-sub-desc" rows="3" maxlength="8000" placeholder="للاستخدام الداخلي لاحقًا"></textarea>
-            <label for="cat-sub-level">مستوى التصنيف الفرعي</label>
-            <select id="cat-sub-level">
-              <option value="beginner">مبتدئ</option>
-              <option value="intermediate" selected>متوسط</option>
-              <option value="advanced">متقدم</option>
-            </select>
             <button type="button" class="btn btn-secondary" id="cat-sub-save-btn">حفظ/تحديث فرعي</button>
             <div class="msg" id="cat-msg"></div>
             <hr />
@@ -749,7 +755,6 @@
                     <th>الرئيسي</th>
                     <th>المفتاح الفرعي</th>
                     <th>الاسم</th>
-                    <th>مستوى</th>
                     <th>وصف داخلي</th>
                     <th>الحالة</th>
                     <th>الترتيب</th>
@@ -837,7 +842,13 @@
         <select id="edit-correct">
           <option value="0">الخيار 1</option><option value="1">الخيار 2</option><option value="2">الخيار 3</option><option value="3">الخيار 4</option>
         </select>
-        <label for="edit-difficulty">الصعوبة</label><input id="edit-difficulty" type="text" maxlength="32" />
+        <label for="edit-difficulty">الصعوبة <span style="color:#f87171">*</span></label>
+        <select id="edit-difficulty" required>
+          <option value="">اختر الصعوبة</option>
+          <option value="easy">سهل (easy)</option>
+          <option value="medium">متوسط (medium)</option>
+          <option value="hard">متقدم (hard)</option>
+        </select>
         <label for="edit-study">نص المذاكرة</label><textarea id="edit-study" maxlength="50000" rows="5"></textarea>
         <label for="edit-subcategory">التصنيف الفرعي</label><select id="edit-subcategory"></select>
         <div class="btn-row">
@@ -969,7 +980,8 @@
           if (!secret) return setMsg("أدخل مفتاح الإدارة.", false);
           loadCategoriesForUi(secret).catch(function () {});
           if (!body.prompt || body.options.some(function (o) { return !o; })) return setMsg("أكمل الحقول المطلوبة.", false);
-          if (diff) body.difficulty = diff;
+          if (!diff) return setMsg("يجب تحديد مستوى صعوبة السؤال قبل الحفظ", false);
+          body.difficulty = diff;
           if (study) body.studyBody = study;
           btn.disabled = true;
           try {
@@ -1012,7 +1024,7 @@
             if (res.ok && data.ok) {
               setJsonMsg("تم استيراد " + data.inserted + " سؤالاً.", true);
               if (typeof data.totalQuestions === "number") totalEl.textContent = String(data.totalQuestions);
-            } else setJsonMsg("تعذر الاستيراد.", false);
+            } else setJsonMsg(data.message || "تعذر الاستيراد.", false);
           } catch (e) { setJsonMsg("خطأ في الاتصال.", false); }
           finally { jsonBtn.disabled = false; }
         });
@@ -1068,6 +1080,7 @@
         var mainSelect = document.getElementById("prompt-main-category");
         var subSelect = document.getElementById("prompt-subcategory");
         var countInput = document.getElementById("prompt-question-count");
+        var difficultySelect = document.getElementById("prompt-difficulty");
         var topicInput = document.getElementById("prompt-topic");
         var loadBtn = document.getElementById("prompt-load-categories-btn");
         var generateBtn = document.getElementById("prompt-generate-btn");
@@ -1076,16 +1089,6 @@
         var msg = document.getElementById("prompt-generator-msg");
         function setPromptMsg(t, ok) { msg.textContent = t || ""; msg.className = "msg " + (ok ? "ok" : "err"); }
         function secret() { return document.getElementById("admin-secret").value.trim(); }
-        function difficultyForPrompt(level) {
-          if (level === "beginner") return "easy";
-          if (level === "advanced") return "hard";
-          return "medium";
-        }
-        function levelLabel(level) {
-          if (level === "beginner") return "مبتدئ";
-          if (level === "advanced") return "متقدم";
-          return "متوسط";
-        }
         async function ensurePromptCategories() {
           var s = secret();
           if (!s) {
@@ -1102,8 +1105,7 @@
           syncPromptGeneratorSubcategories();
           return true;
         }
-        function buildPrompt(main, sub, count, topic) {
-          var difficulty = difficultyForPrompt(sub.difficultyLevel);
+        function buildPrompt(main, sub, count, topic, difficulty) {
           var description = (sub.internalDescription || "").trim() || "لا يوجد وصف داخلي محدد لهذا التصنيف، اعتمد على اسم التصنيف الفرعي وسياقه.";
           var focusedTopic = topic || sub.nameAr;
           return [
@@ -1113,7 +1115,7 @@
             "- التصنيف الرئيسي: " + main.nameAr,
             "- التصنيف الفرعي: " + sub.nameAr,
             "- مفتاح التصنيف الفرعي الذي يجب استخدامه كما هو: " + sub.subcategoryKey,
-            "- مستوى التصنيف الفرعي: " + levelLabel(sub.difficultyLevel) + "، ويجب استخدام قيمة difficulty التالية: " + difficulty,
+            "- الصعوبة المطلوبة لهذه الدفعة: " + difficulty,
             "",
             "Scientific Context:",
             description,
@@ -1208,7 +1210,9 @@
             if (!main) return setPromptMsg("اختر التصنيف الرئيسي.", false);
             if (!sub) return setPromptMsg("اختر التصنيف الفرعي.", false);
             if (!Number.isFinite(count) || count < 1 || count > 200) return setPromptMsg("أدخل عدد أسئلة بين 1 و 200.", false);
-            output.value = buildPrompt(main, sub, count, topicInput.value.trim());
+            var difficulty = (difficultySelect.value || "").trim();
+            if (!["easy", "medium", "hard"].includes(difficulty)) return setPromptMsg("اختر مستوى صعوبة صالحًا.", false);
+            output.value = buildPrompt(main, sub, count, topicInput.value.trim(), difficulty);
             setPromptMsg("تم إنشاء البرومبت.", true);
           } catch (e) {
             setPromptMsg("تعذر إنشاء البرومبت.", false);
@@ -1434,11 +1438,6 @@
         var selectedSubIds = {};
         function setCatMsg(t, ok) { catMsg.textContent = t || ""; catMsg.className = "msg " + (ok ? "ok" : "err"); }
         function secret() { return document.getElementById("admin-secret").value.trim(); }
-        function catLevelAr(lv) {
-          if (lv === "beginner") return "مبتدئ";
-          if (lv === "advanced") return "متقدم";
-          return "متوسط";
-        }
         function catDescPreview(t) {
           t = (t || "").trim();
           if (!t) return "—";
@@ -1542,7 +1541,6 @@
               var sd2 = document.createElement("td"); sd2.textContent = m.nameAr;
               var sd3 = document.createElement("td"); sd3.textContent = s.subcategoryKey;
               var sd4 = document.createElement("td"); sd4.textContent = (s.icon || "📘") + " " + s.nameAr;
-              var sd4b = document.createElement("td"); sd4b.textContent = catLevelAr(s.difficultyLevel);
               var sd4c = document.createElement("td"); sd4c.textContent = catDescPreview(s.internalDescription);
               var sd5 = document.createElement("td"); sd5.textContent = s.isActive ? "مفعّل" : "معطّل";
               var sd6 = document.createElement("td"); sd6.textContent = String(s.sortOrder);
@@ -1553,7 +1551,6 @@
                 document.getElementById("cat-sub-name").value = s.nameAr || "";
                 document.getElementById("cat-sub-icon").value = s.icon || "📘";
                 document.getElementById("cat-sub-desc").value = s.internalDescription || "";
-                document.getElementById("cat-sub-level").value = s.difficultyLevel || "intermediate";
                 setCatMsg("تم تحميل التصنيف الفرعي للتعديل.", true);
               }));
               sd7.appendChild(rowBtn(s.isActive ? "تعطيل" : "تفعيل", "", async function () {
@@ -1578,7 +1575,7 @@
                 } catch (e) { setCatMsg("تعذر الحذف.", false); }
               }));
               ts.appendChild(sd0); ts.appendChild(sd1); ts.appendChild(sd2); ts.appendChild(sd3); ts.appendChild(sd4);
-              ts.appendChild(sd4b); ts.appendChild(sd4c); ts.appendChild(sd5); ts.appendChild(sd6); ts.appendChild(sd7);
+              ts.appendChild(sd4c); ts.appendChild(sd5); ts.appendChild(sd6); ts.appendChild(sd7);
               subBody.appendChild(ts);
             });
           });
@@ -1610,8 +1607,7 @@
             subcategoryKey: document.getElementById("cat-sub-key").value.trim(),
             nameAr: document.getElementById("cat-sub-name").value.trim(),
             icon: document.getElementById("cat-sub-icon").value.trim() || "📘",
-            internalDescription: document.getElementById("cat-sub-desc").value,
-            difficultyLevel: document.getElementById("cat-sub-level").value
+            internalDescription: document.getElementById("cat-sub-desc").value
           };
           if (!body.mainCategoryId || !body.subcategoryKey || !body.nameAr) return setCatMsg("أكمل حقول الفرعي.", false);
           try {
@@ -1874,11 +1870,16 @@
             ],
             correctIndex: parseInt(document.getElementById("edit-correct").value, 10),
             studyBody: document.getElementById("edit-study").value,
-            difficulty: document.getElementById("edit-difficulty").value.trim() || null,
+            difficulty: document.getElementById("edit-difficulty").value.trim(),
             subcategoryKey: document.getElementById("edit-subcategory").value || "general_default"
           };
           if (!body.prompt || body.options.some(function (o) { return !o; })) {
             em.textContent = "أكمل الحقول.";
+            em.className = "msg err";
+            return;
+          }
+          if (!body.difficulty) {
+            em.textContent = "يجب تحديد مستوى صعوبة السؤال قبل الحفظ";
             em.className = "msg err";
             return;
           }

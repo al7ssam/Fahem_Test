@@ -11,6 +11,7 @@ export type QuestionRow = {
 
 export type QuestionFilter = {
   subcategoryKey?: string | null;
+  difficulty?: "easy" | "medium" | "hard" | null;
 };
 
 export async function getRandomQuestion(
@@ -31,6 +32,10 @@ export async function getRandomQuestion(
   if (filter?.subcategoryKey) {
     params.push(filter.subcategoryKey);
     whereParts.push(`subcategory_key = $${params.length}`);
+  }
+  if (filter?.difficulty) {
+    params.push(filter.difficulty);
+    whereParts.push(`difficulty = $${params.length}`);
   }
   const where =
     whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
@@ -119,13 +124,21 @@ export async function countQuestionsBySubcategory(
   pool: Pool,
   subcategoryKey: string,
   requireStudyBody = false,
+  difficulty: "easy" | "medium" | "hard" | null = null,
 ): Promise<number> {
-  const where = requireStudyBody
-    ? `WHERE subcategory_key = $1 AND study_body IS NOT NULL AND btrim(study_body) <> ''`
-    : `WHERE subcategory_key = $1`;
+  const params: unknown[] = [subcategoryKey];
+  const whereParts: string[] = [`subcategory_key = $1`];
+  if (requireStudyBody) {
+    whereParts.push(`study_body IS NOT NULL AND btrim(study_body) <> ''`);
+  }
+  if (difficulty) {
+    params.push(difficulty);
+    whereParts.push(`difficulty = $${params.length}`);
+  }
+  const where = `WHERE ${whereParts.join(" AND ")}`;
   const r = await pool.query<{ c: string }>(
     `SELECT COUNT(*)::text AS c FROM questions ${where}`,
-    [subcategoryKey],
+    params,
   );
   return Number(r.rows[0]?.c ?? 0);
 }

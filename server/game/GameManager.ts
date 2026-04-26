@@ -3,12 +3,13 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getPool } from "../db/pool";
 import { countQuestionsBySubcategory } from "../db/questions";
-import { Match, type GameMode } from "./Match";
+import { Match, type DifficultyMode, type GameMode } from "./Match";
 
 const joinLobbySchema = z.object({
   name: z.string().trim().min(1).max(32),
   mode: z.enum(["direct", "study_then_quiz"]).default("direct"),
   subcategoryKey: z.string().trim().min(1).max(120).optional(),
+  difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
 });
 
 const answerSchema = z.object({
@@ -31,6 +32,7 @@ type LobbyEntry = {
   readyOrder: number | null;
   mode: GameMode;
   subcategoryKey: string | null;
+  difficultyMode: DifficultyMode;
 };
 
 type LobbyStatePayload = {
@@ -41,6 +43,7 @@ type LobbyStatePayload = {
     ready: boolean;
     mode: GameMode;
     subcategoryKey: string | null;
+    difficultyMode: DifficultyMode;
   }>;
   isStarting: boolean;
   participantSocketIds: string[];
@@ -64,6 +67,13 @@ export class GameManager {
     direct: null,
     study_then_quiz: null,
   };
+  private readonly countdownGroup: Record<
+    GameMode,
+    { subcategoryKey: string | null; difficultyMode: DifficultyMode } | null
+  > = {
+    direct: null,
+    study_then_quiz: null,
+  };
   private readonly scheduleChain: Record<GameMode, Promise<void>> = {
     direct: Promise.resolve(),
     study_then_quiz: Promise.resolve(),
@@ -82,12 +92,20 @@ export class GameManager {
 
   constructor(private readonly io: Server) {}
 
-  private lobbyRoom(mode: GameMode, subcategoryKey?: string | null): string {
-    if (mode === "direct") return "lobby:direct";
-    return `lobby:study_then_quiz:${subcategoryKey ?? "general_default"}`;
+  private lobbyRoom(
+    mode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): string {
+    if (mode === "direct") return `lobby:direct:${difficultyMode}`;
+    return `lobby:study_then_quiz:${subcategoryKey ?? "general_default"}:${difficultyMode}`;
   }
 
-  private buildLobbyPayload(mode: GameMode, subcategoryKey?: string | null): LobbyStatePayload {
+  private buildLobbyPayload(
+    mode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): LobbyStatePayload {
     const isStarting = Boolean(this.matchStartTimers[mode]);
     const endsAt = this.countdownEndsAt[mode];
     const countdownSecondsRemaining =
@@ -97,13 +115,18 @@ export class GameManager {
     return {
       mode,
       players: [...this.lobbies[mode].values()]
-        .filter((p) => mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default"))
+        .filter(
+          (p) =>
+            p.difficultyMode === difficultyMode &&
+            (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")),
+        )
         .map((p) => ({
         socketId: p.socketId,
         name: p.name,
         ready: p.ready,
         mode: p.mode,
         subcategoryKey: p.subcategoryKey,
+        difficultyMode: p.difficultyMode,
       })),
       isStarting,
       participantSocketIds: [...this.lockedParticipants[mode]],
@@ -121,6 +144,7 @@ export class GameManager {
           return;
         }
         const { name, mode } = parsed.data;
+        const difficultyMode = parsed.data.difficultyMode ?? "mix";
         const subcategoryKey =
           mode === "study_then_quiz"
             ? String(parsed.data.subcategoryKey ?? "general_default").trim()
@@ -134,11 +158,12 @@ export class GameManager {
           readyOrder: ++this.readyOrderCounter,
           mode,
           subcategoryKey,
+          difficultyMode,
         });
-        await socket.join(this.lobbyRoom(mode, subcategoryKey));
-        this.broadcastLobby(mode, subcategoryKey);
-        socket.emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey));
-        this.enqueueScheduleMatchStart(mode, subcategoryKey);
+        await socket.join(this.lobbyRoom(mode, subcategoryKey, difficultyMode));
+        this.broadcastLobby(mode, subcategoryKey, difficultyMode);
+        socket.emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey, difficultyMode));
+        this.enqueueScheduleMatchStart(mode, subcategoryKey, difficultyMode);
         cb?.({ ok: true });
       } catch {
         cb?.({ ok: false, error: "server" });
@@ -155,8 +180,8 @@ export class GameManager {
         entry.ready = true;
         entry.readyOrder = ++this.readyOrderCounter;
       }
-      this.broadcastLobby(entry.mode, entry.subcategoryKey);
-      this.enqueueScheduleMatchStart(entry.mode, entry.subcategoryKey);
+      this.broadcastLobby(entry.mode, entry.subcategoryKey, entry.difficultyMode);
+      this.enqueueScheduleMatchStart(entry.mode, entry.subcategoryKey, entry.difficultyMode);
       cb?.({ ok: true });
     });
 
@@ -258,9 +283,11 @@ export class GameManager {
       const prev = this.lobbies[mode].get(socketId);
       if (this.lobbies[mode].delete(socketId)) {
         this.lockedParticipants[mode] = this.lockedParticipants[mode].filter((id) => id !== socketId);
-        void this.io.sockets.sockets.get(socketId)?.leave(this.lobbyRoom(mode, prev?.subcategoryKey));
+        void this.io.sockets.sockets.get(socketId)?.leave(
+          this.lobbyRoom(mode, prev?.subcategoryKey, prev?.difficultyMode ?? "mix"),
+        );
         this.clearMatchStartTimerIfNeeded(mode);
-        this.broadcastLobby(mode, prev?.subcategoryKey);
+        this.broadcastLobby(mode, prev?.subcategoryKey, prev?.difficultyMode ?? "mix");
       }
     }
   }
@@ -272,9 +299,11 @@ export class GameManager {
     this.lockedParticipants[entry.mode] = this.lockedParticipants[entry.mode].filter(
       (id) => id !== socketId,
     );
-    void this.io.sockets.sockets.get(socketId)?.leave(this.lobbyRoom(entry.mode, entry.subcategoryKey));
+    void this.io.sockets.sockets.get(socketId)?.leave(
+      this.lobbyRoom(entry.mode, entry.subcategoryKey, entry.difficultyMode),
+    );
     this.clearMatchStartTimerIfNeeded(entry.mode);
-    this.broadcastLobby(entry.mode, entry.subcategoryKey);
+    this.broadcastLobby(entry.mode, entry.subcategoryKey, entry.difficultyMode);
   }
 
   private leaveMatchForSocket(socketId: string): void {
@@ -285,16 +314,25 @@ export class GameManager {
     void this.io.sockets.sockets.get(socketId)?.leave(m.room);
   }
 
-  private readyPlayers(mode: GameMode, subcategoryKey?: string | null): LobbyEntry[] {
+  private readyPlayers(
+    mode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): LobbyEntry[] {
     return [...this.lobbies[mode].values()].filter(
       (p) =>
         p.ready &&
+        p.difficultyMode === difficultyMode &&
         (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")),
     );
   }
 
-  private sortedReadyPlayers(mode: GameMode, subcategoryKey?: string | null): LobbyEntry[] {
-    return this.readyPlayers(mode, subcategoryKey).sort((a, b) => {
+  private sortedReadyPlayers(
+    mode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): LobbyEntry[] {
+    return this.readyPlayers(mode, subcategoryKey, difficultyMode).sort((a, b) => {
       const aOrder = a.readyOrder ?? Number.MAX_SAFE_INTEGER;
       const bOrder = b.readyOrder ?? Number.MAX_SAFE_INTEGER;
       return aOrder - bOrder;
@@ -348,16 +386,24 @@ export class GameManager {
     }
   }
 
-  private broadcastLobby(mode: GameMode, subcategoryKey?: string | null): void {
+  private broadcastLobby(
+    mode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): void {
     this.io
-      .to(this.lobbyRoom(mode, subcategoryKey))
-      .emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey));
+      .to(this.lobbyRoom(mode, subcategoryKey, difficultyMode))
+      .emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey, difficultyMode));
   }
 
-  private enqueueScheduleMatchStart(mode: GameMode, subcategoryKey?: string | null): void {
+  private enqueueScheduleMatchStart(
+    mode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): void {
     this.scheduleChain[mode] = this.scheduleChain[mode]
       .catch(() => undefined)
-      .then(() => this.runScheduleMatchStart(mode, subcategoryKey));
+      .then(() => this.runScheduleMatchStart(mode, subcategoryKey, difficultyMode));
   }
 
   private clearMatchStartTimerIfNeeded(mode: GameMode): void {
@@ -371,6 +417,7 @@ export class GameManager {
         clearTimeout(t);
         this.matchStartTimers[mode] = null;
         this.countdownEndsAt[mode] = null;
+        this.countdownGroup[mode] = null;
         this.lockedParticipants[mode] = [];
         this.io.to(this.lobbyRoom(mode)).emit("match_start_cancelled", {
           reason: "not_enough_ready",
@@ -387,11 +434,12 @@ export class GameManager {
     locked: string[],
     maxPlayers: number,
     subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
   ): void {
     const fillMs = this.matchFillWindowSeconds * 1000;
     const endsAt = this.countdownEndsAt[mode] ?? Date.now() + fillMs;
     const seconds = Math.max(1, Math.ceil((endsAt - Date.now()) / 1000));
-    this.io.to(this.lobbyRoom(mode, subcategoryKey)).emit("match_starting", {
+    this.io.to(this.lobbyRoom(mode, subcategoryKey, difficultyMode)).emit("match_starting", {
       seconds,
       participantSocketIds: locked,
       maxPlayersPerMatch: maxPlayers,
@@ -399,9 +447,22 @@ export class GameManager {
     });
   }
 
-  private async updateRosterDuringCountdown(mode: GameMode, subcategoryKey?: string | null): Promise<void> {
+  private async updateRosterDuringCountdown(
+    mode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): Promise<void> {
+    const activeGroup = this.countdownGroup[mode];
+    const normalizedSubcategory =
+      mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null;
+    if (activeGroup && activeGroup.subcategoryKey !== normalizedSubcategory) {
+      return;
+    }
+    if (activeGroup && activeGroup.difficultyMode !== difficultyMode) {
+      return;
+    }
     const maxPlayers = await this.loadMaxPlayersPerMatch();
-    const locked = this.sortedReadyPlayers(mode, subcategoryKey)
+    const locked = this.sortedReadyPlayers(mode, subcategoryKey, difficultyMode)
       .slice(0, maxPlayers)
       .map((p) => p.socketId);
     if (locked.length < 2) {
@@ -411,23 +472,28 @@ export class GameManager {
         this.matchStartTimers[mode] = null;
       }
       this.countdownEndsAt[mode] = null;
+      this.countdownGroup[mode] = null;
       this.lockedParticipants[mode] = [];
-      this.io.to(this.lobbyRoom(mode, subcategoryKey)).emit("match_start_cancelled", {
+      this.io.to(this.lobbyRoom(mode, subcategoryKey, difficultyMode)).emit("match_start_cancelled", {
         reason: "not_enough_ready",
       });
-      this.broadcastLobby(mode, subcategoryKey);
-      if (this.readyPlayers(mode, subcategoryKey).length >= 2) {
-        this.enqueueScheduleMatchStart(mode, subcategoryKey);
+      this.broadcastLobby(mode, subcategoryKey, difficultyMode);
+      if (this.readyPlayers(mode, subcategoryKey, difficultyMode).length >= 2) {
+        this.enqueueScheduleMatchStart(mode, subcategoryKey, difficultyMode);
       }
       return;
     }
     this.lockedParticipants[mode] = locked;
-    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey);
-    this.broadcastLobby(mode, subcategoryKey);
+    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey, difficultyMode);
+    this.broadcastLobby(mode, subcategoryKey, difficultyMode);
   }
 
-  private async runScheduleMatchStart(mode: GameMode, subcategoryKey?: string | null): Promise<void> {
-    const ready = this.readyPlayers(mode, subcategoryKey);
+  private async runScheduleMatchStart(
+    mode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): Promise<void> {
+    const ready = this.readyPlayers(mode, subcategoryKey, difficultyMode);
     if (ready.length < 2) {
       if (!this.matchStartTimers[mode]) {
         this.clearMatchStartTimerIfNeeded(mode);
@@ -436,36 +502,54 @@ export class GameManager {
     }
 
     if (this.matchStartTimers[mode]) {
-      await this.updateRosterDuringCountdown(mode, subcategoryKey);
+      const activeGroup = this.countdownGroup[mode];
+      const normalizedSubcategory =
+        mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null;
+      if (
+        activeGroup &&
+        activeGroup.subcategoryKey === normalizedSubcategory &&
+        activeGroup.difficultyMode === difficultyMode
+      ) {
+        await this.updateRosterDuringCountdown(mode, subcategoryKey, difficultyMode);
+      }
       return;
     }
 
     const maxPlayers = await this.loadMaxPlayersPerMatch();
     const fillSeconds = await this.loadMatchFillWindowSeconds();
     const fillMs = fillSeconds * 1000;
-    const locked = this.sortedReadyPlayers(mode, subcategoryKey)
+    const locked = this.sortedReadyPlayers(mode, subcategoryKey, difficultyMode)
       .slice(0, maxPlayers)
       .map((p) => p.socketId);
     if (locked.length < 2) return;
 
     if (this.matchStartTimers[mode]) {
-      await this.updateRosterDuringCountdown(mode, subcategoryKey);
+      await this.updateRosterDuringCountdown(mode, subcategoryKey, difficultyMode);
       return;
     }
 
     this.lockedParticipants[mode] = locked;
     this.countdownEndsAt[mode] = Date.now() + fillMs;
-    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey);
-    this.broadcastLobby(mode, subcategoryKey);
+    this.countdownGroup[mode] = {
+      subcategoryKey: mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
+      difficultyMode,
+    };
+    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey, difficultyMode);
+    this.broadcastLobby(mode, subcategoryKey, difficultyMode);
 
     this.matchStartTimers[mode] = setTimeout(() => {
       this.matchStartTimers[mode] = null;
       this.countdownEndsAt[mode] = null;
-      void this.startMatchFromLobby(mode, subcategoryKey);
+      this.countdownGroup[mode] = null;
+      void this.startMatchFromLobby(mode, subcategoryKey, difficultyMode);
     }, fillMs);
   }
 
-  private async startMatchFromLobby(gameMode: GameMode, subcategoryKey?: string | null): Promise<void> {
+  private async startMatchFromLobby(
+    gameMode: GameMode,
+    subcategoryKey?: string | null,
+    difficultyMode: DifficultyMode = "mix",
+  ): Promise<void> {
     const startedAt = Date.now();
     const locked = this.lockedParticipants[gameMode];
     const participants = locked
@@ -477,26 +561,29 @@ export class GameManager {
       });
     if (participants.length < 2) {
       this.lockedParticipants[gameMode] = [];
-      this.io.to(this.lobbyRoom(gameMode, subcategoryKey)).emit("match_start_cancelled", {
+      this.io.to(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode)).emit("match_start_cancelled", {
         reason: "not_enough_ready",
       });
-      this.broadcastLobby(gameMode, subcategoryKey);
-      if (this.readyPlayers(gameMode, subcategoryKey).length >= 2) {
-        this.enqueueScheduleMatchStart(gameMode, subcategoryKey);
+      this.broadcastLobby(gameMode, subcategoryKey, difficultyMode);
+      if (this.readyPlayers(gameMode, subcategoryKey, difficultyMode).length >= 2) {
+        this.enqueueScheduleMatchStart(gameMode, subcategoryKey, difficultyMode);
       }
       return;
     }
     if (gameMode === "study_then_quiz") {
       const key = subcategoryKey ?? "general_default";
-      const total = await countQuestionsBySubcategory(getPool(), key, true);
+      const difficultyFilter = difficultyMode === "mix" ? null : difficultyMode;
+      const total = await countQuestionsBySubcategory(getPool(), key, true, difficultyFilter);
       if (total < 30) {
-        this.io.to(this.lobbyRoom(gameMode, subcategoryKey)).emit("match_start_cancelled", {
+        const isMix = difficultyMode === "mix";
+        this.io.to(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode)).emit("match_start_cancelled", {
           reason: "not_enough_questions",
-          message: "لا توجد أسئلة كافية في هذا التصنيف (الحد الأدنى 30).",
-          minRequired: 30,
-          available: total,
+          message: isMix
+            ? "لا توجد أسئلة كافية في هذا التصنيف."
+            : "لا توجد أسئلة كافية في مستوى الصعوبة هذا داخل التصنيف. جرّب اختيار مزيج.",
+          difficultyMode,
         });
-        this.broadcastLobby(gameMode, subcategoryKey);
+        this.broadcastLobby(gameMode, subcategoryKey, difficultyMode);
         return;
       }
     }
@@ -508,13 +595,14 @@ export class GameManager {
       participants,
       gameMode,
       gameMode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
+      difficultyMode,
     );
 
     await Promise.all(participants.map(async (p) => {
       this.lobbies[gameMode].delete(p.socketId);
       const s = this.io.sockets.sockets.get(p.socketId);
       if (s) {
-        await s.leave(this.lobbyRoom(gameMode, subcategoryKey));
+        await s.leave(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode));
         await s.join(match.room);
         this.socketToMatch.set(p.socketId, match);
       }
@@ -523,7 +611,7 @@ export class GameManager {
     console.debug(`[matchmaking] lobby_to_match_rooms_ms=${roomsReadyMs} mode=${gameMode} participants=${participants.length}`);
 
     this.runningMatches.set(matchId, match);
-    this.broadcastLobby(gameMode, subcategoryKey);
+    this.broadcastLobby(gameMode, subcategoryKey, difficultyMode);
 
     try {
       await match.run();

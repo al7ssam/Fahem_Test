@@ -18,6 +18,7 @@ const DEFAULT_ROUND_READY_MS = 12_000;
 const RUNTIME_SETTINGS_CACHE_MS = 15_000;
 
 export type GameMode = "direct" | "study_then_quiz";
+export type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 
 export type MatchPlayerPublic = {
   socketId: string;
@@ -112,6 +113,7 @@ export class Match {
     entries: Array<{ socketId: string; name: string }>,
     readonly gameMode: GameMode,
     private readonly studySubcategoryKey: string | null = null,
+    private readonly difficultyMode: DifficultyMode = "mix",
   ) {
     this.room = `match_${matchId}`;
     for (const e of entries) {
@@ -532,6 +534,7 @@ export class Match {
       matchId: this.matchId,
       gameMode: this.gameMode,
       subcategoryKey: this.studySubcategoryKey ?? undefined,
+      difficultyMode: this.difficultyMode,
       players: this.snapshotPlayers(),
       revealKeysActive: false,
       keysAttacksEnabled: this.snapshotAbilityToggles().heartAttack,
@@ -557,7 +560,12 @@ export class Match {
 
   private async runDirectQuestionLoop(pool: ReturnType<typeof getPool>): Promise<void> {
     while (!this.finished && this.countActive() > 1 && this.round < MAX_ROUNDS) {
-      const q = await getRandomQuestion(pool, this.usedQuestionIds);
+      const q = await getRandomQuestion(
+        pool,
+        this.usedQuestionIds,
+        false,
+        this.difficultyMode !== "mix" ? { difficulty: this.difficultyMode } : undefined,
+      );
       if (!q) {
         this.emitNoQuestions();
         return;
@@ -586,8 +594,11 @@ export class Match {
           pool,
           [...exclude],
           true,
-          this.studySubcategoryKey
-            ? { subcategoryKey: this.studySubcategoryKey }
+          this.studySubcategoryKey || this.difficultyMode !== "mix"
+            ? {
+                subcategoryKey: this.studySubcategoryKey,
+                difficulty: this.difficultyMode !== "mix" ? this.difficultyMode : null,
+              }
             : undefined,
         );
         if (!q) {

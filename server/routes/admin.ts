@@ -8,11 +8,13 @@ import { getPool } from "../db/pool";
 import { getResultMessages } from "../db/resultCopy";
 import { Match } from "../game/Match";
 
+const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
+
 const questionBodySchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
   options: z.array(z.string().trim().min(1).max(500)).length(4),
   correctIndex: z.number().int().min(0).max(3),
-  difficulty: z.string().trim().max(32).optional(),
+  difficulty: questionDifficultySchema,
   studyBody: z.string().max(50_000).optional(),
   study_body: z.string().max(50_000).optional(),
   subcategoryKey: z.string().trim().min(1).max(120).optional(),
@@ -25,7 +27,7 @@ const importItemSchema = z
     options: z.array(z.string().trim().min(1).max(500)).length(4),
     correctIndex: z.number().int().min(0).max(3).optional(),
     correct_index: z.number().int().min(0).max(3).optional(),
-    difficulty: z.string().trim().max(32).optional(),
+    difficulty: questionDifficultySchema,
     studyBody: z.string().max(50_000).optional(),
     study_body: z.string().max(50_000).optional(),
     subcategoryKey: z.string().trim().min(1).max(120).optional(),
@@ -42,8 +44,6 @@ const importItemSchema = z
     studyBody: (d.studyBody ?? d.study_body)?.trim() || null,
     subcategoryKey: (d.subcategoryKey ?? d.subcategory_key)?.trim() || null,
   }));
-
-const importArraySchema = z.array(importItemSchema).min(1).max(200);
 
 const resultMessagesPatchSchema = z.object({
   winnerTitle: z.string().trim().min(1).max(200),
@@ -95,14 +95,12 @@ const questionPatchSchema = z.object({
   options: z.array(z.string().trim().min(1).max(500)).length(4).optional(),
   correctIndex: z.number().int().min(0).max(3).optional(),
   correct_index: z.number().int().min(0).max(3).optional(),
-  difficulty: z.string().trim().max(32).nullable().optional(),
+  difficulty: questionDifficultySchema,
   studyBody: z.string().max(50_000).nullable().optional(),
   study_body: z.string().max(50_000).nullable().optional(),
   subcategoryKey: z.string().trim().min(1).max(120).optional(),
   subcategory_key: z.string().trim().min(1).max(120).optional(),
 });
-
-const categoryDifficultyLevelSchema = z.enum(["beginner", "intermediate", "advanced"]);
 
 const mainCategorySchema = z.object({
   mainKey: z.string().trim().min(1).max(120),
@@ -120,7 +118,6 @@ const subCategorySchema = z.object({
   sortOrder: z.number().int().min(0).max(10000).optional(),
   isActive: z.boolean().optional(),
   internalDescription: z.string().max(8000).optional(),
-  difficultyLevel: categoryDifficultyLevelSchema.optional(),
 });
 
 const categoriesBulkSchema = z.object({
@@ -222,12 +219,6 @@ function mergedStudyBody(data: {
   return t.length === 0 ? null : t;
 }
 
-function categoryDifficultyLabelAr(level: string): string {
-  if (level === "beginner") return "مبتدئ";
-  if (level === "advanced") return "متقدم";
-  return "متوسط";
-}
-
 async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Array<{
   id: number;
   mainKey: string;
@@ -243,7 +234,6 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     sortOrder: number;
     isActive: boolean;
     internalDescription: string;
-    difficultyLevel: "beginner" | "intermediate" | "advanced";
   }>;
 }>> {
   const mains = await pool.query<{
@@ -267,11 +257,9 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     sort_order: number;
     is_active: boolean;
     internal_description: string;
-    difficulty_level: string;
   }>(
     `SELECT id, main_category_id, subcategory_key, name_ar, icon, sort_order, is_active,
-            COALESCE(internal_description, '') AS internal_description,
-            COALESCE(difficulty_level, 'intermediate') AS difficulty_level
+            COALESCE(internal_description, '') AS internal_description
      FROM question_subcategories
      ORDER BY sort_order ASC, id ASC`,
   );
@@ -296,9 +284,6 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
       sortOrder: s.sort_order,
       isActive: s.is_active,
       internalDescription: s.internal_description,
-      difficultyLevel: (s.difficulty_level === "beginner" || s.difficulty_level === "advanced"
-        ? s.difficulty_level
-        : "intermediate") as "beginner" | "intermediate" | "advanced",
     })),
   }));
 }
@@ -402,8 +387,6 @@ export function registerAdminRoutes(app: Express): void {
                 icon: s.icon,
                 sortOrder: s.sortOrder,
                 isActive: s.isActive,
-                difficultyLevel: s.difficultyLevel,
-                difficultyLabelAr: categoryDifficultyLabelAr(s.difficultyLevel),
               })),
           })),
       });
@@ -835,18 +818,15 @@ export function registerAdminRoutes(app: Express): void {
       const pool = getPool();
       const d = parsed.data;
       const internalDescSub = d.internalDescription ?? "";
-      const diffLevelSub = d.difficultyLevel ?? "intermediate";
       await pool.query(
         `INSERT INTO question_subcategories (
-           main_category_id, subcategory_key, name_ar, icon, sort_order, is_active,
-           internal_description, difficulty_level
+           main_category_id, subcategory_key, name_ar, icon, sort_order, is_active, internal_description
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (subcategory_key) DO UPDATE
          SET main_category_id = EXCLUDED.main_category_id, name_ar = EXCLUDED.name_ar,
              icon = EXCLUDED.icon, sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active,
-             internal_description = EXCLUDED.internal_description,
-             difficulty_level = EXCLUDED.difficulty_level`,
+             internal_description = EXCLUDED.internal_description`,
         [
           d.mainCategoryId,
           d.subcategoryKey,
@@ -855,7 +835,6 @@ export function registerAdminRoutes(app: Express): void {
           d.sortOrder ?? 0,
           d.isActive ?? true,
           internalDescSub,
-          diffLevelSub,
         ],
       );
       res.json({ ok: true });
@@ -933,11 +912,9 @@ export function registerAdminRoutes(app: Express): void {
         sort_order: number;
         is_active: boolean;
         internal_description: string;
-        difficulty_level: string;
       }>(
         `SELECT main_category_id, subcategory_key, name_ar, icon, sort_order, is_active,
-                COALESCE(internal_description, '') AS internal_description,
-                COALESCE(difficulty_level, 'intermediate') AS difficulty_level
+                COALESCE(internal_description, '') AS internal_description
          FROM question_subcategories WHERE id = $1`,
         [id],
       );
@@ -946,16 +923,11 @@ export function registerAdminRoutes(app: Express): void {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
       }
-      const nextSubLevel =
-        d.difficultyLevel ??
-        (row.difficulty_level === "beginner" || row.difficulty_level === "advanced"
-          ? row.difficulty_level
-          : "intermediate");
       await pool.query(
         `UPDATE question_subcategories
          SET main_category_id = $1, subcategory_key = $2, name_ar = $3, icon = $4, sort_order = $5, is_active = $6,
-             internal_description = $7, difficulty_level = $8
-         WHERE id = $9`,
+             internal_description = $7
+         WHERE id = $8`,
         [
           d.mainCategoryId ?? row.main_category_id,
           d.subcategoryKey ?? row.subcategory_key,
@@ -964,7 +936,6 @@ export function registerAdminRoutes(app: Express): void {
           d.sortOrder ?? row.sort_order,
           d.isActive ?? row.is_active,
           d.internalDescription !== undefined ? d.internalDescription : row.internal_description,
-          nextSubLevel,
           id,
         ],
       );
@@ -1319,8 +1290,7 @@ export function registerAdminRoutes(app: Express): void {
       }
       const nextCorrect =
         correctIdx !== undefined ? correctIdx : row.correct_index;
-      const nextDiff =
-        d.difficulty !== undefined ? d.difficulty : row.difficulty;
+      const nextDiff = d.difficulty;
       const nextSubcategoryKey = String(
         d.subcategoryKey ?? d.subcategory_key ?? row.subcategory_key,
       ).trim();
@@ -1414,7 +1384,7 @@ export function registerAdminRoutes(app: Express): void {
           prompt,
           JSON.stringify(options),
           correctIndex,
-          difficulty ?? null,
+          difficulty,
           studyBody,
           subcategoryKey || "general_default",
         ],
@@ -1445,17 +1415,45 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
 
-    const parsed = importArraySchema.safeParse(rawList);
-    if (!parsed.success) {
+    if (rawList.length < 1 || rawList.length > 200) {
       res.status(400).json({
         ok: false,
         error: "invalid_questions",
-        issues: zodIssuesSummary(parsed.error),
+        message: "عدد الأسئلة يجب أن يكون بين 1 و 200",
       });
       return;
     }
-
-    const rows = parsed.data;
+    const rows: Array<z.infer<typeof importItemSchema>> = [];
+    for (let i = 0; i < rawList.length; i++) {
+      const item = rawList[i] as Record<string, unknown> | null;
+      const rawDifficulty =
+        item && typeof item === "object"
+          ? item.difficulty
+          : undefined;
+      if (
+        rawDifficulty === undefined ||
+        rawDifficulty === null ||
+        String(rawDifficulty).trim() === ""
+      ) {
+        res.status(400).json({
+          ok: false,
+          error: "missing_difficulty",
+          message: `السؤال رقم ${i + 1} يفتقد لتحديد الصعوبة`,
+        });
+        return;
+      }
+      const parsedItem = importItemSchema.safeParse(rawList[i]);
+      if (!parsedItem.success) {
+        res.status(400).json({
+          ok: false,
+          error: "invalid_questions",
+          message: `السؤال رقم ${i + 1} يحتوي قيماً غير صالحة`,
+          issues: zodIssuesSummary(parsedItem.error),
+        });
+        return;
+      }
+      rows.push(parsedItem.data);
+    }
     const pool = getPool();
     const client = await pool.connect();
     try {
@@ -1468,7 +1466,7 @@ export function registerAdminRoutes(app: Express): void {
             row.prompt,
             JSON.stringify(row.options),
             row.correctIndex,
-            row.difficulty ?? null,
+            row.difficulty,
             row.studyBody,
             String(
               (row as { subcategoryKey?: string | null }).subcategoryKey ?? "general_default",
