@@ -270,7 +270,8 @@ export class GameManager {
       try {
         const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
         const match = this.playerSessionToMatch.get(playerSessionId);
-        if (!match) {
+        if (!match || match.isFinished()) {
+          this.playerSessionToMatch.delete(playerSessionId);
           cb?.({ ok: false, error: "match_not_found" });
           return;
         }
@@ -578,6 +579,12 @@ export class GameManager {
               }
             }
             this.runningMatches.delete(matchId);
+            for (const [sessionId, mappedMatch] of this.playerSessionToMatch.entries()) {
+              if (mappedMatch === match) this.playerSessionToMatch.delete(sessionId);
+            }
+            for (const [socketId, mappedMatch] of this.socketToMatch.entries()) {
+              if (mappedMatch === match) this.socketToMatch.delete(socketId);
+            }
           }
         })();
       } catch {
@@ -884,6 +891,12 @@ export class GameManager {
       }
       room.roomVersion += 1;
       this.runningMatches.delete(matchId);
+      for (const [sessionId, mappedMatch] of this.playerSessionToMatch.entries()) {
+        if (mappedMatch === match) this.playerSessionToMatch.delete(sessionId);
+      }
+      for (const [socketId, mappedMatch] of this.socketToMatch.entries()) {
+        if (mappedMatch === match) this.socketToMatch.delete(socketId);
+      }
       this.emitPrivateLobbyState(roomCode);
     }
   }
@@ -1217,6 +1230,12 @@ export class GameManager {
         }
       }
       this.runningMatches.delete(matchId);
+      for (const [sessionId, mappedMatch] of this.playerSessionToMatch.entries()) {
+        if (mappedMatch === match) this.playerSessionToMatch.delete(sessionId);
+      }
+      for (const [socketId, mappedMatch] of this.socketToMatch.entries()) {
+        if (mappedMatch === match) this.socketToMatch.delete(socketId);
+      }
     }
   }
 }

@@ -63,6 +63,7 @@ export class Match {
   private readonly playerSessionToSocket = new Map<string, string>();
   private readonly socketToPlayerSession = new Map<string, string>();
   private readonly temporarilyDisconnectedSessions = new Set<string>();
+  private readonly disconnectedDuringQuestionSessions = new Set<string>();
   private singleActiveGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private usedQuestionIds: number[] = [];
   private round = 0;
@@ -202,6 +203,10 @@ export class Match {
       this.singleActiveGraceTimer = null;
       this.io.to(this.room).emit("single_active_grace_cancelled", {});
     }
+  }
+
+  isFinished(): boolean {
+    return this.finished;
   }
 
   /** تكاليف القدرات للعميل (مزامنة مع الإدارة). */
@@ -431,6 +436,7 @@ export class Match {
     if (this.skipSocketsForQuestion.has(socketId)) return;
     const p = this.players.get(socketId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) return;
+    if (this.disconnectedDuringQuestionSessions.has(p.playerSessionId)) return;
     if (this.pendingAnswers.has(socketId)) return;
     this.pendingAnswers.set(socketId, choiceIndex);
     this.answerTimes.set(socketId, Date.now());
@@ -443,6 +449,9 @@ export class Match {
   handleDisconnect(socketId: string): void {
     const p = this.players.get(socketId);
     if (!p || p.eliminated) return;
+    if (!this.roundClosed && this.currentQuestionId !== null) {
+      this.disconnectedDuringQuestionSessions.add(p.playerSessionId);
+    }
     this.temporarilyDisconnectedSessions.add(p.playerSessionId);
     this.playerSessionToSocket.delete(p.playerSessionId);
     this.socketToPlayerSession.delete(socketId);
@@ -805,6 +814,7 @@ export class Match {
     this.answerDeadline = Date.now() + this.questionMs;
     this.pendingAnswers.clear();
     this.answerTimes.clear();
+    this.disconnectedDuringQuestionSessions.clear();
 
     const waitRound = new Promise<void>((resolve) => {
       this.resolveRound = resolve;
@@ -883,8 +893,9 @@ export class Match {
       }
 
       const choice = this.pendingAnswers.get(socketId);
+      const forcedNoAnswerByDisconnect = this.disconnectedDuringQuestionSessions.has(p.playerSessionId);
       const answered = choice !== undefined;
-      const correct = answered && choice === correctIndex;
+      const correct = !forcedNoAnswerByDisconnect && answered && choice === correctIndex;
       let pointsAward = 0;
 
       if (correct) {

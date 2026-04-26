@@ -1958,27 +1958,10 @@ function connectSocket(
       failBackToName("تأخر الاتصال. تحقق من الشبكة ثم حاول مرة أخرى.");
       socket?.disconnect();
     }, 8000);
-    s.emit("reconnect_match", { playerSessionId }, (reconnectAck?: { ok?: boolean; asSpectator?: boolean }) => {
-      if (flowToken !== searchFlowToken) return;
-      if (reconnectAck?.ok) {
-        if (joinAckTimer) {
-          window.clearTimeout(joinAckTimer);
-          joinAckTimer = null;
-        }
-        joinCompleted = true;
-        if (reconnectAck.asSpectator) {
-          spectatorEligible = false;
-          spectatorFollowing = true;
-        }
-        lobbyNotice = reconnectAck.asSpectator
-          ? "تمت إعادة الاتصال — عدت كمشاهد."
-          : "تمت إعادة الاتصال بالمباراة.";
-        updateConnectionBadge();
-        const noticeEl2 = app.querySelector<HTMLParagraphElement>("#lobby-notice");
-        if (noticeEl2) noticeEl2.textContent = lobbyNotice;
-        return;
-      }
-    const payload = {
+    const shouldTryReconnect =
+      phase === "playing" || phase === "studying" || phase === "countdown";
+    const emitJoin = (): void => {
+      const payload = {
       name,
       mode,
       ...(mode === "study_then_quiz" && subcategoryKey ? { subcategoryKey } : {}),
@@ -1997,10 +1980,10 @@ function connectSocket(
           : joinKind === "private_join"
             ? "join_private_room"
             : "join_lobby";
-    s.emit(
-      eventName,
-      payload,
-      (ack: {
+      s.emit(
+        eventName,
+        payload,
+        (ack: {
         ok?: boolean;
         error?: string;
         message?: string;
@@ -2064,8 +2047,34 @@ function connectSocket(
                 : "تم الدخول بنجاح. جاري البحث عن منافسين...";
         }
       }
-      },
-    );
+        },
+      );
+    };
+    if (!shouldTryReconnect) {
+      emitJoin();
+      return;
+    }
+    s.emit("reconnect_match", { playerSessionId }, (reconnectAck?: { ok?: boolean; asSpectator?: boolean }) => {
+      if (flowToken !== searchFlowToken) return;
+      if (reconnectAck?.ok) {
+        if (joinAckTimer) {
+          window.clearTimeout(joinAckTimer);
+          joinAckTimer = null;
+        }
+        joinCompleted = true;
+        if (reconnectAck.asSpectator) {
+          spectatorEligible = false;
+          spectatorFollowing = true;
+        }
+        lobbyNotice = reconnectAck.asSpectator
+          ? "تمت إعادة الاتصال — عدت كمشاهد."
+          : "تمت إعادة الاتصال بالمباراة.";
+        updateConnectionBadge();
+        const noticeEl2 = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+        if (noticeEl2) noticeEl2.textContent = lobbyNotice;
+        return;
+      }
+      emitJoin();
     });
   });
 
