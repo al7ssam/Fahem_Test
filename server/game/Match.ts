@@ -107,6 +107,7 @@ export class Match {
   private abilityAttackStudyEnabled = true;
   private abilityRevealDirectEnabled = true;
   private abilityRevealStudyEnabled = true;
+  private questionMs = QUESTION_MS;
 
   constructor(
     private readonly io: Server,
@@ -115,6 +116,10 @@ export class Match {
     readonly gameMode: GameMode,
     private readonly studySubcategoryKey: string | null = null,
     private readonly difficultyMode: DifficultyMode = "mix",
+    private readonly timeOverrides?: {
+      questionMsOverride?: number;
+      studyPhaseMsOverride?: number;
+    },
   ) {
     this.room = `match_${matchId}`;
     this.isSoloMatch = entries.length === 1;
@@ -536,6 +541,12 @@ export class Match {
       this.abilityAttackStudyEnabled = String(map.get("ability_attack_study_enabled") ?? "1").trim() !== "0";
       this.abilityRevealDirectEnabled = String(map.get("ability_reveal_direct_enabled") ?? "1").trim() !== "0";
       this.abilityRevealStudyEnabled = String(map.get("ability_reveal_study_enabled") ?? "1").trim() !== "0";
+      if (this.timeOverrides?.questionMsOverride !== undefined) {
+        this.questionMs = Math.min(120_000, Math.max(5_000, Math.floor(this.timeOverrides.questionMsOverride)));
+      }
+      if (this.timeOverrides?.studyPhaseMsOverride !== undefined) {
+        this.studyPhaseMs = Math.min(300_000, Math.max(10_000, Math.floor(this.timeOverrides.studyPhaseMsOverride)));
+      }
     } catch {
       this.maxStudyRounds = DEFAULT_MAX_STUDY_ROUNDS;
       this.studyRoundSize = DEFAULT_STUDY_ROUND_SIZE;
@@ -543,6 +554,12 @@ export class Match {
       this.keysSmallStreakReward = 1;
       this.keysRevealQuestionsDirect = 4;
       this.keysRevealQuestionsStudy = 4;
+      if (this.timeOverrides?.questionMsOverride !== undefined) {
+        this.questionMs = Math.min(120_000, Math.max(5_000, Math.floor(this.timeOverrides.questionMsOverride)));
+      }
+      if (this.timeOverrides?.studyPhaseMsOverride !== undefined) {
+        this.studyPhaseMs = Math.min(300_000, Math.max(10_000, Math.floor(this.timeOverrides.studyPhaseMsOverride)));
+      }
     }
   }
 
@@ -681,7 +698,7 @@ export class Match {
     this.currentQuestionId = q.id;
     this.currentCorrectIndex = q.correct_index;
     this.questionStartedAt = Date.now();
-    this.answerDeadline = Date.now() + QUESTION_MS;
+    this.answerDeadline = Date.now() + this.questionMs;
     this.pendingAnswers.clear();
     this.answerTimes.clear();
 
@@ -718,7 +735,7 @@ export class Match {
         this.abilityGraceTimer = null;
         this.finishRound();
       }, ABILITY_GRACE_MS);
-    }, QUESTION_MS);
+    }, this.questionMs);
     await waitRound;
 
     if (this.shouldDeclareWinnerForActiveCount() && !this.finished) {
