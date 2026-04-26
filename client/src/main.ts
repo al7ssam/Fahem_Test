@@ -27,6 +27,7 @@ let selectedDifficultyMode: DifficultyMode = "mix";
 let selectedMainCategoryId: number | null = null;
 let selectedSubcategoryKey: string | null = null;
 let selectedSubcategoryLabel: string | null = null;
+let playerNameDraft = "";
 let categoriesState: Array<{
   id: number;
   mainKey: string;
@@ -465,7 +466,9 @@ function render(): void {
                 <button id="back-mode-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg ${
                   renderModePicker ? "hidden" : ""
                 }">رجوع</button>
-                <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg">${
+                <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg ${
+                  renderModePicker || renderDifficultyPicker ? "" : "hidden"
+                }">${
                   renderModePicker || renderDifficultyPicker
                     ? "ابدأ التحدي"
                     : nameFlowStep === "main_categories"
@@ -481,16 +484,42 @@ function render(): void {
     );
     const input = app.querySelector<HTMLInputElement>("#name-input")!;
     const storedName = getStoredPlayerName();
-    if (storedName) {
-      input.value = storedName;
+    if (playerNameDraft || storedName) {
+      input.value = playerNameDraft || storedName;
     }
+    input.addEventListener("input", () => {
+      playerNameDraft = input.value;
+    });
     const btn = app.querySelector<HTMLButtonElement>("#join-btn")!;
     const backBtn = app.querySelector<HTMLButtonElement>("#back-mode-btn");
     const err = app.querySelector<HTMLParagraphElement>("#join-err")!;
     const modeBtns = app.querySelectorAll<HTMLButtonElement>(".mode-option-btn");
+    const goToStudyCategories = async () => {
+      if (btn.disabled) return;
+      err.textContent = "";
+      playerNameDraft = input.value;
+      selectedModeInName = "study_then_quiz";
+      selectedMainCategoryId = null;
+      selectedSubcategoryKey = null;
+      selectedSubcategoryLabel = null;
+      btn.disabled = true;
+      btn.classList.add("btn-pending");
+      btn.textContent = "جاري تحميل التصنيفات...";
+      try {
+        await fetchCategoriesState();
+        nameFlowStep = "main_categories";
+        render();
+      } catch {
+        btn.disabled = false;
+        btn.classList.remove("btn-pending");
+        btn.textContent = "ابدأ التحدي";
+        err.textContent = "تعذر تحميل التصنيفات.";
+      }
+    };
     if (renderModePicker) {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
+          playerNameDraft = input.value;
           selectedModeInName =
             b.dataset.mode === "study_then_quiz" ? "study_then_quiz" : "direct";
           modeBtns.forEach((x) => {
@@ -498,26 +527,35 @@ function render(): void {
             x.classList.toggle("mode-option-btn--selected", on);
             x.setAttribute("aria-pressed", on ? "true" : "false");
           });
+          if (selectedModeInName === "study_then_quiz") {
+            void goToStudyCategories();
+          }
         });
       });
     } else if (nameFlowStep === "main_categories") {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
+          playerNameDraft = input.value;
           const id = Number(b.dataset.mainId);
           if (!Number.isInteger(id)) return;
           selectedMainCategoryId = id;
-          modeBtns.forEach((x) => x.classList.toggle("mode-option-btn--selected", x === b));
+          selectedSubcategoryKey = null;
+          selectedSubcategoryLabel = null;
+          nameFlowStep = "sub_categories";
+          render();
         });
       });
     } else if (nameFlowStep === "sub_categories") {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
+          playerNameDraft = input.value;
           const key = b.dataset.subKey?.trim();
           const label = b.dataset.subName?.trim();
           if (!key) return;
           selectedSubcategoryKey = key;
           selectedSubcategoryLabel = label || key;
-          modeBtns.forEach((x) => x.classList.toggle("mode-option-btn--selected", x === b));
+          nameFlowStep = "difficulty";
+          render();
         });
       });
     } else {
@@ -573,6 +611,7 @@ function render(): void {
         } catch {
           btn.disabled = false;
           btn.classList.remove("btn-pending");
+          btn.textContent = "ابدأ التحدي";
           err.textContent = "تعذر تحميل التصنيفات.";
         }
         return;
