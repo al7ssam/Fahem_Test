@@ -29,6 +29,7 @@ let selectedSubcategoryKey: string | null = null;
 let selectedSubcategoryLabel: string | null = null;
 let playerNameDraft = "";
 let searchFlowToken = 0;
+let soloLearningPending = false;
 let categoriesState: Array<{
   id: number;
   mainKey: string;
@@ -365,6 +366,7 @@ function disconnectSearchSocket(): void {
   currentGameMode = null;
   lobbyNotice = "";
   lobbyPlayersList = [];
+  soloLearningPending = false;
 }
 
 function returnToDifficultyFromSearch(): void {
@@ -506,6 +508,9 @@ function render(): void {
                       : "التالي"
                 }</button>
               </div>
+              <button id="solo-learning-btn" class="ui-btn ui-btn--primary w-full py-3 text-lg ${
+                renderDifficultyPicker ? "" : "hidden"
+              }">التعلم الفردي</button>
               <p id="join-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
             </div>
           </div>
@@ -521,6 +526,7 @@ function render(): void {
       playerNameDraft = input.value;
     });
     const btn = app.querySelector<HTMLButtonElement>("#join-btn")!;
+    const soloBtn = app.querySelector<HTMLButtonElement>("#solo-learning-btn");
     const backBtn = app.querySelector<HTMLButtonElement>("#back-mode-btn");
     const err = app.querySelector<HTMLParagraphElement>("#join-err")!;
     const modeBtns = app.querySelectorAll<HTMLButtonElement>(".mode-option-btn");
@@ -683,6 +689,38 @@ function render(): void {
       lobbyNotice = `جاري الاتصال بالخادم... (${selectedSubcategoryLabel ?? selectedSubcategoryKey} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
       render();
       connectSocket(name, "study_then_quiz", selectedSubcategoryKey, selectedDifficultyMode);
+    });
+    soloBtn?.addEventListener("click", () => {
+      if (soloBtn.disabled) return;
+      err.textContent = "";
+      const name = input.value.trim();
+      if (!name) {
+        err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        return;
+      }
+      if (selectedModeInName === "study_then_quiz" && !selectedSubcategoryKey) {
+        err.textContent = "اختر تصنيفًا فرعيًا أولاً.";
+        return;
+      }
+      storePlayerName(name);
+      playerNameDraft = name;
+      soloBtn.disabled = true;
+      soloBtn.classList.add("btn-pending");
+      soloBtn.textContent = "جاري بدء التعلم الفردي...";
+      phase = "matchmaking";
+      soloLearningPending = true;
+      currentGameMode = selectedModeInName;
+      lobbyNotice =
+        selectedModeInName === "direct"
+          ? `جاري بدء التعلم الفردي... (${difficultyModeLabelAr(selectedDifficultyMode)})`
+          : `جاري بدء التعلم الفردي... (${selectedSubcategoryLabel ?? selectedSubcategoryKey} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
+      render();
+      connectSoloSocket(
+        name,
+        selectedModeInName,
+        selectedModeInName === "study_then_quiz" ? selectedSubcategoryKey : null,
+        selectedDifficultyMode,
+      );
     });
     return;
   }
@@ -897,6 +935,7 @@ function render(): void {
       selectedMainCategoryId = null;
       selectedSubcategoryKey = null;
       selectedSubcategoryLabel = null;
+      soloLearningPending = false;
       socket?.disconnect();
       socket = null;
       mySocketId = null;
@@ -911,6 +950,13 @@ function render(): void {
 function updateLobbyModeLabel(): void {
   const elMode = app.querySelector<HTMLParagraphElement>("#lobby-mode");
   if (!elMode || !currentGameMode) return;
+  if (soloLearningPending) {
+    elMode.textContent =
+      currentGameMode === "direct"
+        ? "التعلم الفردي — نمط مباشر"
+        : "التعلم الفردي — مراجعة ثم أسئلة";
+    return;
+  }
   elMode.textContent =
     currentGameMode === "direct"
       ? "البحث عن تحدي — نمط مباشر"
@@ -932,6 +978,10 @@ function updateConnectionBadge(): void {
 function syncMatchmakingStatusText(): void {
   const el = app.querySelector<HTMLParagraphElement>("#mm-status");
   if (!el) return;
+  if (soloLearningPending) {
+    el.textContent = "جاري تجهيز جولتك الفردية…";
+    return;
+  }
   const readyCount = lobbyPlayersList.filter((p) => p.ready).length;
   el.textContent =
     readyCount < 2
@@ -1431,6 +1481,7 @@ function connectSocket(
   mode: GameMode,
   subcategoryKey?: string | null,
   difficultyMode: DifficultyMode = "mix",
+  solo = false,
 ): void {
   const flowToken = ++searchFlowToken;
   const joinFlowStartMs = performance.now();
@@ -1454,6 +1505,7 @@ function connectSocket(
       joinAckTimer = null;
     }
     joinCompleted = true;
+    soloLearningPending = false;
     phase = "name";
     render();
     const errEl = document.querySelector<HTMLParagraphElement>("#join-err");
@@ -1491,7 +1543,9 @@ function connectSocket(
     console.debug("[join-flow] click->connect_ms", Math.round(performance.now() - joinFlowStartMs));
     const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
     if (noticeEl && phase === "matchmaking") {
-      noticeEl.textContent = "تم الاتصال بالخادم. جاري الدخول إلى البحث...";
+      noticeEl.textContent = solo
+        ? "تم الاتصال بالخادم. جاري تجهيز التعلم الفردي..."
+        : "تم الاتصال بالخادم. جاري الدخول إلى البحث...";
     }
     joinAckTimer = window.setTimeout(() => {
       if (joinCompleted) return;
@@ -1499,14 +1553,14 @@ function connectSocket(
       socket?.disconnect();
     }, 8000);
     s.emit(
-      "join_lobby",
+      solo ? "start_solo_match" : "join_lobby",
       {
         name,
         mode,
         ...(mode === "study_then_quiz" && subcategoryKey ? { subcategoryKey } : {}),
         difficultyMode,
       },
-      (ack: { ok?: boolean }) => {
+      (ack: { ok?: boolean; error?: string; message?: string }) => {
       if (flowToken !== searchFlowToken) return;
       if (joinAckTimer) {
         window.clearTimeout(joinAckTimer);
@@ -1514,7 +1568,7 @@ function connectSocket(
       }
       joinCompleted = true;
       if (!ack?.ok) {
-        failBackToName("تعذر الدخول. حاول مرة أخرى.");
+        failBackToName(ack?.message || (solo ? "تعذر بدء التعلم الفردي. حاول مرة أخرى." : "تعذر الدخول. حاول مرة أخرى."));
         return;
       }
       console.debug("[join-flow] connect->join_ack_ms", Math.round(performance.now() - joinFlowStartMs));
@@ -1523,7 +1577,11 @@ function connectSocket(
         render();
       } else {
         const noticeEl2 = app.querySelector<HTMLParagraphElement>("#lobby-notice");
-        if (noticeEl2) noticeEl2.textContent = "تم الدخول بنجاح. جاري البحث عن منافسين...";
+        if (noticeEl2) {
+          noticeEl2.textContent = solo
+            ? "تم إنشاء الجولة الفردية. جاري البدء..."
+            : "تم الدخول بنجاح. جاري البحث عن منافسين...";
+        }
       }
       },
     );
@@ -1695,6 +1753,7 @@ function connectSocket(
           lastAward: p.lastAward ?? 0,
         }));
       }
+      soloLearningPending = false;
       applyAbilityCostsPayload(payload.abilityCosts ?? null);
       refreshKeysBadge();
       refreshAbilityAffordability();
@@ -2241,6 +2300,15 @@ function connectSocket(
   );
 
   s.connect();
+}
+
+function connectSoloSocket(
+  name: string,
+  mode: GameMode,
+  subcategoryKey?: string | null,
+  difficultyMode: DifficultyMode = "mix",
+): void {
+  connectSocket(name, mode, subcategoryKey, difficultyMode, true);
 }
 
 function renderHearts(n: number): void {

@@ -57,6 +57,7 @@ export class Match {
     Match.runtimeSettingsCache = null;
   }
   readonly room: string;
+  private readonly isSoloMatch: boolean;
   private readonly players = new Map<string, MatchPlayerState>();
   private usedQuestionIds: number[] = [];
   private round = 0;
@@ -116,6 +117,7 @@ export class Match {
     private readonly difficultyMode: DifficultyMode = "mix",
   ) {
     this.room = `match_${matchId}`;
+    this.isSoloMatch = entries.length === 1;
     for (const e of entries) {
       this.players.set(e.socketId, {
         name: e.name,
@@ -166,6 +168,14 @@ export class Match {
     heartAttack: boolean;
     reveal: boolean;
   } {
+    if (this.isSoloMatch) {
+      return {
+        skillBoost: false,
+        skipQuestion: false,
+        heartAttack: false,
+        reveal: false,
+      };
+    }
     const isDirect = this.gameMode === "direct";
     return {
       skillBoost: isDirect ? this.abilitySkillBoostDirectEnabled : this.abilitySkillBoostStudyEnabled,
@@ -215,6 +225,16 @@ export class Match {
       if (!p.eliminated && p.hearts > 0) n++;
     }
     return n;
+  }
+
+  private hasEnoughActivePlayersForQuestions(): boolean {
+    const active = this.countActive();
+    return this.isSoloMatch ? active > 0 : active > 1;
+  }
+
+  private shouldDeclareWinnerForActiveCount(): boolean {
+    const active = this.countActive();
+    return this.isSoloMatch ? active <= 0 : active <= 1;
   }
 
   private allActiveAnswered(): boolean {
@@ -376,7 +396,7 @@ export class Match {
       name: p.name,
       reason: "disconnect",
     });
-    if (this.countActive() <= 1 && !this.finished) {
+    if (this.shouldDeclareWinnerForActiveCount() && !this.finished) {
       this.clearQuestionTimers();
       this.clearStudyWait();
       this.roundClosed = true;
@@ -559,7 +579,7 @@ export class Match {
   }
 
   private async runDirectQuestionLoop(pool: ReturnType<typeof getPool>): Promise<void> {
-    while (!this.finished && this.countActive() > 1 && this.round < MAX_ROUNDS) {
+    while (!this.finished && this.hasEnoughActivePlayersForQuestions() && this.round < MAX_ROUNDS) {
       const q = await getRandomQuestion(
         pool,
         this.usedQuestionIds,
@@ -581,7 +601,7 @@ export class Match {
 
     while (
       !this.finished &&
-      this.countActive() > 1 &&
+      this.hasEnoughActivePlayersForQuestions() &&
       this.macroRound < this.maxStudyRounds
     ) {
       this.macroRound += 1;
@@ -623,7 +643,7 @@ export class Match {
       if (this.finished) return;
 
       for (const q of block) {
-        if (this.finished || this.countActive() <= 1 || this.round >= MAX_ROUNDS) {
+        if (this.finished || !this.hasEnoughActivePlayersForQuestions() || this.round >= MAX_ROUNDS) {
           return;
         }
         await this.playOneQuestion(pool, q);
@@ -701,7 +721,7 @@ export class Match {
     }, QUESTION_MS);
     await waitRound;
 
-    if (this.countActive() <= 1 && !this.finished) {
+    if (this.shouldDeclareWinnerForActiveCount() && !this.finished) {
       this.declareWinner();
     }
   }
@@ -829,7 +849,7 @@ export class Match {
     this.resolveRound?.();
     this.resolveRound = null;
 
-    if (this.countActive() <= 1) {
+    if (this.shouldDeclareWinnerForActiveCount()) {
       this.declareWinner();
     }
   }
@@ -903,6 +923,7 @@ export class Match {
   }
 
   tryAbilitySkillBoost(socketId: string): AbilityAck {
+    if (this.isSoloMatch) return { ok: false, error: "solo_abilities_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityEnabled("skill_boost")) return { ok: false, error: "ability_disabled" };
     const p = this.players.get(socketId);
@@ -918,6 +939,7 @@ export class Match {
   }
 
   tryAbilitySkipQuestion(socketId: string): AbilityAck {
+    if (this.isSoloMatch) return { ok: false, error: "solo_abilities_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityEnabled("skip")) return { ok: false, error: "ability_disabled" };
     const p = this.players.get(socketId);
@@ -935,6 +957,7 @@ export class Match {
   }
 
   tryAbilityHeartAttack(attackerId: string, victimId: string): AbilityAck {
+    if (this.isSoloMatch) return { ok: false, error: "solo_abilities_disabled" };
     if (!this.isAbilityEnabled("attack")) return { ok: false, error: "ability_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityWindowOpen()) return { ok: false, error: "question_closed" };
@@ -971,13 +994,14 @@ export class Match {
     });
     this.emitKeysRoomState();
 
-    if (this.countActive() <= 1 && !this.finished) {
+    if (this.shouldDeclareWinnerForActiveCount() && !this.finished) {
       this.declareWinner();
     }
     return { ok: true, keys: attacker.keys };
   }
 
   tryAbilityRevealKeys(socketId: string): AbilityAck {
+    if (this.isSoloMatch) return { ok: false, error: "solo_abilities_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityEnabled("reveal")) return { ok: false, error: "ability_disabled" };
     const p = this.players.get(socketId);

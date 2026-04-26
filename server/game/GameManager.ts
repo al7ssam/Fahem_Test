@@ -170,6 +170,75 @@ export class GameManager {
       }
     });
 
+    socket.on("start_solo_match", async (raw, cb) => {
+      try {
+        const parsed = joinLobbySchema.safeParse(raw);
+        if (!parsed.success) {
+          cb?.({ ok: false, error: "invalid_name" });
+          return;
+        }
+        const { name, mode } = parsed.data;
+        const difficultyMode = parsed.data.difficultyMode ?? "mix";
+        const subcategoryKey =
+          mode === "study_then_quiz"
+            ? String(parsed.data.subcategoryKey ?? "general_default").trim()
+            : null;
+
+        if (mode === "study_then_quiz") {
+          const key = subcategoryKey ?? "general_default";
+          const difficultyFilter = difficultyMode === "mix" ? null : difficultyMode;
+          const total = await countQuestionsBySubcategory(getPool(), key, true, difficultyFilter);
+          if (total < 30) {
+            cb?.({
+              ok: false,
+              error: "not_enough_questions",
+              message: difficultyMode === "mix"
+                ? "لا توجد أسئلة كافية في هذا التصنيف."
+                : "لا توجد أسئلة كافية في مستوى الصعوبة هذا داخل التصنيف. جرّب اختيار مزيج.",
+            });
+            return;
+          }
+        }
+
+        this.leaveMatchForSocket(socket.id);
+        this.leaveLobbyEverywhere(socket.id);
+
+        const matchId = randomUUID();
+        const match = new Match(
+          this.io,
+          matchId,
+          [{ socketId: socket.id, name }],
+          mode,
+          mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
+          difficultyMode,
+        );
+
+        await socket.join(match.room);
+        this.socketToMatch.set(socket.id, match);
+        this.runningMatches.set(matchId, match);
+        cb?.({ ok: true });
+
+        void (async () => {
+          try {
+            await match.run();
+          } finally {
+            this.socketToMatch.delete(socket.id);
+            const s = this.io.sockets.sockets.get(socket.id);
+            if (s) {
+              try {
+                await Promise.resolve(s.leave(match.room));
+              } catch {
+                /* ignore */
+              }
+            }
+            this.runningMatches.delete(matchId);
+          }
+        })();
+      } catch {
+        cb?.({ ok: false, error: "server" });
+      }
+    });
+
     socket.on("player_ready", (_payload, cb) => {
       const entry = this.findLobbyEntry(socket.id);
       if (!entry) {
