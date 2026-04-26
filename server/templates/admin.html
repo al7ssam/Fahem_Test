@@ -2580,10 +2580,20 @@
         }
         function applyModels(models, availableModels, defaultModel, defaultApiKeyEnv, availableReasoningLevels, defaultReasoningLevel, thinkingLevelSupportedModelIds) {
           thinkingLevelModelIds = Array.isArray(thinkingLevelSupportedModelIds) ? thinkingLevelSupportedModelIds : [];
+          var afModelFallback = [
+            "gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-2.0-flash-001", "gemini-2.0-flash-lite-001", "gemini-2.0-flash-lite",
+            "gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts", "gemma-3-1b-it", "gemma-3-4b-it", "gemma-3-12b-it", "gemma-3-27b-it",
+            "gemma-3n-e4b-it", "gemma-3n-e2b-it", "gemma-4-26b-a4b-it", "gemma-4-31b-it", "gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest",
+            "gemini-2.5-flash-lite", "gemini-2.5-flash-image", "gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools", "gemini-3.1-flash-lite-preview", "gemini-3-pro-image-preview", "nano-banana-pro-preview",
+            "gemini-3.1-flash-image-preview", "lyria-3-clip-preview", "lyria-3-pro-preview", "gemini-3.1-flash-tts-preview",
+            "gemini-robotics-er-1.5-preview", "gemini-robotics-er-1.6-preview", "gemini-2.5-computer-use-preview-10-2025",
+            "deep-research-max-preview-04-2026", "deep-research-preview-04-2026", "deep-research-pro-preview-12-2025"
+          ];
           var allowed = Array.isArray(availableModels) && availableModels.length
             ? availableModels
-            : ["gemini-3-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
-          var fallbackModel = String(defaultModel || "gemini-3-flash");
+            : afModelFallback;
+          var fallbackModel = String(defaultModel || "gemini-3-flash-preview");
           var allowedReasoning = Array.isArray(availableReasoningLevels) && availableReasoningLevels.length
             ? availableReasoningLevels
             : ["none", "low", "medium", "high"];
@@ -2670,7 +2680,7 @@
           return {
             layerName: layerName,
             provider: "gemini",
-            modelName: val("af-model-" + layerName) || "gemini-3-flash",
+            modelName: val("af-model-" + layerName) || "gemini-3-flash-preview",
             apiKeyEnv: val("af-key-env") || "GEMINI_API_KEY",
             temperature: layerNumeric("af-temp-" + layerName, 0.4),
             maxOutputTokens: Math.round(layerNumeric("af-max-tokens-" + layerName, 8192)),

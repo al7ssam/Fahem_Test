@@ -8,27 +8,67 @@ import { getPool } from "../../db/pool";
 import { sleep } from "./utils";
 import type { FactoryLayer, FactoryReasoningLevel, LayerModelConfig } from "./types";
 
-export const AI_FACTORY_AVAILABLE_MODELS = ["gemini-3-flash", "gemini-1.5-flash", "gemini-1.5-pro"] as const;
-export const AI_FACTORY_DEFAULT_MODEL = "gemini-3-flash";
+/**
+ * Model IDs supported for factory layers (must match ListModels + generateContent for your API key).
+ * Synchronized with `npm run list-gemini-models` (v1beta) — update when Google adds/removes endpoints.
+ */
+export const AI_FACTORY_AVAILABLE_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-001",
+  "gemini-2.0-flash-lite-001",
+  "gemini-2.0-flash-lite",
+  "gemini-2.5-flash-preview-tts",
+  "gemini-2.5-pro-preview-tts",
+  "gemma-3-1b-it",
+  "gemma-3-4b-it",
+  "gemma-3-12b-it",
+  "gemma-3-27b-it",
+  "gemma-3n-e4b-it",
+  "gemma-3n-e2b-it",
+  "gemma-4-26b-a4b-it",
+  "gemma-4-31b-it",
+  "gemini-flash-latest",
+  "gemini-flash-lite-latest",
+  "gemini-pro-latest",
+  "gemini-2.5-flash-lite",
+  "gemini-2.5-flash-image",
+  "gemini-3-pro-preview",
+  "gemini-3-flash-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-pro-preview-customtools",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3-pro-image-preview",
+  "nano-banana-pro-preview",
+  "gemini-3.1-flash-image-preview",
+  "lyria-3-clip-preview",
+  "lyria-3-pro-preview",
+  "gemini-3.1-flash-tts-preview",
+  "gemini-robotics-er-1.5-preview",
+  "gemini-robotics-er-1.6-preview",
+  "gemini-2.5-computer-use-preview-10-2025",
+  "deep-research-max-preview-04-2026",
+  "deep-research-preview-04-2026",
+  "deep-research-pro-preview-12-2025",
+] as const;
+export const AI_FACTORY_DEFAULT_MODEL = "gemini-3-flash-preview";
 export const AI_FACTORY_DEFAULT_API_KEY_ENV = "GEMINI_API_KEY";
 export const AI_FACTORY_AVAILABLE_REASONING_LEVELS = ["none", "low", "medium", "high"] as const;
 export const AI_FACTORY_DEFAULT_REASONING_LEVEL: FactoryReasoningLevel = "none";
 
 /**
- * Model IDs that support `thinkingLevel` inside `generationConfig.thinkingConfig` (Gemini 3+).
- * @see https://ai.google.dev/gemini-api/docs/thinking — "Thinking levels (Gemini 3)"
- * @see https://ai.google.dev/gemini-api/docs/gemini-3 — model table (IDs as published by Google)
- * Gemini 2.5+ use `thinkingBudget` instead; gemini-1.5-* does not use `thinkingLevel`.
+ * Models that use `generationConfig.thinkingConfig.thinkingLevel` (Gemini 3 family on `v1beta`).
+ * Only include IDs from ListModels that are general Gemini 3 text/multimodal; omit TTS-only / agents if they reject this field.
  */
 export const AI_FACTORY_THINKING_LEVEL_MODEL_IDS: readonly string[] = [
-  "gemini-3-flash",
-  "gemini-3-flash-preview",
   "gemini-3-pro-preview",
-  "gemini-3.1-flash-lite-preview",
-  "gemini-3.1-flash-image-preview",
+  "gemini-3-flash-preview",
   "gemini-3.1-pro-preview",
   "gemini-3.1-pro-preview-customtools",
+  "gemini-3.1-flash-lite-preview",
   "gemini-3-pro-image-preview",
+  "gemini-3.1-flash-image-preview",
 ];
 
 type ModelCallResult = {
