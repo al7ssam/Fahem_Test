@@ -42,6 +42,9 @@ let pendingJoinRoomCode = "";
 let privateRoomVersionState = 0;
 let privateReadyPending = false;
 let privateQrDataUrl: string | null = null;
+let privateEntryAutoJoinTried = false;
+let isPrivateRoomSession = false;
+let lastPrivateRoomCode: string | null = null;
 let categoriesState: Array<{
   id: number;
   mainKey: string;
@@ -409,6 +412,7 @@ function disconnectSearchSocket(): void {
   privateRoomVersionState = 0;
   privateReadyPending = false;
   privateQrDataUrl = null;
+  isPrivateRoomSession = false;
 }
 
 function returnToDifficultyFromSearch(): void {
@@ -426,6 +430,10 @@ function returnToHomeFromSearch(): void {
   selectedMainCategoryId = null;
   selectedSubcategoryKey = null;
   selectedSubcategoryLabel = null;
+  lastPrivateRoomCode = null;
+  isPrivateRoomSession = false;
+  pendingJoinRoomCode = "";
+  privateEntryAutoJoinTried = false;
   render();
 }
 
@@ -454,8 +462,9 @@ function render(): void {
   app.innerHTML = "";
 
   if (phase === "name") {
-    const renderModePicker = nameFlowStep === "mode";
-    const renderDifficultyPicker = nameFlowStep === "difficulty";
+    const isPrivateEntryFlow = Boolean(pendingJoinRoomCode);
+    const renderModePicker = !isPrivateEntryFlow && nameFlowStep === "mode";
+    const renderDifficultyPicker = !isPrivateEntryFlow && nameFlowStep === "difficulty";
     const selectedMain = categoriesState.find((c) => c.id === selectedMainCategoryId) ?? null;
     const subItems = selectedMain?.subcategories ?? [];
     const mainCards = categoriesState
@@ -502,7 +511,9 @@ function render(): void {
               <label class="block text-right text-sm text-slate-400">اسمك في اللعبة</label>
               <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="app-input w-full px-4 py-3 text-right text-lg" />
               <p class="text-sm text-slate-400 text-right m-0">${
-                renderModePicker
+                isPrivateEntryFlow
+                  ? `الانضمام للغرفة الخاصة (${pendingJoinRoomCode})`
+                  : renderModePicker
                   ? "اختر نمط اللعب"
                   : nameFlowStep === "main_categories"
                     ? "اختر التصنيف الرئيسي"
@@ -512,7 +523,13 @@ function render(): void {
               }</p>
               <div class="mode-picker-grid" role="group" aria-label="اختيارات">
                 ${
-                  renderModePicker
+                  isPrivateEntryFlow
+                    ? `
+                <div class="app-card p-3 text-right">
+                  <p class="text-sm text-slate-300 m-0">سيتم الانضمام مباشرة إلى الغرفة الخاصة عبر الرابط/الباركود.</p>
+                </div>
+                `
+                    : renderModePicker
                     ? `
                 <button type="button" class="mode-option-btn ${
                   selectedModeInName === "direct" ? "mode-option-btn--selected" : ""
@@ -538,12 +555,14 @@ function render(): void {
               </div>
               <div class="flex gap-2">
                 <button id="back-mode-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg ${
-                  renderModePicker ? "hidden" : ""
+                  renderModePicker || isPrivateEntryFlow ? "hidden" : ""
                 }">رجوع</button>
                 <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg ${
-                  renderModePicker || renderDifficultyPicker ? "" : "hidden"
+                  isPrivateEntryFlow || renderModePicker || renderDifficultyPicker ? "" : "hidden"
                 }">${
-                  renderModePicker || renderDifficultyPicker
+                  isPrivateEntryFlow
+                    ? "انضمام للغرفة"
+                    : renderModePicker || renderDifficultyPicker
                     ? "ابدأ التحدي"
                     : nameFlowStep === "main_categories"
                       ? "التالي"
@@ -551,9 +570,9 @@ function render(): void {
                 }</button>
               </div>
               <button id="solo-learning-btn" class="ui-btn ui-btn--primary w-full py-3 text-lg ${
-                renderDifficultyPicker ? "" : "hidden"
+                renderDifficultyPicker && !isPrivateEntryFlow ? "" : "hidden"
               }">التعلم الفردي</button>
-              <div class="${renderDifficultyPicker ? "space-y-2" : "hidden"}">
+              <div class="${renderDifficultyPicker && !isPrivateEntryFlow ? "space-y-2" : "hidden"}">
                 <button id="create-private-room-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg">إنشاء غرفة خاصة</button>
                 <div class="flex gap-2">
                   <input id="private-room-code-input" type="text" placeholder="كود الغرفة" class="app-input w-full px-3 py-2 text-right" />
@@ -667,6 +686,7 @@ function render(): void {
       });
     }
     backBtn?.addEventListener("click", () => {
+      if (isPrivateEntryFlow) return;
       if (nameFlowStep === "difficulty") {
         nameFlowStep = selectedModeInName === "direct" ? "mode" : "sub_categories";
       } else if (nameFlowStep === "sub_categories") {
@@ -687,6 +707,19 @@ function render(): void {
       btn.disabled = true;
       btn.classList.add("btn-pending");
       storePlayerName(name);
+      if (isPrivateEntryFlow) {
+        playerNameDraft = name;
+        phase = "matchmaking";
+        soloLearningPending = false;
+        privateRoomCodeState = pendingJoinRoomCode;
+        privateRoomInviteUrl = null;
+        privateEntryAutoJoinTried = true;
+        isPrivateRoomSession = true;
+        lobbyNotice = "جاري الانضمام للغرفة الخاصة...";
+        render();
+        connectSocket(name, "direct", null, "mix", "private_join", pendingJoinRoomCode);
+        return;
+      }
       if (nameFlowStep === "mode") {
         if (selectedModeInName === "direct") {
           nameFlowStep = "difficulty";
@@ -791,6 +824,8 @@ function render(): void {
       soloLearningPending = false;
       privateRoomCodeState = null;
       privateRoomInviteUrl = null;
+      privateQrDataUrl = null;
+      isPrivateRoomSession = true;
       lobbyNotice = "جاري إنشاء الغرفة الخاصة...";
       currentGameMode = selectedModeInName;
       render();
@@ -819,10 +854,30 @@ function render(): void {
       soloLearningPending = false;
       privateRoomCodeState = roomCode;
       privateRoomInviteUrl = null;
+      privateQrDataUrl = null;
+      isPrivateRoomSession = true;
+      lastPrivateRoomCode = roomCode;
       lobbyNotice = "جاري الانضمام للغرفة الخاصة...";
       render();
       connectSocket(name, selectedModeInName, null, selectedDifficultyMode, "private_join", roomCode);
     });
+    if (
+      isPrivateEntryFlow &&
+      storedName &&
+      !privateEntryAutoJoinTried
+    ) {
+      input.value = storedName;
+      playerNameDraft = storedName;
+      privateEntryAutoJoinTried = true;
+      phase = "matchmaking";
+      soloLearningPending = false;
+      privateRoomCodeState = pendingJoinRoomCode;
+      privateRoomInviteUrl = null;
+      isPrivateRoomSession = true;
+      lobbyNotice = "جاري الانضمام التلقائي للغرفة الخاصة...";
+      render();
+      connectSocket(storedName, "direct", null, "mix", "private_join", pendingJoinRoomCode);
+    }
     return;
   }
 
@@ -840,9 +895,9 @@ function render(): void {
             <div class="h-14 w-14 rounded-full border-4 border-amber-400/25 border-t-amber-400 animate-spin shrink-0" role="status" aria-label="جاري البحث"></div>
             <p id="mm-status" class="text-center text-slate-200 text-lg font-medium px-2 leading-relaxed"></p>
             <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem] max-w-md"></p>
-            <div class="${isPrivateLobby ? "w-full app-card p-4 space-y-3 text-right" : "hidden"}">
+            <div class="${isPrivateLobby ? "w-full app-card private-room-card p-4 space-y-3 text-right" : "hidden"}">
               <p class="text-sm text-slate-300 m-0">كود الغرفة: <b id="private-room-code">${privateRoomCodeState ?? ""}</b></p>
-              <div class="flex gap-2">
+              <div class="private-room-actions flex gap-2">
                 <button id="copy-private-link-btn" type="button" class="ui-btn ui-btn--ghost w-full py-2 text-sm">نسخ الرابط</button>
                 <button id="private-ready-btn" type="button" class="ui-btn ui-btn--cta w-full py-2 text-sm">جاهز</button>
               </div>
@@ -850,11 +905,13 @@ function render(): void {
               <div class="space-y-2 ${mySocketId && privateRoomHostSocketId === mySocketId ? "" : "hidden"}">
                 <label class="block text-xs text-slate-400">وقت السؤال (ثانية)</label>
                 <input id="private-question-ms-input" type="number" min="5" max="120" class="app-input w-full px-3 py-2 text-right" value="${Math.round(privateRoomQuestionMs / 1000)}" />
-                <label class="block text-xs text-slate-400">وقت بطاقات المذاكرة (ثانية)</label>
-                <input id="private-study-ms-input" type="number" min="10" max="300" class="app-input w-full px-3 py-2 text-right" value="${Math.round(privateRoomStudyPhaseMs / 1000)}" />
+                <div class="${currentGameMode === "study_then_quiz" ? "" : "hidden"}">
+                  <label class="block text-xs text-slate-400">وقت بطاقات المذاكرة (ثانية)</label>
+                  <input id="private-study-ms-input" type="number" min="10" max="300" class="app-input w-full px-3 py-2 text-right" value="${Math.round(privateRoomStudyPhaseMs / 1000)}" />
+                </div>
                 <button id="private-save-settings-btn" type="button" class="ui-btn ui-btn--primary w-full py-2 text-sm">حفظ إعدادات الوقت</button>
               </div>
-              <div id="private-players-list" class="text-sm text-slate-200"></div>
+              <div id="private-players-list" class="private-players-list text-sm text-slate-200"></div>
             </div>
             <div class="w-full flex flex-col sm:flex-row gap-3">
               <button id="cancel-search-btn" type="button" class="ui-btn ui-btn--ghost w-full py-3 text-base">إلغاء البحث</button>
@@ -872,7 +929,7 @@ function render(): void {
       const inviteUrl = privateRoomInviteUrl || `${window.location.origin}?room=${privateRoomCodeState}`;
       const qrImg = app.querySelector<HTMLImageElement>("#private-qr-img");
       if (qrImg) {
-        qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(inviteUrl)}`;
+        qrImg.src = privateQrDataUrl || "";
       }
       const playersEl = app.querySelector<HTMLDivElement>("#private-players-list");
       if (playersEl) {
@@ -880,9 +937,9 @@ function render(): void {
           .map((p) => {
             const isMe = mySocketId && p.socketId === mySocketId;
             const isHost = privateRoomHostSocketId && p.socketId === privateRoomHostSocketId;
-            return `<div class="flex items-center justify-between py-1 border-b border-white/10">
-              <span>${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}${isHost ? " 👑" : ""}</span>
-              <span class="${p.ready ? "text-emerald-300" : "text-slate-400"}">${p.ready ? "جاهز" : "غير جاهز"}</span>
+            return `<div class="private-player-row flex items-center justify-between py-2 px-2 border-b border-white/10">
+              <span class="private-player-name">${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}${isHost ? " 👑" : ""}</span>
+              <span class="private-player-ready ${p.ready ? "is-ready text-emerald-300" : "text-slate-400"}">${p.ready ? "جاهز" : "غير جاهز"}</span>
             </div>`;
           })
           .join("");
@@ -908,7 +965,8 @@ function render(): void {
       });
       app.querySelector<HTMLButtonElement>("#private-save-settings-btn")?.addEventListener("click", () => {
         const qSec = Number(app.querySelector<HTMLInputElement>("#private-question-ms-input")?.value ?? "15");
-        const sSec = Number(app.querySelector<HTMLInputElement>("#private-study-ms-input")?.value ?? "60");
+        const sSecDefault = Math.max(10, Math.round(privateRoomStudyPhaseMs / 1000));
+        const sSec = Number(app.querySelector<HTMLInputElement>("#private-study-ms-input")?.value ?? String(sSecDefault));
         socket?.emit("private_room_update_settings", { questionMs: qSec * 1000, studyPhaseMs: sSec * 1000 }, (ack?: { ok?: boolean; roomSettings?: { questionMs?: number; studyPhaseMs?: number } }) => {
           if (ack?.ok) {
             if (ack.roomSettings?.questionMs) privateRoomQuestionMs = ack.roomSettings.questionMs;
@@ -939,9 +997,9 @@ function render(): void {
             <span id="conn" class="text-xs px-2 py-1 rounded-full bg-white/10">…</span>
           </header>
           <p id="lobby-mode" class="text-right text-sm text-slate-400 mb-2"></p>
-          <div class="app-card p-4 space-y-3 text-right">
+          <div class="app-card private-room-card p-4 space-y-3 text-right">
             <p class="text-sm text-slate-300 m-0">كود الغرفة: <b id="private-room-code">${privateRoomCodeState ?? ""}</b></p>
-            <div class="flex gap-2">
+            <div class="private-room-actions flex gap-2">
               <button id="copy-private-link-btn" type="button" class="ui-btn ui-btn--ghost w-full py-2 text-sm">نسخ الرابط</button>
               <button id="private-ready-btn" type="button" class="ui-btn ui-btn--cta w-full py-2 text-sm">${privateReadyPending ? "جارٍ الإرسال..." : meReady ? "إلغاء الجاهزية" : "جاهز"}</button>
             </div>
@@ -950,11 +1008,13 @@ function render(): void {
             <div class="space-y-2 ${mySocketId && privateRoomHostSocketId === mySocketId ? "" : "hidden"}">
               <label class="block text-xs text-slate-400">وقت السؤال (ثانية)</label>
               <input id="private-question-ms-input" type="number" min="5" max="120" class="app-input w-full px-3 py-2 text-right" value="${Math.round(privateRoomQuestionMs / 1000)}" />
-              <label class="block text-xs text-slate-400">وقت بطاقات المذاكرة (ثانية)</label>
-              <input id="private-study-ms-input" type="number" min="10" max="300" class="app-input w-full px-3 py-2 text-right" value="${Math.round(privateRoomStudyPhaseMs / 1000)}" />
+              <div class="${currentGameMode === "study_then_quiz" ? "" : "hidden"}">
+                <label class="block text-xs text-slate-400">وقت بطاقات المذاكرة (ثانية)</label>
+                <input id="private-study-ms-input" type="number" min="10" max="300" class="app-input w-full px-3 py-2 text-right" value="${Math.round(privateRoomStudyPhaseMs / 1000)}" />
+              </div>
               <button id="private-save-settings-btn" type="button" class="ui-btn ui-btn--primary w-full py-2 text-sm">حفظ إعدادات الوقت</button>
             </div>
-            <div id="private-players-list" class="text-sm text-slate-200"></div>
+            <div id="private-players-list" class="private-players-list text-sm text-slate-200"></div>
           </div>
           <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem] max-w-md mt-4">${escapeHtml(lobbyNotice)}</p>
           <div class="w-full flex flex-col sm:flex-row gap-3 mt-2">
@@ -972,9 +1032,9 @@ function render(): void {
         .map((p) => {
           const isMe = mySocketId && p.socketId === mySocketId;
           const isHost = privateRoomHostSocketId && p.socketId === privateRoomHostSocketId;
-          return `<div class="flex items-center justify-between py-1 border-b border-white/10">
-            <span>${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}${isHost ? " 👑" : ""}</span>
-            <span class="${p.ready ? "text-emerald-300" : "text-slate-400"}">${p.ready ? "جاهز" : "غير جاهز"}</span>
+          return `<div class="private-player-row flex items-center justify-between py-2 px-2 border-b border-white/10">
+            <span class="private-player-name">${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}${isHost ? " 👑" : ""}</span>
+            <span class="private-player-ready ${p.ready ? "is-ready text-emerald-300" : "text-slate-400"}">${p.ready ? "جاهز" : "غير جاهز"}</span>
           </div>`;
         })
         .join("");
@@ -1007,7 +1067,8 @@ function render(): void {
     });
     app.querySelector<HTMLButtonElement>("#private-save-settings-btn")?.addEventListener("click", () => {
       const qSec = Number(app.querySelector<HTMLInputElement>("#private-question-ms-input")?.value ?? "15");
-      const sSec = Number(app.querySelector<HTMLInputElement>("#private-study-ms-input")?.value ?? "60");
+      const sSecDefault = Math.max(10, Math.round(privateRoomStudyPhaseMs / 1000));
+      const sSec = Number(app.querySelector<HTMLInputElement>("#private-study-ms-input")?.value ?? String(sSecDefault));
       socket?.emit("private_room_update_settings", { questionMs: qSec * 1000, studyPhaseMs: sSec * 1000 }, (ack?: { ok?: boolean; roomSettings?: { questionMs?: number; studyPhaseMs?: number } }) => {
         if (ack?.ok) {
           if (ack.roomSettings?.questionMs) privateRoomQuestionMs = ack.roomSettings.questionMs;
@@ -1155,6 +1216,7 @@ function render(): void {
   }
 
   if (phase === "result") {
+    const showPrivateRoomActions = isPrivateRoomSession && Boolean(lastPrivateRoomCode);
     app.append(
       el(`
         <div id="result-screen" class="result-screen result-screen--empty min-h-screen text-white p-6 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full gap-5">
@@ -1182,7 +1244,11 @@ function render(): void {
           <button id="continue-watch" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base hidden">متابعة الجولة كمشاهد</button>
           <div id="res-leaderboard" class="w-full text-right"></div>
           <div id="res-stats" class="result-screen__stats hidden"></div>
-          <button id="again" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-lg">العب مجدداً</button>
+          <div class="${showPrivateRoomActions ? "w-full flex flex-col sm:flex-row gap-3" : "hidden"}">
+            <button id="back-private-room" type="button" class="result-screen__again ui-btn ui-btn--cta w-full py-3 text-base">العودة للغرفة الخاصة</button>
+            <button id="go-home-from-result" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base">الصفحة الرئيسية</button>
+          </div>
+          <button id="again" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-lg ${showPrivateRoomActions ? "hidden" : ""}">العب مجدداً</button>
         </div>
       `),
     );
@@ -1214,6 +1280,31 @@ function render(): void {
       studyCards = [];
       lobbyPlayersList = [];
       render();
+    });
+    const backPrivateRoomBtn = app.querySelector<HTMLButtonElement>("#back-private-room");
+    backPrivateRoomBtn?.addEventListener("click", () => {
+      const roomCode = lastPrivateRoomCode;
+      if (!roomCode) return;
+      const name = (playerNameDraft || getStoredPlayerName()).trim();
+      if (!name) {
+        phase = "name";
+        pendingJoinRoomCode = roomCode;
+        privateEntryAutoJoinTried = false;
+        render();
+        const errEl = document.querySelector<HTMLParagraphElement>("#join-err");
+        if (errEl) errEl.textContent = "أدخل الاسم للعودة إلى الغرفة الخاصة.";
+        return;
+      }
+      phase = "matchmaking";
+      privateRoomCodeState = roomCode;
+      privateRoomInviteUrl = `${window.location.origin}?room=${roomCode}`;
+      lobbyNotice = "جاري العودة إلى الغرفة الخاصة...";
+      privateReadyPending = false;
+      render();
+      connectSocket(name, "direct", null, "mix", "private_join", roomCode);
+    });
+    app.querySelector<HTMLButtonElement>("#go-home-from-result")?.addEventListener("click", () => {
+      returnToHomeFromSearch();
     });
   }
 }
@@ -1775,6 +1866,10 @@ function connectSocket(
   socket?.disconnect();
 
   currentGameMode = mode;
+  if (joinKind === "public" || joinKind === "solo") {
+    isPrivateRoomSession = false;
+    lastPrivateRoomCode = null;
+  }
 
   const s = io({
     path: "/socket.io",
@@ -1799,6 +1894,7 @@ function connectSocket(
       privateRoomVersionState = 0;
       privateQrDataUrl = null;
       privateReadyPending = false;
+      isPrivateRoomSession = false;
     }
     phase = "name";
     render();
@@ -1911,6 +2007,11 @@ function connectSocket(
         if (ack.mode) currentGameMode = ack.mode;
         if (ack.subcategoryKey !== undefined) selectedSubcategoryKey = ack.subcategoryKey;
         if (ack.difficultyMode) selectedDifficultyMode = ack.difficultyMode;
+        if (ack.roomCode) lastPrivateRoomCode = ack.roomCode;
+        isPrivateRoomSession = true;
+        if (privateRoomInviteUrl) {
+          void ensurePrivateQrDataUrl(privateRoomInviteUrl);
+        }
       }
       console.debug("[join-flow] connect->join_ack_ms", Math.round(performance.now() - joinFlowStartMs));
       if (phase !== "matchmaking" && phase !== "private_room_lobby") {
@@ -1971,6 +2072,8 @@ function connectSocket(
       privateReadyPending = false;
       const inviteUrl = `${window.location.origin}?room=${payload.roomCode}`;
       privateRoomInviteUrl = inviteUrl;
+      lastPrivateRoomCode = payload.roomCode;
+      isPrivateRoomSession = true;
       await ensurePrivateQrDataUrl(inviteUrl);
       if (phase !== "countdown") {
         phase = "private_room_lobby";
@@ -2766,7 +2869,8 @@ function startStudyTimer(): void {
 
 pendingJoinRoomCode = getRoomCodeFromUrl() ?? "";
 if (pendingJoinRoomCode) {
-  nameFlowStep = "difficulty";
+  nameFlowStep = "mode";
+  privateEntryAutoJoinTried = false;
 }
 render();
 startReleaseVersionWatch();

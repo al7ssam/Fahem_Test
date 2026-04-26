@@ -791,9 +791,42 @@ export class GameManager {
           } catch {
             /* ignore */
           }
+          if (s.connected && this.privateRooms.has(roomCode)) {
+            const restoredEntry: LobbyEntry = {
+              socketId: p.socketId,
+              name: p.name,
+              ready: false,
+              readyOrder: null,
+              mode: room.mode,
+              subcategoryKey: room.subcategoryKey,
+              difficultyMode: room.difficultyMode,
+              roomCode,
+            };
+            room.members.set(p.socketId, restoredEntry);
+            this.socketToPrivateRoomCode.set(p.socketId, roomCode);
+            try {
+              await Promise.resolve(s.join(this.privateLobbyRoom(roomCode)));
+            } catch {
+              /* ignore */
+            }
+          }
         }
       }
+      room.lockedParticipants = [];
+      room.countdownEndsAt = null;
+      if (!room.members.has(room.hostSocketId)) {
+        const nextHost = room.members.keys().next().value as string | undefined;
+        if (nextHost) {
+          room.hostSocketId = nextHost;
+        } else {
+          this.privateRooms.delete(roomCode);
+          this.runningMatches.delete(matchId);
+          return;
+        }
+      }
+      room.roomVersion += 1;
       this.runningMatches.delete(matchId);
+      this.emitPrivateLobbyState(roomCode);
     }
   }
 

@@ -50,6 +50,46 @@ body {
   backdrop-filter: blur(6px);
 }
 
+.private-room-card {
+  background: linear-gradient(155deg, rgba(17, 25, 48, 0.95), rgba(9, 16, 35, 0.92));
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+.private-room-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.private-players-list {
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(7, 13, 28, 0.55);
+  overflow: hidden;
+}
+
+.private-player-row {
+  transition: background 0.16s ease;
+}
+
+.private-player-row:hover {
+  background: rgba(148, 163, 184, 0.09);
+}
+
+.private-player-name {
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.private-player-ready {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.private-player-ready.is-ready {
+  text-shadow: 0 0 14px rgba(52, 211, 153, 0.34);
+}
+
 .app-input {
   border-radius: 0.9rem;
   background: rgba(8, 15, 32, 0.92);
