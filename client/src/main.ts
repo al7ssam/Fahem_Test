@@ -1,11 +1,13 @@
 import "./style.css";
 import { io, type Socket } from "socket.io-client";
+import { toDataURL as qrToDataURL } from "qrcode";
 
 type GameMode = "direct" | "study_then_quiz";
 type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 type Phase =
   | "name"
   | "matchmaking"
+  | "private_room_lobby"
   | "countdown"
   | "studying"
   | "playing"
@@ -37,6 +39,9 @@ let privateRoomInviteUrl: string | null = null;
 let privateRoomQuestionMs = 15_000;
 let privateRoomStudyPhaseMs = 60_000;
 let pendingJoinRoomCode = "";
+let privateRoomVersionState = 0;
+let privateReadyPending = false;
+let privateQrDataUrl: string | null = null;
 let categoriesState: Array<{
   id: number;
   mainKey: string;
@@ -200,6 +205,18 @@ function getRoomCodeFromUrl(): string | null {
     return code.length > 0 ? code : null;
   } catch {
     return null;
+  }
+}
+
+async function ensurePrivateQrDataUrl(inviteUrl: string): Promise<void> {
+  try {
+    privateQrDataUrl = await qrToDataURL(inviteUrl, {
+      width: 220,
+      margin: 1,
+      errorCorrectionLevel: "M",
+    });
+  } catch {
+    privateQrDataUrl = null;
   }
 }
 
@@ -389,6 +406,9 @@ function disconnectSearchSocket(): void {
   privateRoomCodeState = null;
   privateRoomHostSocketId = null;
   privateRoomInviteUrl = null;
+  privateRoomVersionState = 0;
+  privateReadyPending = false;
+  privateQrDataUrl = null;
 }
 
 function returnToDifficultyFromSearch(): void {
@@ -767,7 +787,7 @@ function render(): void {
         return;
       }
       storePlayerName(name);
-      phase = "matchmaking";
+      phase = "private_room_lobby";
       soloLearningPending = false;
       privateRoomCodeState = null;
       privateRoomInviteUrl = null;
@@ -905,6 +925,102 @@ function render(): void {
     app.querySelector<HTMLButtonElement>("#cancel-search-btn")?.addEventListener("click", returnToDifficultyFromSearch);
     app.querySelector<HTMLButtonElement>("#home-search-btn")?.addEventListener("click", returnToHomeFromSearch);
     syncMatchmakingStatusText();
+    return;
+  }
+
+  if (phase === "private_room_lobby") {
+    const inviteUrl = privateRoomInviteUrl || `${window.location.origin}?room=${privateRoomCodeState ?? ""}`;
+    const meReady = Boolean(lobbyPlayersList.find((p) => p.socketId === mySocketId)?.ready);
+    app.append(
+      el(`
+        <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full">
+          <header class="flex items-center justify-between py-4">
+            <h1 class="text-2xl font-extrabold text-amber-300">فاهم</h1>
+            <span id="conn" class="text-xs px-2 py-1 rounded-full bg-white/10">…</span>
+          </header>
+          <p id="lobby-mode" class="text-right text-sm text-slate-400 mb-2"></p>
+          <div class="app-card p-4 space-y-3 text-right">
+            <p class="text-sm text-slate-300 m-0">كود الغرفة: <b id="private-room-code">${privateRoomCodeState ?? ""}</b></p>
+            <div class="flex gap-2">
+              <button id="copy-private-link-btn" type="button" class="ui-btn ui-btn--ghost w-full py-2 text-sm">نسخ الرابط</button>
+              <button id="private-ready-btn" type="button" class="ui-btn ui-btn--cta w-full py-2 text-sm">${privateReadyPending ? "جارٍ الإرسال..." : meReady ? "إلغاء الجاهزية" : "جاهز"}</button>
+            </div>
+            <img id="private-qr-img" class="w-40 h-40 mx-auto rounded-lg bg-white p-2" alt="QR الغرفة" />
+            <p class="text-xs text-slate-400 break-all">${escapeHtml(inviteUrl)}</p>
+            <div class="space-y-2 ${mySocketId && privateRoomHostSocketId === mySocketId ? "" : "hidden"}">
+              <label class="block text-xs text-slate-400">وقت السؤال (ثانية)</label>
+              <input id="private-question-ms-input" type="number" min="5" max="120" class="app-input w-full px-3 py-2 text-right" value="${Math.round(privateRoomQuestionMs / 1000)}" />
+              <label class="block text-xs text-slate-400">وقت بطاقات المذاكرة (ثانية)</label>
+              <input id="private-study-ms-input" type="number" min="10" max="300" class="app-input w-full px-3 py-2 text-right" value="${Math.round(privateRoomStudyPhaseMs / 1000)}" />
+              <button id="private-save-settings-btn" type="button" class="ui-btn ui-btn--primary w-full py-2 text-sm">حفظ إعدادات الوقت</button>
+            </div>
+            <div id="private-players-list" class="text-sm text-slate-200"></div>
+          </div>
+          <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem] max-w-md mt-4">${escapeHtml(lobbyNotice)}</p>
+          <div class="w-full flex flex-col sm:flex-row gap-3 mt-2">
+            <button id="cancel-search-btn" type="button" class="ui-btn ui-btn--ghost w-full py-3 text-base">إلغاء البحث</button>
+            <button id="home-search-btn" type="button" class="ui-btn ui-btn--primary w-full py-3 text-base">الصفحة الرئيسية</button>
+          </div>
+        </div>
+      `),
+    );
+    updateConnectionBadge();
+    updateLobbyModeLabel();
+    const playersEl = app.querySelector<HTMLDivElement>("#private-players-list");
+    if (playersEl) {
+      playersEl.innerHTML = lobbyPlayersList
+        .map((p) => {
+          const isMe = mySocketId && p.socketId === mySocketId;
+          const isHost = privateRoomHostSocketId && p.socketId === privateRoomHostSocketId;
+          return `<div class="flex items-center justify-between py-1 border-b border-white/10">
+            <span>${escapeHtml(p.name)}${isMe ? " (أنت)" : ""}${isHost ? " 👑" : ""}</span>
+            <span class="${p.ready ? "text-emerald-300" : "text-slate-400"}">${p.ready ? "جاهز" : "غير جاهز"}</span>
+          </div>`;
+        })
+        .join("");
+    }
+    const qrImg = app.querySelector<HTMLImageElement>("#private-qr-img");
+    if (qrImg) qrImg.src = privateQrDataUrl || "";
+    app.querySelector<HTMLButtonElement>("#copy-private-link-btn")?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(inviteUrl);
+        lobbyNotice = "تم نسخ رابط الغرفة.";
+      } catch {
+        lobbyNotice = "تعذر نسخ الرابط.";
+      }
+      const n = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+      if (n) n.textContent = lobbyNotice;
+    });
+    app.querySelector<HTMLButtonElement>("#private-ready-btn")?.addEventListener("click", () => {
+      if (privateReadyPending) return;
+      const me = lobbyPlayersList.find((p) => p.socketId === mySocketId);
+      const nextReady = !Boolean(me?.ready);
+      privateReadyPending = true;
+      render();
+      socket?.emit("private_room_set_ready", { ready: nextReady }, (ack?: { ok?: boolean }) => {
+        privateReadyPending = false;
+        if (!ack?.ok) {
+          lobbyNotice = "تعذر تغيير حالة الجاهزية.";
+        }
+        render();
+      });
+    });
+    app.querySelector<HTMLButtonElement>("#private-save-settings-btn")?.addEventListener("click", () => {
+      const qSec = Number(app.querySelector<HTMLInputElement>("#private-question-ms-input")?.value ?? "15");
+      const sSec = Number(app.querySelector<HTMLInputElement>("#private-study-ms-input")?.value ?? "60");
+      socket?.emit("private_room_update_settings", { questionMs: qSec * 1000, studyPhaseMs: sSec * 1000 }, (ack?: { ok?: boolean; roomSettings?: { questionMs?: number; studyPhaseMs?: number } }) => {
+        if (ack?.ok) {
+          if (ack.roomSettings?.questionMs) privateRoomQuestionMs = ack.roomSettings.questionMs;
+          if (ack.roomSettings?.studyPhaseMs) privateRoomStudyPhaseMs = ack.roomSettings.studyPhaseMs;
+          lobbyNotice = "تم حفظ إعدادات الوقت.";
+        } else {
+          lobbyNotice = "تعذر حفظ الإعدادات.";
+        }
+        render();
+      });
+    });
+    app.querySelector<HTMLButtonElement>("#cancel-search-btn")?.addEventListener("click", returnToDifficultyFromSearch);
+    app.querySelector<HTMLButtonElement>("#home-search-btn")?.addEventListener("click", returnToHomeFromSearch);
     return;
   }
 
@@ -1680,6 +1796,9 @@ function connectSocket(
       privateRoomCodeState = null;
       privateRoomHostSocketId = null;
       privateRoomInviteUrl = null;
+      privateRoomVersionState = 0;
+      privateQrDataUrl = null;
+      privateReadyPending = false;
     }
     phase = "name";
     render();
@@ -1717,7 +1836,7 @@ function connectSocket(
     mySocketId = s.id ?? null;
     console.debug("[join-flow] click->connect_ms", Math.round(performance.now() - joinFlowStartMs));
     const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
-    if (noticeEl && phase === "matchmaking") {
+    if (noticeEl && (phase === "matchmaking" || phase === "private_room_lobby")) {
       noticeEl.textContent = joinKind === "solo"
         ? "تم الاتصال بالخادم. جاري تجهيز التعلم الفردي..."
         : joinKind === "private_create"
@@ -1752,7 +1871,19 @@ function connectSocket(
     s.emit(
       eventName,
       payload,
-      (ack: { ok?: boolean; error?: string; message?: string; roomCode?: string; inviteUrl?: string; hostSocketId?: string; roomSettings?: { questionMs?: number; studyPhaseMs?: number } }) => {
+      (ack: {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        roomCode?: string;
+        inviteUrl?: string;
+        hostSocketId?: string;
+        mode?: GameMode;
+        subcategoryKey?: string | null;
+        difficultyMode?: DifficultyMode;
+        roomVersion?: number;
+        roomSettings?: { questionMs?: number; studyPhaseMs?: number };
+      }) => {
       if (flowToken !== searchFlowToken) return;
       if (joinAckTimer) {
         window.clearTimeout(joinAckTimer);
@@ -1774,12 +1905,18 @@ function connectSocket(
         if (ack.roomCode) privateRoomCodeState = ack.roomCode;
         if (ack.inviteUrl) privateRoomInviteUrl = ack.inviteUrl;
         if (ack.hostSocketId) privateRoomHostSocketId = ack.hostSocketId;
+        if (typeof ack.roomVersion === "number") privateRoomVersionState = ack.roomVersion;
         if (ack.roomSettings?.questionMs) privateRoomQuestionMs = ack.roomSettings.questionMs;
         if (ack.roomSettings?.studyPhaseMs) privateRoomStudyPhaseMs = ack.roomSettings.studyPhaseMs;
+        if (ack.mode) currentGameMode = ack.mode;
+        if (ack.subcategoryKey !== undefined) selectedSubcategoryKey = ack.subcategoryKey;
+        if (ack.difficultyMode) selectedDifficultyMode = ack.difficultyMode;
       }
       console.debug("[join-flow] connect->join_ack_ms", Math.round(performance.now() - joinFlowStartMs));
-      if (phase !== "matchmaking") {
-        phase = "matchmaking";
+      if (phase !== "matchmaking" && phase !== "private_room_lobby") {
+        phase = joinKind === "private_create" || joinKind === "private_join"
+          ? "private_room_lobby"
+          : "matchmaking";
         render();
       } else {
         const noticeEl2 = app.querySelector<HTMLParagraphElement>("#lobby-notice");
@@ -1807,6 +1944,49 @@ function connectSocket(
   });
 
   s.on(
+    "private_room_state",
+    async (payload: {
+      roomCode: string;
+      hostSocketId: string;
+      mode: GameMode;
+      subcategoryKey: string | null;
+      difficultyMode: DifficultyMode;
+      roomVersion: number;
+      players: Array<{ socketId: string; name: string; ready: boolean }>;
+      isStarting: boolean;
+      participantSocketIds: string[];
+      countdownSecondsRemaining?: number;
+      roomSettings: { questionMs: number; studyPhaseMs: number };
+    }) => {
+      if (payload.roomVersion < privateRoomVersionState) return;
+      privateRoomVersionState = payload.roomVersion;
+      privateRoomCodeState = payload.roomCode;
+      privateRoomHostSocketId = payload.hostSocketId;
+      currentGameMode = payload.mode;
+      selectedSubcategoryKey = payload.subcategoryKey;
+      selectedDifficultyMode = payload.difficultyMode;
+      privateRoomQuestionMs = payload.roomSettings.questionMs;
+      privateRoomStudyPhaseMs = payload.roomSettings.studyPhaseMs;
+      lobbyPlayersList = payload.players;
+      privateReadyPending = false;
+      const inviteUrl = `${window.location.origin}?room=${payload.roomCode}`;
+      privateRoomInviteUrl = inviteUrl;
+      await ensurePrivateQrDataUrl(inviteUrl);
+      if (phase !== "countdown") {
+        phase = "private_room_lobby";
+      }
+      if (
+        payload.isStarting &&
+        mySocketId &&
+        payload.participantSocketIds.includes(mySocketId)
+      ) {
+        phase = "countdown";
+      }
+      render();
+    },
+  );
+
+  s.on(
     "lobby_state",
     (payload: {
       mode?: GameMode;
@@ -1823,14 +2003,9 @@ function connectSocket(
         studyPhaseMs?: number;
       };
     }) => {
-      if (phase !== "matchmaking" && phase !== "countdown") return;
+      if (phase !== "matchmaking" && phase !== "countdown" && phase !== "private_room_lobby") return;
+      if (payload.isPrivate) return;
       if (payload.mode) currentGameMode = payload.mode;
-      if (payload.isPrivate) {
-        privateRoomCodeState = payload.roomCode ?? privateRoomCodeState;
-        privateRoomHostSocketId = payload.hostSocketId ?? privateRoomHostSocketId;
-        if (payload.roomSettings?.questionMs) privateRoomQuestionMs = payload.roomSettings.questionMs;
-        if (payload.roomSettings?.studyPhaseMs) privateRoomStudyPhaseMs = payload.roomSettings.studyPhaseMs;
-      }
       currentMatchPlayers = payload.players.map((p) => ({
         socketId: p.socketId,
         name: p.name,
@@ -1859,7 +2034,7 @@ function connectSocket(
       }
 
       if (
-        phase === "matchmaking" &&
+        (phase === "matchmaking" || phase === "private_room_lobby") &&
         payload.isStarting &&
         mySocketId &&
         participants.length > 0 &&
@@ -1873,7 +2048,7 @@ function connectSocket(
           Math.max(1, payload.countdownSecondsRemaining ?? DEFAULT_LOBBY_COUNTDOWN_SEC),
         );
       } else if (
-        phase === "matchmaking" &&
+        (phase === "matchmaking" || phase === "private_room_lobby") &&
         payload.isStarting &&
         mySocketId &&
         participants.length > 0 &&
@@ -1883,7 +2058,7 @@ function connectSocket(
       }
 
       lobbyPlayersList = payload.players;
-      if (phase === "matchmaking") {
+      if (phase === "matchmaking" || phase === "private_room_lobby") {
         syncMatchmakingStatusText();
         const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
         if (noticeEl) noticeEl.textContent = lobbyNotice;
@@ -1906,7 +2081,7 @@ function connectSocket(
         }
         phase = "matchmaking";
         render();
-      } else if (phase === "matchmaking") {
+      } else if (phase === "matchmaking" || phase === "private_room_lobby") {
         render();
       }
       return;
@@ -1915,7 +2090,7 @@ function connectSocket(
       startCountdownTicks(Math.max(1, payload.seconds));
       return;
     }
-    if (phase !== "matchmaking") return;
+    if (phase !== "matchmaking" && phase !== "private_room_lobby") return;
     lobbyNotice = "";
     phase = "countdown";
     render();
@@ -1934,7 +2109,7 @@ function connectSocket(
       payload?.reason === "not_enough_questions"
         ? payload.message || "لا توجد أسئلة كافية في مستوى الصعوبة هذا أو هذا التصنيف."
         : LOBBY_MSG_CANCELLED;
-    if (phase === "matchmaking") render();
+    if (phase === "matchmaking" || phase === "private_room_lobby") render();
   });
 
   s.on(
@@ -2590,5 +2765,8 @@ function startStudyTimer(): void {
 }
 
 pendingJoinRoomCode = getRoomCodeFromUrl() ?? "";
+if (pendingJoinRoomCode) {
+  nameFlowStep = "difficulty";
+}
 render();
 startReleaseVersionWatch();

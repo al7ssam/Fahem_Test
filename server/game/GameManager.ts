@@ -75,6 +75,24 @@ type PrivateRoomState = {
   lockedParticipants: string[];
   countdownEndsAt: number | null;
   matchStartTimer: ReturnType<typeof setTimeout> | null;
+  roomVersion: number;
+};
+
+type PrivateRoomStatePayload = {
+  roomCode: string;
+  hostSocketId: string;
+  mode: GameMode;
+  subcategoryKey: string | null;
+  difficultyMode: DifficultyMode;
+  roomVersion: number;
+  players: Array<{ socketId: string; name: string; ready: boolean }>;
+  isStarting: boolean;
+  participantSocketIds: string[];
+  countdownSecondsRemaining?: number;
+  roomSettings: {
+    questionMs: number;
+    studyPhaseMs: number;
+  };
 };
 
 export class GameManager {
@@ -213,7 +231,28 @@ export class GameManager {
         studyPhaseMs: room.settings.studyPhaseMs,
       },
     };
+    const privatePayload: PrivateRoomStatePayload = {
+      roomCode: room.roomCode,
+      hostSocketId: room.hostSocketId,
+      mode: room.mode,
+      subcategoryKey: room.subcategoryKey,
+      difficultyMode: room.difficultyMode,
+      roomVersion: room.roomVersion,
+      players: [...room.members.values()].map((p) => ({
+        socketId: p.socketId,
+        name: p.name,
+        ready: p.ready,
+      })),
+      isStarting: Boolean(room.matchStartTimer),
+      participantSocketIds: [...room.lockedParticipants],
+      countdownSecondsRemaining,
+      roomSettings: {
+        questionMs: room.settings.questionMs,
+        studyPhaseMs: room.settings.studyPhaseMs,
+      },
+    };
     this.io.to(this.privateLobbyRoom(roomCode)).emit("lobby_state", payload);
+    this.io.to(this.privateLobbyRoom(roomCode)).emit("private_room_state", privatePayload);
   }
 
   attachSocket(socket: Socket): void {
@@ -296,6 +335,7 @@ export class GameManager {
           lockedParticipants: [],
           countdownEndsAt: null,
           matchStartTimer: null,
+          roomVersion: 1,
         };
         this.privateRooms.set(roomCode, room);
         this.socketToPrivateRoomCode.set(socket.id, roomCode);
@@ -303,7 +343,17 @@ export class GameManager {
         this.emitPrivateLobbyState(roomCode);
         const origin = String((raw as { origin?: unknown }).origin ?? "").trim();
         const inviteUrl = origin ? `${origin}?room=${roomCode}` : `?room=${roomCode}`;
-        cb?.({ ok: true, roomCode, inviteUrl, hostSocketId: socket.id });
+        cb?.({
+          ok: true,
+          roomCode,
+          inviteUrl,
+          hostSocketId: socket.id,
+          mode,
+          subcategoryKey,
+          difficultyMode: d.difficultyMode ?? "mix",
+          roomSettings: settings,
+          roomVersion: room.roomVersion,
+        });
       } catch {
         cb?.({ ok: false, error: "server" });
       }
@@ -336,6 +386,7 @@ export class GameManager {
           roomCode,
         };
         room.members.set(socket.id, entry);
+        room.roomVersion += 1;
         this.socketToPrivateRoomCode.set(socket.id, roomCode);
         await socket.join(this.privateLobbyRoom(roomCode));
         this.emitPrivateLobbyState(roomCode);
@@ -347,6 +398,7 @@ export class GameManager {
           subcategoryKey: room.subcategoryKey,
           difficultyMode: room.difficultyMode,
           roomSettings: room.settings,
+          roomVersion: room.roomVersion,
         });
       } catch {
         cb?.({ ok: false, error: "server" });
@@ -376,8 +428,9 @@ export class GameManager {
       const sRaw = Number((raw as { studyPhaseMs?: unknown }).studyPhaseMs ?? room.settings.studyPhaseMs);
       room.settings.questionMs = Math.min(120_000, Math.max(5_000, Number.isFinite(qRaw) ? qRaw : room.settings.questionMs));
       room.settings.studyPhaseMs = Math.min(300_000, Math.max(10_000, Number.isFinite(sRaw) ? sRaw : room.settings.studyPhaseMs));
+      room.roomVersion += 1;
       this.emitPrivateLobbyState(roomCode);
-      cb?.({ ok: true, roomSettings: room.settings });
+      cb?.({ ok: true, roomSettings: room.settings, roomVersion: room.roomVersion });
     });
 
     socket.on("private_room_set_ready", async (raw, cb) => {
@@ -398,8 +451,19 @@ export class GameManager {
       }
       const ready = Boolean((raw as { ready?: unknown }).ready);
       entry.ready = ready;
+      if (room.matchStartTimer && ![...room.members.values()].every((m) => m.ready)) {
+        clearTimeout(room.matchStartTimer);
+        room.matchStartTimer = null;
+        room.countdownEndsAt = null;
+        room.lockedParticipants = [];
+        this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+          reason: "not_all_ready",
+          message: "تم إلغاء البدء لأن أحد اللاعبين ألغى الجاهزية.",
+        });
+      }
+      room.roomVersion += 1;
       this.emitPrivateLobbyState(roomCode);
-      cb?.({ ok: true });
+      cb?.({ ok: true, ready, roomVersion: room.roomVersion });
       await this.tryStartPrivateRoom(roomCode);
     });
 
@@ -618,11 +682,13 @@ export class GameManager {
     if (!room) return;
     room.members.delete(socketId);
     room.lockedParticipants = room.lockedParticipants.filter((id) => id !== socketId);
+    room.roomVersion += 1;
     void this.io.sockets.sockets.get(socketId)?.leave(this.privateLobbyRoom(roomCode));
     if (room.hostSocketId === socketId) {
       const nextHost = room.members.keys().next().value as string | undefined;
       if (nextHost) {
         room.hostSocketId = nextHost;
+      room.roomVersion += 1;
       } else {
         if (room.matchStartTimer) {
           clearTimeout(room.matchStartTimer);
@@ -659,6 +725,7 @@ export class GameManager {
     }
     room.lockedParticipants = members.map((m) => m.socketId);
     room.countdownEndsAt = Date.now() + (this.matchFillWindowSeconds * 1000);
+    room.roomVersion += 1;
     this.io.to(this.privateLobbyRoom(roomCode)).emit("match_starting", {
       seconds: Math.max(1, Math.ceil((room.countdownEndsAt - Date.now()) / 1000)),
       participantSocketIds: room.lockedParticipants,
@@ -667,6 +734,7 @@ export class GameManager {
     room.matchStartTimer = setTimeout(() => {
       room.matchStartTimer = null;
       room.countdownEndsAt = null;
+      room.roomVersion += 1;
       void this.startPrivateRoomMatch(roomCode);
     }, this.matchFillWindowSeconds * 1000);
   }
@@ -680,6 +748,7 @@ export class GameManager {
       .filter((p) => Boolean(this.io.sockets.sockets.get(p.socketId)?.connected && p.ready));
     if (participants.length < 1) {
       room.lockedParticipants = [];
+      room.roomVersion += 1;
       this.emitPrivateLobbyState(roomCode);
       return;
     }
@@ -707,6 +776,7 @@ export class GameManager {
       }
     }));
     room.lockedParticipants = [];
+    room.roomVersion += 1;
     this.runningMatches.set(matchId, match);
     this.emitPrivateLobbyState(roomCode);
     try {
