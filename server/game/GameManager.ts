@@ -10,6 +10,7 @@ const joinLobbySchema = z.object({
   mode: z.enum(["direct", "study_then_quiz"]).default("direct"),
   subcategoryKey: z.string().trim().min(1).max(120).optional(),
   difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
+  playerSessionId: z.string().trim().min(1).max(120).optional(),
 });
 
 const answerSchema = z.object({
@@ -27,6 +28,7 @@ const MATCH_SETTINGS_CACHE_MS = 15_000;
 
 type LobbyEntry = {
   socketId: string;
+  playerSessionId: string;
   name: string;
   ready: boolean;
   readyOrder: number | null;
@@ -125,6 +127,8 @@ export class GameManager {
     study_then_quiz: Promise.resolve(),
   };
   private readonly socketToMatch = new Map<string, Match>();
+  private readonly socketToPlayerSessionId = new Map<string, string>();
+  private readonly playerSessionToMatch = new Map<string, Match>();
   private readonly runningMatches = new Map<string, Match>();
   private readonly lockedParticipants: Record<GameMode, string[]> = {
     direct: [],
@@ -137,6 +141,12 @@ export class GameManager {
   private fillWindowLoadedAtMs = 0;
 
   constructor(private readonly io: Server) {}
+
+  private resolvePlayerSessionId(raw: unknown, socketId: string): string {
+    const value = String((raw as { playerSessionId?: unknown })?.playerSessionId ?? "").trim();
+    if (value) return value.slice(0, 120);
+    return `sid:${socketId}`;
+  }
 
   private lobbyRoom(
     mode: GameMode,
@@ -256,6 +266,31 @@ export class GameManager {
   }
 
   attachSocket(socket: Socket): void {
+    socket.on("reconnect_match", async (raw, cb) => {
+      try {
+        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
+        const match = this.playerSessionToMatch.get(playerSessionId);
+        if (!match) {
+          cb?.({ ok: false, error: "match_not_found" });
+          return;
+        }
+        const reconnect = match.reconnectPlayer(playerSessionId, socket.id);
+        if (!reconnect.ok) {
+          cb?.({ ok: false, error: "player_not_found" });
+          return;
+        }
+        this.socketToPlayerSessionId.set(socket.id, playerSessionId);
+        this.socketToMatch.set(socket.id, match);
+        await socket.join(match.room);
+        cb?.({
+          ok: true,
+          asSpectator: Boolean(reconnect.asSpectator),
+        });
+      } catch {
+        cb?.({ ok: false, error: "server" });
+      }
+    });
+
     socket.on("join_lobby", async (raw, cb) => {
       try {
         const parsed = joinLobbySchema.safeParse(raw);
@@ -264,6 +299,7 @@ export class GameManager {
           return;
         }
         const { name, mode } = parsed.data;
+        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
         const difficultyMode = parsed.data.difficultyMode ?? "mix";
         const subcategoryKey =
           mode === "study_then_quiz"
@@ -274,6 +310,7 @@ export class GameManager {
         this.removeFromPrivateRoom(socket.id);
         this.lobbies[mode].set(socket.id, {
           socketId: socket.id,
+          playerSessionId,
           name,
           ready: true,
           readyOrder: ++this.readyOrderCounter,
@@ -281,6 +318,7 @@ export class GameManager {
           subcategoryKey,
           difficultyMode,
         });
+        this.socketToPlayerSessionId.set(socket.id, playerSessionId);
         await socket.join(this.lobbyRoom(mode, subcategoryKey, difficultyMode));
         this.broadcastLobby(mode, subcategoryKey, difficultyMode);
         socket.emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey, difficultyMode));
@@ -299,6 +337,7 @@ export class GameManager {
           return;
         }
         const d = parsed.data;
+        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
         const roomCode = this.allocateUniqueRoomCode();
         const mode = d.mode;
         const subcategoryKey =
@@ -316,6 +355,7 @@ export class GameManager {
         this.removeFromPrivateRoom(socket.id);
         const entry: LobbyEntry = {
           socketId: socket.id,
+          playerSessionId,
           name: d.name,
           ready: false,
           readyOrder: null,
@@ -339,6 +379,7 @@ export class GameManager {
         };
         this.privateRooms.set(roomCode, room);
         this.socketToPrivateRoomCode.set(socket.id, roomCode);
+        this.socketToPlayerSessionId.set(socket.id, playerSessionId);
         await socket.join(this.privateLobbyRoom(roomCode));
         this.emitPrivateLobbyState(roomCode);
         const origin = String((raw as { origin?: unknown }).origin ?? "").trim();
@@ -362,6 +403,7 @@ export class GameManager {
     socket.on("join_private_room", async (raw, cb) => {
       try {
         const name = String((raw as { name?: unknown }).name ?? "").trim();
+        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
         const roomCode = String((raw as { roomCode?: unknown }).roomCode ?? "").trim().toUpperCase();
         if (!name || !roomCode) {
           cb?.({ ok: false, error: "invalid_body" });
@@ -377,6 +419,7 @@ export class GameManager {
         this.removeFromPrivateRoom(socket.id);
         const entry: LobbyEntry = {
           socketId: socket.id,
+          playerSessionId,
           name,
           ready: false,
           readyOrder: null,
@@ -388,6 +431,7 @@ export class GameManager {
         room.members.set(socket.id, entry);
         room.roomVersion += 1;
         this.socketToPrivateRoomCode.set(socket.id, roomCode);
+        this.socketToPlayerSessionId.set(socket.id, playerSessionId);
         await socket.join(this.privateLobbyRoom(roomCode));
         this.emitPrivateLobbyState(roomCode);
         cb?.({
@@ -475,6 +519,7 @@ export class GameManager {
           return;
         }
         const { name, mode } = parsed.data;
+        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
         const difficultyMode = parsed.data.difficultyMode ?? "mix";
         const subcategoryKey =
           mode === "study_then_quiz"
@@ -505,14 +550,16 @@ export class GameManager {
         const match = new Match(
           this.io,
           matchId,
-          [{ socketId: socket.id, name }],
+          [{ socketId: socket.id, name, playerSessionId }],
           mode,
           mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
           difficultyMode,
         );
 
         await socket.join(match.room);
+        this.socketToPlayerSessionId.set(socket.id, playerSessionId);
         this.socketToMatch.set(socket.id, match);
+        this.playerSessionToMatch.set(playerSessionId, match);
         this.runningMatches.set(matchId, match);
         cb?.({ ok: true });
 
@@ -521,6 +568,7 @@ export class GameManager {
             await match.run();
           } finally {
             this.socketToMatch.delete(socket.id);
+            this.playerSessionToMatch.delete(playerSessionId);
             const s = this.io.sockets.sockets.get(socket.id);
             if (s) {
               try {
@@ -630,11 +678,16 @@ export class GameManager {
     socket.on("disconnect", () => {
       this.removeFromLobby(socket.id);
       this.removeFromPrivateRoom(socket.id);
+      const playerSessionId = this.socketToPlayerSessionId.get(socket.id);
       const match = this.socketToMatch.get(socket.id);
       if (match) {
         match.handleDisconnect(socket.id);
         this.socketToMatch.delete(socket.id);
+        if (playerSessionId) {
+          this.playerSessionToMatch.set(playerSessionId, match);
+        }
       }
+      this.socketToPlayerSessionId.delete(socket.id);
     });
   }
 
@@ -773,6 +826,8 @@ export class GameManager {
         await s.leave(this.privateLobbyRoom(roomCode));
         await s.join(match.room);
         this.socketToMatch.set(p.socketId, match);
+        this.socketToPlayerSessionId.set(p.socketId, p.playerSessionId);
+        this.playerSessionToMatch.set(p.playerSessionId, match);
       }
     }));
     room.lockedParticipants = [];
@@ -784,6 +839,7 @@ export class GameManager {
     } finally {
       for (const p of participants) {
         this.socketToMatch.delete(p.socketId);
+        this.playerSessionToMatch.delete(p.playerSessionId);
         const s = this.io.sockets.sockets.get(p.socketId);
         if (s) {
           try {
@@ -794,6 +850,7 @@ export class GameManager {
           if (s.connected && this.privateRooms.has(roomCode)) {
             const restoredEntry: LobbyEntry = {
               socketId: p.socketId,
+              playerSessionId: p.playerSessionId,
               name: p.name,
               ready: false,
               readyOrder: null,
@@ -804,6 +861,7 @@ export class GameManager {
             };
             room.members.set(p.socketId, restoredEntry);
             this.socketToPrivateRoomCode.set(p.socketId, roomCode);
+            this.socketToPlayerSessionId.set(p.socketId, p.playerSessionId);
             try {
               await Promise.resolve(s.join(this.privateLobbyRoom(roomCode)));
             } catch {
@@ -833,8 +891,12 @@ export class GameManager {
   private leaveMatchForSocket(socketId: string): void {
     const m = this.socketToMatch.get(socketId);
     if (!m) return;
+    const playerSessionId = this.socketToPlayerSessionId.get(socketId);
     m.handleDisconnect(socketId);
     this.socketToMatch.delete(socketId);
+    if (playerSessionId) {
+      this.playerSessionToMatch.set(playerSessionId, m);
+    }
     void this.io.sockets.sockets.get(socketId)?.leave(m.room);
   }
 
@@ -1129,6 +1191,8 @@ export class GameManager {
         await s.leave(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode));
         await s.join(match.room);
         this.socketToMatch.set(p.socketId, match);
+        this.socketToPlayerSessionId.set(p.socketId, p.playerSessionId);
+        this.playerSessionToMatch.set(p.playerSessionId, match);
       }
     }));
     const roomsReadyMs = Date.now() - startedAt;
@@ -1142,6 +1206,7 @@ export class GameManager {
     } finally {
       for (const p of participants) {
         this.socketToMatch.delete(p.socketId);
+        this.playerSessionToMatch.delete(p.playerSessionId);
         const s = this.io.sockets.sockets.get(p.socketId);
         if (s) {
           try {

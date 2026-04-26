@@ -120,6 +120,7 @@ const DEFAULT_RESULT_MESSAGES = {
   tie: "تعادل أو لا فائز — حاول مرة أخرى!",
 } as const;
 const PLAYER_NAME_STORAGE_KEY = "fahem.playerName";
+const PLAYER_SESSION_STORAGE_KEY = "fahem.playerSessionId";
 const RELEASE_VERSION_QUERY_KEY = "v";
 const RELEASE_WATCH_INTERVAL_MS = 30000;
 let releaseWatchHandle: number | null = null;
@@ -147,6 +148,18 @@ function storePlayerName(name: string): void {
     window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
   } catch {
     /* ignore storage failures */
+  }
+}
+
+function getOrCreatePlayerSessionId(): string {
+  try {
+    const existing = (window.localStorage.getItem(PLAYER_SESSION_STORAGE_KEY) ?? "").trim();
+    if (existing) return existing;
+    const next = `ps_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+    window.localStorage.setItem(PLAYER_SESSION_STORAGE_KEY, next);
+    return next;
+  } catch {
+    return `ps_fallback_${Date.now().toString(36)}`;
   }
 }
 
@@ -1858,6 +1871,7 @@ function connectSocket(
   joinKind: JoinKind = "public",
   roomCode?: string,
 ): void {
+  const playerSessionId = getOrCreatePlayerSessionId();
   const flowToken = ++searchFlowToken;
   const joinFlowStartMs = performance.now();
   socket?.removeAllListeners();
@@ -1944,6 +1958,26 @@ function connectSocket(
       failBackToName("تأخر الاتصال. تحقق من الشبكة ثم حاول مرة أخرى.");
       socket?.disconnect();
     }, 8000);
+    s.emit("reconnect_match", { playerSessionId }, (reconnectAck?: { ok?: boolean; asSpectator?: boolean }) => {
+      if (flowToken !== searchFlowToken) return;
+      if (reconnectAck?.ok) {
+        if (joinAckTimer) {
+          window.clearTimeout(joinAckTimer);
+          joinAckTimer = null;
+        }
+        joinCompleted = true;
+        if (reconnectAck.asSpectator) {
+          spectatorEligible = false;
+          spectatorFollowing = true;
+        }
+        lobbyNotice = reconnectAck.asSpectator
+          ? "تمت إعادة الاتصال — عدت كمشاهد."
+          : "تمت إعادة الاتصال بالمباراة.";
+        updateConnectionBadge();
+        const noticeEl2 = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+        if (noticeEl2) noticeEl2.textContent = lobbyNotice;
+        return;
+      }
     const payload = {
       name,
       mode,
@@ -1953,6 +1987,7 @@ function connectSocket(
       origin: window.location.origin,
       questionMs: privateRoomQuestionMs,
       studyPhaseMs: privateRoomStudyPhaseMs,
+      playerSessionId,
     };
     const eventName =
       joinKind === "solo"
@@ -2031,6 +2066,7 @@ function connectSocket(
       }
       },
     );
+    });
   });
 
   s.on("connect_error", () => {
@@ -2040,6 +2076,8 @@ function connectSocket(
 
   s.on("disconnect", () => {
     updateConnectionBadge();
+    const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+    if (noticeEl) noticeEl.textContent = "انقطع الاتصال مؤقتًا... جاري إعادة الاتصال";
   });
 
   s.on(
