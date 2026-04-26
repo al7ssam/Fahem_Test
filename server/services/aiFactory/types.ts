@@ -1,4 +1,5 @@
 export type FactoryLayer = "architect" | "creator" | "auditor" | "refiner";
+export type FactoryReasoningLevel = "none" | "low" | "medium" | "high";
 
 export type FactoryDifficulty = "mix" | "easy" | "medium" | "hard";
 
@@ -31,4 +32,5 @@ export type LayerModelConfig = {
   temperature: number;
   maxOutputTokens: number;
   isEnabled: boolean;
+  reasoningLevel: FactoryReasoningLevel;
 };

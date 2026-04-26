@@ -406,6 +406,11 @@
         background: rgba(6, 10, 20, 0.88);
         font-size: 0.84rem;
       }
+      .factory-help {
+        margin-top: 0.3rem;
+        font-size: 0.78rem;
+        color: #d1bf93;
+      }
       .guide-title {
         margin: 0 0 0.4rem;
         font-weight: 800;
@@ -847,10 +852,17 @@
             </div>
             <label style="margin-top:0.7rem">اختيار النموذج لكل طبقة</label>
             <div class="factory-grid">
-              <div><label for="af-model-architect">Architect</label><input id="af-model-architect" type="text" value="gemini-1.5-pro" /></div>
-              <div><label for="af-model-creator">Creator</label><input id="af-model-creator" type="text" value="gemini-1.5-pro" /></div>
-              <div><label for="af-model-auditor">Auditor</label><input id="af-model-auditor" type="text" value="gemini-1.5-pro" /></div>
-              <div><label for="af-model-refiner">Refiner</label><input id="af-model-refiner" type="text" value="gemini-1.5-pro" /></div>
+              <div><label for="af-model-architect">Architect</label><select id="af-model-architect"><option value="gemini-3-flash">gemini-3-flash</option><option value="gemini-1.5-flash">gemini-1.5-flash</option><option value="gemini-1.5-pro">gemini-1.5-pro</option></select></div>
+              <div><label for="af-model-creator">Creator</label><select id="af-model-creator"><option value="gemini-3-flash">gemini-3-flash</option><option value="gemini-1.5-flash">gemini-1.5-flash</option><option value="gemini-1.5-pro">gemini-1.5-pro</option></select></div>
+              <div><label for="af-model-auditor">Auditor</label><select id="af-model-auditor"><option value="gemini-3-flash">gemini-3-flash</option><option value="gemini-1.5-flash">gemini-1.5-flash</option><option value="gemini-1.5-pro">gemini-1.5-pro</option></select></div>
+              <div><label for="af-model-refiner">Refiner</label><select id="af-model-refiner"><option value="gemini-3-flash">gemini-3-flash</option><option value="gemini-1.5-flash">gemini-1.5-flash</option><option value="gemini-1.5-pro">gemini-1.5-pro</option></select></div>
+            </div>
+            <label style="margin-top:0.5rem" title="مستويات التفكير العالية تزيد من دقة النتائج ولكن تستهلك من الحد المجاني للـ API بسرعة أكبر">مستوى التفكير لكل طبقة</label>
+            <div class="factory-grid">
+              <div><label for="af-reasoning-architect">تفكير Architect</label><select id="af-reasoning-architect"><option value="none">بدون تفكير</option><option value="low">منخفض</option><option value="medium">متوسط</option><option value="high">مرتفع</option></select><div class="factory-help" id="af-reasoning-help-architect"></div></div>
+              <div><label for="af-reasoning-creator">تفكير Creator</label><select id="af-reasoning-creator"><option value="none">بدون تفكير</option><option value="low">منخفض</option><option value="medium">متوسط</option><option value="high">مرتفع</option></select><div class="factory-help" id="af-reasoning-help-creator"></div></div>
+              <div><label for="af-reasoning-auditor">تفكير Auditor</label><select id="af-reasoning-auditor"><option value="none">بدون تفكير</option><option value="low">منخفض</option><option value="medium">متوسط</option><option value="high">مرتفع</option></select><div class="factory-help" id="af-reasoning-help-auditor"></div></div>
+              <div><label for="af-reasoning-refiner">تفكير Refiner</label><select id="af-reasoning-refiner"><option value="none">بدون تفكير</option><option value="low">منخفض</option><option value="medium">متوسط</option><option value="high">مرتفع</option></select><div class="factory-help" id="af-reasoning-help-refiner"></div></div>
             </div>
             <div class="factory-grid" style="margin-top:0.4rem">
               <div><label for="af-key-env">API Key Env</label><input id="af-key-env" type="text" value="GEMINI_API_KEY" /></div>
@@ -2450,6 +2462,7 @@
       })();
 
       (function () {
+        var thinkingLevelModelIds = [];
         function secret() { return document.getElementById("admin-secret").value.trim(); }
         function hdr() { return { "Content-Type": "application/json", "X-Admin-Secret": secret() }; }
         function msg(t, ok) {
@@ -2458,6 +2471,55 @@
           el.className = "msg " + (ok ? "ok" : "err");
         }
         function val(id) { return document.getElementById(id).value.trim(); }
+        function supportsThinkingModel(modelName) {
+          var m = String(modelName || "");
+          if (thinkingLevelModelIds.length) {
+            return thinkingLevelModelIds.indexOf(m) >= 0;
+          }
+          return m === "gemini-3-flash" || m === "gemini-3-flash-preview";
+        }
+        function ensureReasoningOptions(selectId, options, fallback) {
+          var el = document.getElementById(selectId);
+          if (!el || !Array.isArray(options) || !options.length) return;
+          el.innerHTML = "";
+          options.forEach(function (value) {
+            var opt = document.createElement("option");
+            opt.value = String(value);
+            var label =
+              value === "none" ? "بدون تفكير" :
+              value === "low" ? "منخفض" :
+              value === "medium" ? "متوسط" :
+              value === "high" ? "مرتفع" : String(value);
+            opt.textContent = label;
+            el.appendChild(opt);
+          });
+          el.value = String(fallback || options[0]);
+        }
+        function syncLayerReasoningState(layerName) {
+          var modelEl = document.getElementById("af-model-" + layerName);
+          var reasoningEl = document.getElementById("af-reasoning-" + layerName);
+          var helpEl = document.getElementById("af-reasoning-help-" + layerName);
+          if (!modelEl || !reasoningEl || !helpEl) return;
+          var supported = supportsThinkingModel(modelEl.value);
+          if (!supported) {
+            reasoningEl.value = "none";
+            reasoningEl.disabled = true;
+            helpEl.textContent = "هذا الموديل لا يدعم التفكير المنهجي؛ تم ضبط المستوى على (بدون تفكير).";
+          } else {
+            reasoningEl.disabled = false;
+            helpEl.textContent = "";
+          }
+        }
+        function bindReasoningGuards() {
+          ["architect", "creator", "auditor", "refiner"].forEach(function (layerName) {
+            var modelEl = document.getElementById("af-model-" + layerName);
+            if (!modelEl) return;
+            modelEl.addEventListener("change", function () {
+              syncLayerReasoningState(layerName);
+            });
+            syncLayerReasoningState(layerName);
+          });
+        }
         function setStatus(runtime) {
           runtime = runtime || {};
           document.getElementById("af-queued").textContent = String(runtime.queued || 0);
@@ -2476,19 +2538,51 @@
           document.getElementById("af-interval").value = String(s.intervalMinutes || 30);
           document.getElementById("af-target-default").value = String(s.defaultTargetCount || 200);
         }
-        function applyModels(models) {
+        function ensureModelOptions(selectId, options, fallback) {
+          var el = document.getElementById(selectId);
+          if (!el || !Array.isArray(options) || !options.length) return;
+          el.innerHTML = "";
+          options.forEach(function (modelName) {
+            var opt = document.createElement("option");
+            opt.value = String(modelName);
+            opt.textContent = String(modelName);
+            el.appendChild(opt);
+          });
+          el.value = String(fallback || options[0]);
+        }
+        function applyModels(models, availableModels, defaultModel, defaultApiKeyEnv, availableReasoningLevels, defaultReasoningLevel, thinkingLevelSupportedModelIds) {
+          thinkingLevelModelIds = Array.isArray(thinkingLevelSupportedModelIds) ? thinkingLevelSupportedModelIds : [];
+          var allowed = Array.isArray(availableModels) && availableModels.length
+            ? availableModels
+            : ["gemini-3-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+          var fallbackModel = String(defaultModel || "gemini-3-flash");
+          var allowedReasoning = Array.isArray(availableReasoningLevels) && availableReasoningLevels.length
+            ? availableReasoningLevels
+            : ["none", "low", "medium", "high"];
+          var fallbackReasoning = String(defaultReasoningLevel || "none");
+          ensureModelOptions("af-model-architect", allowed, fallbackModel);
+          ensureModelOptions("af-model-creator", allowed, fallbackModel);
+          ensureModelOptions("af-model-auditor", allowed, fallbackModel);
+          ensureModelOptions("af-model-refiner", allowed, fallbackModel);
+          ensureReasoningOptions("af-reasoning-architect", allowedReasoning, fallbackReasoning);
+          ensureReasoningOptions("af-reasoning-creator", allowedReasoning, fallbackReasoning);
+          ensureReasoningOptions("af-reasoning-auditor", allowedReasoning, fallbackReasoning);
+          ensureReasoningOptions("af-reasoning-refiner", allowedReasoning, fallbackReasoning);
           if (!Array.isArray(models)) return;
           models.forEach(function (m) {
             if (!m || !m.layerName) return;
             var id = "af-model-" + m.layerName;
             var el = document.getElementById(id);
             if (el) el.value = String(m.modelName || "");
+            var reasoningEl = document.getElementById("af-reasoning-" + m.layerName);
+            if (reasoningEl) reasoningEl.value = String(m.reasoningLevel || fallbackReasoning);
             if (m.layerName === "architect") {
-              document.getElementById("af-key-env").value = String(m.apiKeyEnv || "GEMINI_API_KEY");
+              document.getElementById("af-key-env").value = String(m.apiKeyEnv || defaultApiKeyEnv || "GEMINI_API_KEY");
               document.getElementById("af-temp").value = String(m.temperature ?? 0.4);
               document.getElementById("af-max-tokens").value = String(m.maxOutputTokens ?? 8192);
             }
           });
+          bindReasoningGuards();
         }
         async function loadFactory() {
           if (!secret()) return;
@@ -2504,7 +2598,9 @@
             var status = await statusRes.json();
             var jobs = await jobsRes.json();
             if (stRes.ok && st.ok) applySettings(st);
-            if (modelRes.ok && md.ok) applyModels(md.models);
+            if (modelRes.ok && md.ok) {
+              applyModels(md.models, md.availableModels, md.defaultModel, md.defaultApiKeyEnv, md.availableReasoningLevels, md.defaultReasoningLevel, md.thinkingLevelSupportedModelIds);
+            }
             if (statusRes.ok && status.ok) setStatus(status.runtime);
             if (jobsRes.ok && jobs.ok) renderJobs(jobs.items || []);
             msg("تم تحميل بيانات المصنع.", true);
@@ -2516,11 +2612,12 @@
           return {
             layerName: layerName,
             provider: "gemini",
-            modelName: val("af-model-" + layerName) || "gemini-1.5-pro",
+            modelName: val("af-model-" + layerName) || "gemini-3-flash",
             apiKeyEnv: val("af-key-env") || "GEMINI_API_KEY",
             temperature: Number(val("af-temp") || "0.4"),
             maxOutputTokens: Number(val("af-max-tokens") || "8192"),
-            isEnabled: true
+            isEnabled: true,
+            reasoningLevel: val("af-reasoning-" + layerName) || "none"
           };
         }
         async function saveFactorySettingsUi() {

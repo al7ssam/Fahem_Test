@@ -1,6 +1,29 @@
 import { getPool } from "../../db/pool";
 import { sleep } from "./utils";
-import type { FactoryLayer, LayerModelConfig } from "./types";
+import type { FactoryLayer, FactoryReasoningLevel, LayerModelConfig } from "./types";
+
+export const AI_FACTORY_AVAILABLE_MODELS = ["gemini-3-flash", "gemini-1.5-flash", "gemini-1.5-pro"] as const;
+export const AI_FACTORY_DEFAULT_MODEL = "gemini-3-flash";
+export const AI_FACTORY_DEFAULT_API_KEY_ENV = "GEMINI_API_KEY";
+export const AI_FACTORY_AVAILABLE_REASONING_LEVELS = ["none", "low", "medium", "high"] as const;
+export const AI_FACTORY_DEFAULT_REASONING_LEVEL: FactoryReasoningLevel = "none";
+
+/**
+ * Model IDs that support `thinkingLevel` inside `generationConfig.thinkingConfig` (Gemini 3+).
+ * @see https://ai.google.dev/gemini-api/docs/thinking — "Thinking levels (Gemini 3)"
+ * @see https://ai.google.dev/gemini-api/docs/gemini-3 — model table (IDs as published by Google)
+ * Gemini 2.5+ use `thinkingBudget` instead; gemini-1.5-* does not use `thinkingLevel`.
+ */
+export const AI_FACTORY_THINKING_LEVEL_MODEL_IDS: readonly string[] = [
+  "gemini-3-flash",
+  "gemini-3-flash-preview",
+  "gemini-3-pro-preview",
+  "gemini-3.1-flash-lite-preview",
+  "gemini-3.1-flash-image-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3.1-pro-preview-customtools",
+  "gemini-3-pro-image-preview",
+];
 
 type ModelCallResult = {
   text: string;
@@ -40,8 +63,9 @@ async function readLayerConfig(layer: FactoryLayer): Promise<LayerModelConfig> {
     temperature: number;
     max_output_tokens: number;
     is_enabled: boolean;
+    reasoning_level: FactoryReasoningLevel;
   }>(
-    `SELECT layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled
+    `SELECT layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled, reasoning_level
      FROM ai_factory_model_config
      WHERE layer_name = $1
      LIMIT 1`,
@@ -62,6 +86,7 @@ async function readLayerConfig(layer: FactoryLayer): Promise<LayerModelConfig> {
     temperature: Number(row.temperature),
     maxOutputTokens: Number(row.max_output_tokens),
     isEnabled: row.is_enabled,
+    reasoningLevel: row.reasoning_level ?? AI_FACTORY_DEFAULT_REASONING_LEVEL,
   };
 }
 
@@ -75,8 +100,9 @@ export async function listModelConfigs(): Promise<LayerModelConfig[]> {
     temperature: number;
     max_output_tokens: number;
     is_enabled: boolean;
+    reasoning_level: FactoryReasoningLevel;
   }>(
-    `SELECT layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled
+    `SELECT layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled, reasoning_level
      FROM ai_factory_model_config
      ORDER BY layer_name ASC`,
   );
@@ -88,14 +114,25 @@ export async function listModelConfigs(): Promise<LayerModelConfig[]> {
     temperature: Number(row.temperature),
     maxOutputTokens: Number(row.max_output_tokens),
     isEnabled: row.is_enabled,
+    reasoningLevel: row.reasoning_level ?? AI_FACTORY_DEFAULT_REASONING_LEVEL,
   }));
 }
 
 export async function saveModelConfig(input: LayerModelConfig): Promise<void> {
+  if (!AI_FACTORY_AVAILABLE_MODELS.includes(input.modelName as (typeof AI_FACTORY_AVAILABLE_MODELS)[number])) {
+    throw new Error(`unsupported_model_${input.modelName}`);
+  }
+  if (
+    !AI_FACTORY_AVAILABLE_REASONING_LEVELS.includes(
+      input.reasoningLevel as (typeof AI_FACTORY_AVAILABLE_REASONING_LEVELS)[number],
+    )
+  ) {
+    throw new Error(`unsupported_reasoning_level_${input.reasoningLevel}`);
+  }
   const pool = getPool();
   await pool.query(
-    `INSERT INTO ai_factory_model_config (layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    `INSERT INTO ai_factory_model_config (layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled, reasoning_level, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
      ON CONFLICT (layer_name) DO UPDATE SET
        provider = EXCLUDED.provider,
        model_name = EXCLUDED.model_name,
@@ -103,6 +140,7 @@ export async function saveModelConfig(input: LayerModelConfig): Promise<void> {
        temperature = EXCLUDED.temperature,
        max_output_tokens = EXCLUDED.max_output_tokens,
        is_enabled = EXCLUDED.is_enabled,
+       reasoning_level = EXCLUDED.reasoning_level,
        updated_at = NOW()`,
     [
       input.layerName,
@@ -112,8 +150,14 @@ export async function saveModelConfig(input: LayerModelConfig): Promise<void> {
       input.temperature,
       input.maxOutputTokens,
       input.isEnabled,
+      input.reasoningLevel,
     ],
   );
+}
+
+/** True if the model supports `generationConfig.thinkingConfig.thinkingLevel` (Gemini 3 API). */
+export function supportsThinkingLevel(modelName: string): boolean {
+  return AI_FACTORY_THINKING_LEVEL_MODEL_IDS.includes(modelName);
 }
 
 async function callGemini(config: LayerModelConfig, prompt: string): Promise<ModelCallResult> {
@@ -123,12 +167,19 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
   }
   const model = encodeURIComponent(config.modelName);
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const generationConfig: Record<string, unknown> = {
+    temperature: config.temperature,
+    maxOutputTokens: config.maxOutputTokens,
+  };
+  if (supportsThinkingLevel(config.modelName) && config.reasoningLevel !== "none") {
+    generationConfig.thinkingConfig = {
+      thinkingLevel: config.reasoningLevel,
+      includeThoughts: true,
+    };
+  }
   const payload = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: {
-      temperature: config.temperature,
-      maxOutputTokens: config.maxOutputTokens,
-    },
+    generationConfig,
   };
   const res = await fetch(url, {
     method: "POST",

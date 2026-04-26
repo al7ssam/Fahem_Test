@@ -13,7 +13,16 @@ import {
   performCleanup,
   updateCleanupSettings,
 } from "../services/cleanup";
-import { listModelConfigs, saveModelConfig } from "../services/aiFactory/modelManager";
+import {
+  AI_FACTORY_AVAILABLE_MODELS,
+  AI_FACTORY_DEFAULT_API_KEY_ENV,
+  AI_FACTORY_DEFAULT_MODEL,
+  AI_FACTORY_AVAILABLE_REASONING_LEVELS,
+  AI_FACTORY_DEFAULT_REASONING_LEVEL,
+  AI_FACTORY_THINKING_LEVEL_MODEL_IDS,
+  listModelConfigs,
+  saveModelConfig,
+} from "../services/aiFactory/modelManager";
 import { getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
 import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
 import type { FactoryLayer } from "../services/aiFactory/types";
@@ -145,11 +154,12 @@ const factoryRunNowSchema = z.object({
 const factoryModelPatchSchema = z.object({
   layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
   provider: z.string().trim().min(1).max(50),
-  modelName: z.string().trim().min(1).max(120),
+  modelName: z.enum(AI_FACTORY_AVAILABLE_MODELS),
   apiKeyEnv: z.string().trim().min(1).max(120),
   temperature: z.number().min(0).max(2),
   maxOutputTokens: z.number().int().min(256).max(65536),
   isEnabled: z.boolean(),
+  reasoningLevel: z.enum(AI_FACTORY_AVAILABLE_REASONING_LEVELS),
 });
 
 const questionPatchSchema = z.object({
@@ -796,7 +806,16 @@ export function registerAdminRoutes(app: Express): void {
     if (!verifyAdmin(req, res)) return;
     try {
       const models = await listModelConfigs();
-      res.json({ ok: true, models });
+      res.json({
+        ok: true,
+        models,
+        availableModels: AI_FACTORY_AVAILABLE_MODELS,
+        defaultModel: AI_FACTORY_DEFAULT_MODEL,
+        defaultApiKeyEnv: AI_FACTORY_DEFAULT_API_KEY_ENV,
+        availableReasoningLevels: AI_FACTORY_AVAILABLE_REASONING_LEVELS,
+        defaultReasoningLevel: AI_FACTORY_DEFAULT_REASONING_LEVEL,
+        thinkingLevelSupportedModelIds: [...AI_FACTORY_THINKING_LEVEL_MODEL_IDS],
+      });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
     }
@@ -829,6 +848,7 @@ export function registerAdminRoutes(app: Express): void {
           temperature: m.temperature,
           maxOutputTokens: m.maxOutputTokens,
           isEnabled: m.isEnabled,
+          reasoningLevel: m.reasoningLevel,
         });
       }
       res.json({ ok: true });
