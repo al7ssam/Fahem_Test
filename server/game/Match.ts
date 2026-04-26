@@ -62,9 +62,6 @@ export class Match {
   private readonly players = new Map<string, MatchPlayerState>();
   private readonly playerSessionToSocket = new Map<string, string>();
   private readonly socketToPlayerSession = new Map<string, string>();
-  private readonly temporarilyDisconnectedSessions = new Set<string>();
-  private readonly disconnectedDuringQuestionSessions = new Set<string>();
-  private singleActiveGraceTimer: ReturnType<typeof setTimeout> | null = null;
   private usedQuestionIds: number[] = [];
   private round = 0;
   private currentQuestionId: number | null = null;
@@ -159,50 +156,6 @@ export class Match {
       keys: p.keys,
       skillBoostStacks: p.skillBoostStacks,
     }));
-  }
-
-  private getConnectedActiveCount(): number {
-    let n = 0;
-    for (const [socketId, p] of this.players) {
-      if (p.eliminated || p.hearts <= 0) continue;
-      if (this.temporarilyDisconnectedSessions.has(p.playerSessionId)) continue;
-      if (!this.playerSessionToSocket.has(p.playerSessionId)) continue;
-      if (socketId !== this.playerSessionToSocket.get(p.playerSessionId)) continue;
-      n += 1;
-    }
-    return n;
-  }
-
-  private updateSingleActiveGraceTimer(): void {
-    if (this.finished) return;
-    const alive = this.countActive();
-    if (alive <= 1) {
-      if (this.singleActiveGraceTimer) {
-        clearTimeout(this.singleActiveGraceTimer);
-        this.singleActiveGraceTimer = null;
-      }
-      return;
-    }
-    const connectedActive = this.getConnectedActiveCount();
-    if (connectedActive <= 1) {
-      if (this.singleActiveGraceTimer) return;
-      this.io.to(this.room).emit("single_active_grace_started", {
-        seconds: 15,
-      });
-      this.singleActiveGraceTimer = setTimeout(() => {
-        this.singleActiveGraceTimer = null;
-        if (this.finished) return;
-        if (this.getConnectedActiveCount() <= 1 && this.countActive() > 1) {
-          this.declareWinner();
-        }
-      }, 15_000);
-      return;
-    }
-    if (this.singleActiveGraceTimer) {
-      clearTimeout(this.singleActiveGraceTimer);
-      this.singleActiveGraceTimer = null;
-      this.io.to(this.room).emit("single_active_grace_cancelled", {});
-    }
   }
 
   isFinished(): boolean {
@@ -436,7 +389,6 @@ export class Match {
     if (this.skipSocketsForQuestion.has(socketId)) return;
     const p = this.players.get(socketId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) return;
-    if (this.disconnectedDuringQuestionSessions.has(p.playerSessionId)) return;
     if (this.pendingAnswers.has(socketId)) return;
     this.pendingAnswers.set(socketId, choiceIndex);
     this.answerTimes.set(socketId, Date.now());
@@ -449,81 +401,28 @@ export class Match {
   handleDisconnect(socketId: string): void {
     const p = this.players.get(socketId);
     if (!p || p.eliminated) return;
-    if (!this.roundClosed && this.currentQuestionId !== null) {
-      this.disconnectedDuringQuestionSessions.add(p.playerSessionId);
-    }
-    this.temporarilyDisconnectedSessions.add(p.playerSessionId);
     this.playerSessionToSocket.delete(p.playerSessionId);
     this.socketToPlayerSession.delete(socketId);
-    this.io.to(this.room).emit("player_connection_state", {
+    this.revealRemainingBySocket.delete(socketId);
+    this.revealMacroRoundBySocket.delete(socketId);
+    p.hearts = 0;
+    p.eliminated = true;
+    p.isSpectator = false;
+    this.io.to(this.room).emit("player_eliminated", {
       socketId,
       name: p.name,
-      connected: false,
+      reason: "disconnect",
     });
-    this.updateSingleActiveGraceTimer();
-  }
-
-  reconnectPlayer(
-    playerSessionId: string,
-    newSocketId: string,
-  ): { ok: boolean; asSpectator?: boolean; previousSocketId?: string } {
-    const previousSocketId = this.playerSessionToSocket.get(playerSessionId)
-      ?? [...this.players.entries()].find(([, p]) => p.playerSessionId === playerSessionId)?.[0];
-    if (!previousSocketId) return { ok: false };
-    const p = this.players.get(previousSocketId);
-    if (!p) return { ok: false };
-
-    if (previousSocketId !== newSocketId) {
-      this.players.delete(previousSocketId);
-      this.players.set(newSocketId, p);
-      if (this.pendingAnswers.has(previousSocketId)) {
-        const v = this.pendingAnswers.get(previousSocketId)!;
-        this.pendingAnswers.delete(previousSocketId);
-        this.pendingAnswers.set(newSocketId, v);
-      }
-      if (this.answerTimes.has(previousSocketId)) {
-        const v = this.answerTimes.get(previousSocketId)!;
-        this.answerTimes.delete(previousSocketId);
-        this.answerTimes.set(newSocketId, v);
-      }
-      if (this.skipSocketsForQuestion.has(previousSocketId)) {
-        this.skipSocketsForQuestion.delete(previousSocketId);
-        this.skipSocketsForQuestion.add(newSocketId);
-      }
-      if (this.roundReady.has(previousSocketId)) {
-        this.roundReady.delete(previousSocketId);
-        this.roundReady.add(newSocketId);
-      }
-      if (this.revealRemainingBySocket.has(previousSocketId)) {
-        const rem = this.revealRemainingBySocket.get(previousSocketId)!;
-        this.revealRemainingBySocket.delete(previousSocketId);
-        this.revealRemainingBySocket.set(newSocketId, rem);
-      }
-      if (this.revealMacroRoundBySocket.has(previousSocketId)) {
-        const mr = this.revealMacroRoundBySocket.get(previousSocketId)!;
-        this.revealMacroRoundBySocket.delete(previousSocketId);
-        this.revealMacroRoundBySocket.set(newSocketId, mr);
-      }
-      this.socketToPlayerSession.delete(previousSocketId);
+    if (this.shouldDeclareWinnerForActiveCount() && !this.finished) {
+      this.clearQuestionTimers();
+      this.clearStudyWait();
+      this.roundClosed = true;
+      this.currentQuestionId = null;
+      this.currentCorrectIndex = null;
+      this.resolveRound?.();
+      this.resolveRound = null;
+      this.declareWinner();
     }
-
-    this.playerSessionToSocket.set(playerSessionId, newSocketId);
-    this.socketToPlayerSession.set(newSocketId, playerSessionId);
-    this.temporarilyDisconnectedSessions.delete(playerSessionId);
-
-    if (p.eliminated || p.hearts <= 0) {
-      p.eliminated = true;
-      p.isSpectator = true;
-      this.updateSingleActiveGraceTimer();
-      return { ok: true, asSpectator: true, previousSocketId };
-    }
-    this.updateSingleActiveGraceTimer();
-    this.emitKeysRoomState();
-    return { ok: true, asSpectator: false, previousSocketId };
-  }
-
-  hasPlayerSession(playerSessionId: string): boolean {
-    return [...this.players.values()].some((p) => p.playerSessionId === playerSessionId);
   }
 
   private async runStudyPhase(
@@ -814,7 +713,6 @@ export class Match {
     this.answerDeadline = Date.now() + this.questionMs;
     this.pendingAnswers.clear();
     this.answerTimes.clear();
-    this.disconnectedDuringQuestionSessions.clear();
 
     const waitRound = new Promise<void>((resolve) => {
       this.resolveRound = resolve;
@@ -893,9 +791,8 @@ export class Match {
       }
 
       const choice = this.pendingAnswers.get(socketId);
-      const forcedNoAnswerByDisconnect = this.disconnectedDuringQuestionSessions.has(p.playerSessionId);
       const answered = choice !== undefined;
-      const correct = !forcedNoAnswerByDisconnect && answered && choice === correctIndex;
+      const correct = answered && choice === correctIndex;
       let pointsAward = 0;
 
       if (correct) {
@@ -981,8 +878,6 @@ export class Match {
     this.resolveRound?.();
     this.resolveRound = null;
 
-    this.updateSingleActiveGraceTimer();
-
     if (this.shouldDeclareWinnerForActiveCount()) {
       this.declareWinner();
     }
@@ -991,10 +886,6 @@ export class Match {
   private declareWinner(): void {
     if (this.finished) return;
     this.finished = true;
-    if (this.singleActiveGraceTimer) {
-      clearTimeout(this.singleActiveGraceTimer);
-      this.singleActiveGraceTimer = null;
-    }
     this.clearStudyWait();
     this.clearQuestionTimers();
 
@@ -1003,8 +894,39 @@ export class Match {
         socketId,
         name: p.name,
         skillPoints: p.skillPoints,
+        hearts: p.hearts,
+        eliminated: p.eliminated,
       }))
       .sort((a, b) => b.skillPoints - a.skillPoints);
+
+    const alivePlayers = bySkillDesc.filter((p) => !p.eliminated && p.hearts > 0);
+    if (alivePlayers.length === 1) {
+      const winner = {
+        socketId: alivePlayers[0].socketId,
+        name: alivePlayers[0].name,
+      };
+      const rm = this.resultMessages ?? {
+        winner: "",
+        loser: "",
+        tie: "",
+      };
+      this.io.to(this.room).emit("game_over", {
+        reason: "finished",
+        outcomeType: "single_winner",
+        winner,
+        winners: [winner],
+        players: this.snapshotPlayers(),
+        resultMessages: rm,
+        leaderboard: bySkillDesc.map((row, idx) => ({
+          socketId: row.socketId,
+          name: row.name,
+          skillPoints: row.skillPoints,
+          rank: idx + 1,
+          medal: idx === 0 ? "gold" : idx === 1 ? "silver" : idx === 2 ? "bronze" : null,
+        })),
+      });
+      return;
+    }
 
     const topSkillPoints = bySkillDesc[0]?.skillPoints ?? 0;
     const winners =

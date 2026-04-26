@@ -266,32 +266,6 @@ export class GameManager {
   }
 
   attachSocket(socket: Socket): void {
-    socket.on("reconnect_match", async (raw, cb) => {
-      try {
-        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
-        const match = this.playerSessionToMatch.get(playerSessionId);
-        if (!match || match.isFinished()) {
-          this.playerSessionToMatch.delete(playerSessionId);
-          cb?.({ ok: false, error: "match_not_found" });
-          return;
-        }
-        const reconnect = match.reconnectPlayer(playerSessionId, socket.id);
-        if (!reconnect.ok) {
-          cb?.({ ok: false, error: "player_not_found" });
-          return;
-        }
-        this.socketToPlayerSessionId.set(socket.id, playerSessionId);
-        this.socketToMatch.set(socket.id, match);
-        await socket.join(match.room);
-        cb?.({
-          ok: true,
-          asSpectator: Boolean(reconnect.asSpectator),
-        });
-      } catch {
-        cb?.({ ok: false, error: "server" });
-      }
-    });
-
     socket.on("join_lobby", async (raw, cb) => {
       try {
         const parsed = joinLobbySchema.safeParse(raw);
@@ -765,7 +739,7 @@ export class GameManager {
     const room = this.privateRooms.get(roomCode);
     if (!room || room.matchStartTimer) return;
     const members = [...room.members.values()];
-    if (members.length < 1) return;
+    if (members.length < 2) return;
     const allReady = members.every((m) => m.ready);
     if (!allReady) return;
     if (room.mode === "study_then_quiz") {
@@ -806,7 +780,7 @@ export class GameManager {
       .map((id) => room.members.get(id))
       .filter((p): p is LobbyEntry => Boolean(p))
       .filter((p) => Boolean(this.io.sockets.sockets.get(p.socketId)?.connected && p.ready));
-    if (participants.length < 1) {
+    if (participants.length < 2) {
       room.lockedParticipants = [];
       room.roomVersion += 1;
       this.emitPrivateLobbyState(roomCode);
