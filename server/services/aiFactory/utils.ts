@@ -1,31 +1,74 @@
 import type { FactoryQuestion } from "./types";
 
+function normalizeJsonLikeText(input: string): string {
+  return input
+    .replace(/^\uFEFF/, "")
+    .replace(/^[\s\r\n]*json[\s\r\n]+/i, "")
+    .replace(/[“”]/g, "\"")
+    .replace(/[‘’]/g, "'");
+}
+
+function stripMarkdownFences(input: string): string {
+  return input.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+}
+
+function removeTrailingCommas(input: string): string {
+  return input.replace(/,\s*([}\]])/g, "$1");
+}
+
+function repairLikelyJsonArray(input: string): string {
+  const normalized = normalizeJsonLikeText(input);
+  const noFences = stripMarkdownFences(normalized);
+  return removeTrailingCommas(noFences).trim();
+}
+
+function parseArrayOrQuestions(value: unknown): unknown[] | null {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") {
+    const questions = (value as { questions?: unknown }).questions;
+    if (Array.isArray(questions)) return questions;
+  }
+  return null;
+}
+
+function tryParseCandidate(candidate: string, useRepair: boolean): unknown[] | null {
+  const payload = useRepair ? repairLikelyJsonArray(candidate) : candidate.trim();
+  if (!payload) return null;
+  try {
+    const parsed = JSON.parse(payload);
+    return parseArrayOrQuestions(parsed);
+  } catch {
+    return null;
+  }
+}
+
 export function extractJsonArray(raw: string): unknown[] | null {
   const text = String(raw || "").trim();
   if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) return parsed;
-  } catch {
-    // ignore and try fenced block extraction
-  }
+
   const blockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (blockMatch?.[1]) {
-    try {
-      const parsed = JSON.parse(blockMatch[1].trim());
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // ignore
-    }
-  }
   const firstBracket = text.indexOf("[");
   const lastBracket = text.lastIndexOf("]");
+
+  const candidates: string[] = [text];
+  if (blockMatch?.[1]) candidates.push(blockMatch[1]);
   if (firstBracket >= 0 && lastBracket > firstBracket) {
-    try {
-      const parsed = JSON.parse(text.slice(firstBracket, lastBracket + 1));
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // ignore
+    candidates.push(text.slice(firstBracket, lastBracket + 1));
+  }
+
+  for (const c of candidates) {
+    const parsed = tryParseCandidate(c, false);
+    if (parsed) return parsed;
+  }
+  for (const c of candidates) {
+    const parsed = tryParseCandidate(c, true);
+    if (parsed) return parsed;
+  }
+  if (!blockMatch?.[1]) {
+    const looseFence = stripMarkdownFences(text);
+    if (looseFence !== text) {
+      const parsed = tryParseCandidate(looseFence, true);
+      if (parsed) return parsed;
     }
   }
   return null;

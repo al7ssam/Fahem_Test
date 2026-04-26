@@ -161,7 +161,10 @@ function buildCreatorPrompt(args: {
     `Difficulty mode: ${args.difficultyMode}`,
     "If difficulty mode is mix, distribute easy/medium/hard fairly.",
     `Already generated in current run: ${args.alreadyGenerated}`,
-    "Return JSON array only.",
+    "Return ONLY valid JSON array.",
+    "Do not wrap in markdown fences.",
+    "No commentary before or after JSON.",
+    "Use standard double quotes for all JSON keys and string values.",
   ].join("\n");
 }
 
@@ -181,6 +184,10 @@ function buildRefinerPrompt(questions: FactoryQuestion[], audit: FactoryAuditRep
     "Fix the question array based on the audit report and return corrected JSON array only.",
     "Preserve schema fields exactly.",
     "Constraints: options length 2 or 4, correctIndex in-range, non-empty studyBody, valid difficulty.",
+    "Return ONLY valid JSON array.",
+    "Do not wrap in markdown fences.",
+    "No commentary before or after JSON.",
+    "Use standard double quotes for all JSON keys and string values.",
     `Audit summary: ${audit.summary}`,
     `Audit issues: ${JSON.stringify(audit.issues)}`,
     JSON.stringify(questions),
@@ -199,9 +206,17 @@ function parseAuditReport(text: string): FactoryAuditReport {
   }
 }
 
-function normalizeQuestionsFromModel(rawText: string, job: JobRow): FactoryQuestion[] {
+function compactSnippet(input: string, max = 180): string {
+  const s = String(input || "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  return s.length > max ? `${s.slice(0, max)}...` : s;
+}
+
+function normalizeQuestionsFromModel(rawText: string, job: JobRow, layer: "creator" | "refiner"): FactoryQuestion[] {
   const arr = extractJsonArray(rawText);
-  if (!arr) throw new Error("invalid_json_output");
+  if (!arr) {
+    throw new Error(`invalid_json_output:layer=${layer}:snippet=${compactSnippet(rawText)}`);
+  }
   return arr.map((item, idx) => {
     const q = normalizeFactoryQuestion(item, idx);
     if (q.subcategoryKey !== job.subcategory_key) {
@@ -328,7 +343,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       alreadyGenerated: 0,
     });
     const creator = await runLayerModel("creator", creatorPrompt);
-    const creatorQuestions = normalizeQuestionsFromModel(creator.text, job);
+    const creatorQuestions = normalizeQuestionsFromModel(creator.text, job, "creator");
     await appendJobLog(job.id, "info", "Creator layer completed", "creator", {
       generated: creatorQuestions.length,
       model: creator.modelName,
@@ -358,7 +373,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
     const refinerPrompt = buildRefinerPrompt(creatorQuestions, auditReport);
     const refiner = await runLayerModel("refiner", refinerPrompt);
-    let finalQuestions = normalizeQuestionsFromModel(refiner.text, job);
+    let finalQuestions = normalizeQuestionsFromModel(refiner.text, job, "refiner");
     if (finalQuestions.length > job.batch_size) {
       finalQuestions = finalQuestions.slice(0, job.batch_size);
     }
