@@ -86,6 +86,7 @@ class RateLimitError extends Error {
 }
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
+const GEMINI_REQUEST_TIMEOUT_MS = 120_000;
 const GEMINI_V1_MODEL_IDS = new Set<string>([
   "gemini-2.5-flash",
   "gemini-2.5-pro",
@@ -324,7 +325,10 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: normalizedId, generationConfig }, { apiVersion });
+  const model = genAI.getGenerativeModel(
+    { model: normalizedId, generationConfig },
+    { apiVersion, timeout: GEMINI_REQUEST_TIMEOUT_MS },
+  );
 
   try {
     const result = await model.generateContent(prompt);

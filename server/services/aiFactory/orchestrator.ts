@@ -342,6 +342,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       difficultyMode: job.difficulty_mode,
       alreadyGenerated: 0,
     });
+    await appendJobLog(job.id, "info", "Creator layer started", "creator");
     const creator = await runLayerModel("creator", creatorPrompt);
     const creatorQuestions = normalizeQuestionsFromModel(creator.text, job, "creator");
     await appendJobLog(job.id, "info", "Creator layer completed", "creator", {
@@ -356,6 +357,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       lastLayer: "auditor",
     });
     const auditorPrompt = buildAuditorPrompt(creatorQuestions);
+    await appendJobLog(job.id, "info", "Auditor layer started", "auditor");
     const auditor = await runLayerModel("auditor", auditorPrompt);
     const auditReport = parseAuditReport(auditor.text);
     await appendJobLog(job.id, "info", "Auditor layer completed", "auditor", {
@@ -372,6 +374,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       lastLayer: "refiner",
     });
     const refinerPrompt = buildRefinerPrompt(creatorQuestions, auditReport);
+    await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
     const refiner = await runLayerModel("refiner", refinerPrompt);
     let finalQuestions = normalizeQuestionsFromModel(refiner.text, job, "refiner");
     if (finalQuestions.length > job.batch_size) {
