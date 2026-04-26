@@ -345,6 +345,9 @@
         display: grid;
         gap: 0.5rem;
       }
+      .preview-options.two-options {
+        grid-template-columns: 1fr 1fr;
+      }
       .preview-option {
         border: 1px solid rgba(223, 187, 106, 0.22);
         background: rgba(12, 17, 34, 0.95);
@@ -521,8 +524,8 @@
             <textarea id="prompt" required maxlength="2000"></textarea>
             <label for="opt0">الخيار 1</label><input id="opt0" type="text" required maxlength="500" />
             <label for="opt1">الخيار 2</label><input id="opt1" type="text" required maxlength="500" />
-            <label for="opt2">الخيار 3</label><input id="opt2" type="text" required maxlength="500" />
-            <label for="opt3">الخيار 4</label><input id="opt3" type="text" required maxlength="500" />
+            <label for="opt2">الخيار 3 (اختياري)</label><input id="opt2" type="text" maxlength="500" />
+            <label for="opt3">الخيار 4 (اختياري)</label><input id="opt3" type="text" maxlength="500" />
             <label for="correct">الإجابة الصحيحة</label>
             <select id="correct" required>
               <option value="0">الخيار 1</option>
@@ -530,6 +533,7 @@
               <option value="2">الخيار 3</option>
               <option value="3">الخيار 4</option>
             </select>
+            <p class="subtitle">يمكن إدخال سؤال بخيارين (صح/خطأ) أو أربعة خيارات فقط.</p>
             <label for="difficulty">الصعوبة <span style="color:#f87171">*</span></label>
             <select id="difficulty" required>
               <option value="">اختر الصعوبة</option>
@@ -556,7 +560,7 @@
           <div class="card">
             <div class="guide-block">
               <h3 class="guide-title">صيغة سؤال المذاكرة مع التصنيف</h3>
-              <p class="subtitle">أضف <code>studyBody</code> كنص مذاكرة، وحدد التصنيف عبر <code>subcategoryKey</code> أو <code>subcategory_key</code>.</p>
+              <p class="subtitle">أضف <code>studyBody</code> كنص مذاكرة، وحدد التصنيف عبر <code>subcategoryKey</code> أو <code>subcategory_key</code>. يقبل النظام <code>options</code> بطول 2 أو 4.</p>
               <pre class="example-pre">[
   {
     "prompt": "ما وظيفة الكلوروفيل في النبات؟",
@@ -568,7 +572,7 @@
   }
 ]</pre>
             </div>
-            <p class="subtitle">يُقبل أيضًا <code>correct_index</code> بدل <code>correctIndex</code> و <code>study_body</code> بدل <code>studyBody</code> و <code>subcategory_key</code> بدل <code>subcategoryKey</code>.</p>
+            <p class="subtitle">يُقبل أيضًا <code>correct_index</code> بدل <code>correctIndex</code> و <code>study_body</code> بدل <code>studyBody</code> و <code>subcategory_key</code> بدل <code>subcategoryKey</code>. يجب أن يكون <code>correctIndex</code> ضمن مدى الخيارات الفعلي.</p>
           </div>
         </div>
       </div>
@@ -950,8 +954,8 @@
         <textarea id="edit-prompt" maxlength="2000" rows="3"></textarea>
         <label for="edit-opt0">الخيار 1</label><input id="edit-opt0" type="text" maxlength="500" />
         <label for="edit-opt1">الخيار 2</label><input id="edit-opt1" type="text" maxlength="500" />
-        <label for="edit-opt2">الخيار 3</label><input id="edit-opt2" type="text" maxlength="500" />
-        <label for="edit-opt3">الخيار 4</label><input id="edit-opt3" type="text" maxlength="500" />
+        <label for="edit-opt2">الخيار 3 (اختياري)</label><input id="edit-opt2" type="text" maxlength="500" />
+        <label for="edit-opt3">الخيار 4 (اختياري)</label><input id="edit-opt3" type="text" maxlength="500" />
         <label for="edit-correct">الإجابة الصحيحة</label>
         <select id="edit-correct">
           <option value="0">الخيار 1</option><option value="1">الخيار 2</option><option value="2">الخيار 3</option><option value="3">الخيار 4</option>
@@ -1066,7 +1070,39 @@
         var msg = document.getElementById("msg");
         var btn = document.getElementById("submit-btn");
         var totalEl = document.getElementById("total-display");
+        var correctSelect = document.getElementById("correct");
         function setMsg(text, ok) { msg.textContent = text || ""; msg.className = "msg " + (ok ? "ok" : "err"); }
+        function buildNormalizedOptions(values) {
+          var cleaned = values.map(function (v) { return String(v || "").trim(); });
+          var nonEmpty = cleaned.filter(function (v) { return v.length > 0; });
+          if (nonEmpty.length !== 2 && nonEmpty.length !== 4) return { error: "عدد الخيارات يجب أن يكون 2 أو 4." };
+          if (nonEmpty.length !== cleaned.length) return { error: "لا تترك فراغات بين الخيارات. املأ أول خيارين فقط، أو جميع الأربعة." };
+          return { options: nonEmpty };
+        }
+        function syncCorrectChoices(selectEl, optionsCount) {
+          var count = optionsCount === 2 ? 2 : 4;
+          var nextHtml = "";
+          for (var i = 0; i < count; i++) {
+            nextHtml += '<option value="' + i + '">الخيار ' + (i + 1) + '</option>';
+          }
+          var prev = parseInt(selectEl.value, 10);
+          selectEl.innerHTML = nextHtml;
+          if (Number.isInteger(prev) && prev >= 0 && prev < count) {
+            selectEl.value = String(prev);
+          } else {
+            selectEl.value = "0";
+          }
+        }
+        function syncCorrectFromManualOptions() {
+          var values = [
+            document.getElementById("opt0").value.trim(),
+            document.getElementById("opt1").value.trim(),
+            document.getElementById("opt2").value.trim(),
+            document.getElementById("opt3").value.trim()
+          ];
+          var count = values.filter(function (v) { return v.length > 0; }).length;
+          if (count === 2 || count === 4) syncCorrectChoices(correctSelect, count);
+        }
         async function refreshCount() {
           try {
             var r = await fetch("/api/admin/question-count");
@@ -1080,20 +1116,26 @@
           var secret = document.getElementById("admin-secret").value.trim();
           var body = {
             prompt: document.getElementById("prompt").value.trim(),
-            options: [
+            correctIndex: parseInt(correctSelect.value, 10),
+            subcategoryKey: document.getElementById("q-subcategory").value || "general_default"
+          };
+          var optionsInput = [
               document.getElementById("opt0").value.trim(),
               document.getElementById("opt1").value.trim(),
               document.getElementById("opt2").value.trim(),
               document.getElementById("opt3").value.trim()
-            ],
-            correctIndex: parseInt(document.getElementById("correct").value, 10),
-            subcategoryKey: document.getElementById("q-subcategory").value || "general_default"
-          };
+            ];
           var diff = document.getElementById("difficulty").value.trim();
           var study = document.getElementById("study-body").value.trim();
           if (!secret) return setMsg("أدخل مفتاح الإدارة.", false);
           loadCategoriesForUi(secret).catch(function () {});
-          if (!body.prompt || body.options.some(function (o) { return !o; })) return setMsg("أكمل الحقول المطلوبة.", false);
+          var normalized = buildNormalizedOptions(optionsInput);
+          if (normalized.error) return setMsg(normalized.error, false);
+          body.options = normalized.options;
+          if (!body.prompt) return setMsg("أكمل الحقول المطلوبة.", false);
+          if (!Number.isInteger(body.correctIndex) || body.correctIndex < 0 || body.correctIndex >= body.options.length) {
+            return setMsg("الإجابة الصحيحة يجب أن تكون ضمن عدد الخيارات.", false);
+          }
           if (!diff) return setMsg("يجب تحديد مستوى صعوبة السؤال قبل الحفظ", false);
           body.difficulty = diff;
           if (study) body.studyBody = study;
@@ -1105,13 +1147,17 @@
               setMsg("تم حفظ السؤال بنجاح.", true);
               if (typeof data.totalQuestions === "number") totalEl.textContent = String(data.totalQuestions); else await refreshCount();
               form.reset();
-              document.getElementById("correct").value = "0";
+              syncCorrectChoices(correctSelect, 4);
+              correctSelect.value = "0";
             } else setMsg("تعذر الحفظ.", false);
           } catch (e) {
             setMsg("خطأ في الاتصال.", false);
           } finally {
             btn.disabled = false;
           }
+        });
+        ["opt0", "opt1", "opt2", "opt3"].forEach(function (id) {
+          document.getElementById(id).addEventListener("input", syncCorrectFromManualOptions);
         });
       })();
 
@@ -1145,10 +1191,14 @@
           var subcategoryKey = String(item.subcategoryKey || "").trim();
           var difficulty = String(item.difficulty || "").trim().toLowerCase();
           if (!prompt) return { error: "العنصر " + (idx + 1) + ": مفتاح prompt مفقود أو فارغ." };
-          if (!Array.isArray(options) || options.length !== 4) return { error: "العنصر " + (idx + 1) + ": options يجب أن تكون مصفوفة من 4 عناصر." };
+          if (!Array.isArray(options) || (options.length !== 2 && options.length !== 4)) {
+            return { error: "العنصر " + (idx + 1) + ": options يجب أن تكون مصفوفة من عنصرين أو 4 عناصر." };
+          }
           var normalizedOptions = options.map(function (o) { return String(o || "").trim(); });
           if (normalizedOptions.some(function (o) { return !o; })) return { error: "العنصر " + (idx + 1) + ": جميع عناصر options مطلوبة." };
-          if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex > 3) return { error: "العنصر " + (idx + 1) + ": correctIndex يجب أن يكون رقمًا صحيحًا بين 0 و 3." };
+          if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= normalizedOptions.length) {
+            return { error: "العنصر " + (idx + 1) + ": correctIndex يجب أن يكون ضمن مدى الخيارات الفعلي." };
+          }
           if (!studyBody) return { error: "العنصر " + (idx + 1) + ": مفتاح studyBody مفقود أو فارغ." };
           if (!subcategoryKey) return { error: "العنصر " + (idx + 1) + ": مفتاح subcategoryKey مفقود أو فارغ." };
           if (!difficultySet[difficulty]) return { error: "العنصر " + (idx + 1) + ": difficulty يجب أن تكون easy أو medium أو hard." };
@@ -1173,10 +1223,11 @@
             var c = "preview-option" + (i === item.correctIndex ? " correct" : "");
             return '<div class="' + c + '">' + opt + '</div>';
           }).join("");
+          var optionsClass = item.options.length === 2 ? "preview-options two-options" : "preview-options";
           previewPhone.innerHTML =
             '<div class="preview-meta"><span>السؤال ' + (currentIndex + 1) + ' / ' + previewItems.length + '</span><span>' + item.difficulty + '</span></div>' +
             '<div class="preview-prompt">' + item.prompt + '</div>' +
-            '<div class="preview-options">' + optionsHtml + '</div>' +
+            '<div class="' + optionsClass + '">' + optionsHtml + '</div>' +
             '<div class="preview-study"><b>بطاقة المذاكرة:</b><div style="margin-top:0.45rem">' + item.studyBody + '</div></div>';
           prevBtn.disabled = currentIndex <= 0;
           nextBtn.disabled = currentIndex >= previewItems.length - 1;
@@ -1353,7 +1404,7 @@
             "",
             "{",
             '  "prompt": "السؤال هنا؟",',
-            '  "options": ["خيار 1", "خيار 2", "خيار 3", "خيار 4"],',
+            '  "options": ["خيار 1", "خيار 2"] أو ["خيار 1", "خيار 2", "خيار 3", "خيار 4"],',
             '  "correctIndex": 0,',
             '  "studyBody": "هنا تضع نص البطاقة التعليمية الشامل والمركز بأسلوب شيق ومبسط.",',
             '  "subcategoryKey": "' + sub.subcategoryKey + '",',
@@ -1373,7 +1424,7 @@
             "",
             "توزيع الإجابة الصحيحة (Randomize Correct Index):",
             "- يُمنع منعاً باتاً جعل الإجابة الصحيحة هي الخيار الأول دائماً.",
-            "- يجب توزيع قيمة correctIndex عشوائياً بين 0 و 1 و 2 و 3 عبر كامل المصفوفة.",
+            "- إذا كان السؤال بخيارين فـ correctIndex يجب أن يكون 0 أو 1. وإذا كان بأربعة خيارات فـ correctIndex يجب أن يكون بين 0 و 3.",
             "- يجب أن يطابق correctIndex مكان الإجابة الصحيحة الفعلي داخل مصفوفة options لكل سؤال.",
             "- عند توليد " + count + " سؤالاً، راقب التوزيع النهائي حتى لا ينحاز إلى رقم واحد أو نمط متكرر واضح.",
             "",
@@ -1390,7 +1441,7 @@
             "- إذا احتجت للاقتباس داخل النص فاستخدم صياغة بديلة أو علامات اقتباس مفردة فقط عند الضرورة.",
             "",
             "تنسيق الخيارات (options):",
-            "- يجب أن تكون الخيارات الأربعة مختصرة ومركزة وواضحة.",
+            "- يجب أن يكون عدد الخيارات لكل سؤال 2 أو 4 فقط.",
             "- لا تجعل أي خيار طويلاً؛ الأفضل أن يكون كلمات معدودة ليناسب واجهة الجوال.",
             "- يجب أن تكون الخيارات متقاربة في النمط حتى لا تكون الإجابة الصحيحة مكشوفة من طولها أو صياغتها.",
             "- يجب أن تكون الخيارات الخاطئة Distractors ذكية ومبنية على أخطاء منطقية محتملة للاعب، وليست أرقاماً عشوائية أو إجابات سخيفة.",
@@ -2186,6 +2237,35 @@
           } catch (e) { setBankMsg("خطأ في الاتصال.", false); }
         };
         var modal = document.getElementById("edit-modal");
+        var editCorrectSelect = document.getElementById("edit-correct");
+        function syncEditCorrectChoices(optionsCount) {
+          var count = optionsCount === 2 ? 2 : 4;
+          var current = parseInt(editCorrectSelect.value, 10);
+          var html = "";
+          for (var i = 0; i < count; i++) {
+            html += '<option value="' + i + '">الخيار ' + (i + 1) + '</option>';
+          }
+          editCorrectSelect.innerHTML = html;
+          if (Number.isInteger(current) && current >= 0 && current < count) editCorrectSelect.value = String(current);
+          else editCorrectSelect.value = "0";
+        }
+        function buildNormalizedOptions(values) {
+          var trimmed = values.map(function (v) { return String(v || "").trim(); });
+          var nonEmpty = trimmed.filter(function (v) { return v.length > 0; });
+          if (nonEmpty.length !== 2 && nonEmpty.length !== 4) return { error: "عدد الخيارات يجب أن يكون 2 أو 4." };
+          if (nonEmpty.length !== trimmed.length) return { error: "لا تترك فراغات بين الخيارات. املأ أول خيارين فقط، أو جميع الأربعة." };
+          return { options: nonEmpty };
+        }
+        function syncEditCorrectFromInputs() {
+          var values = [
+            document.getElementById("edit-opt0").value.trim(),
+            document.getElementById("edit-opt1").value.trim(),
+            document.getElementById("edit-opt2").value.trim(),
+            document.getElementById("edit-opt3").value.trim()
+          ];
+          var count = values.filter(function (v) { return v.length > 0; }).length;
+          if (count === 2 || count === 4) syncEditCorrectChoices(count);
+        }
         function closeModal() { modal.hidden = true; }
         document.getElementById("edit-close").onclick = closeModal;
         document.getElementById("edit-cancel-btn").onclick = closeModal;
@@ -2204,6 +2284,7 @@
             document.getElementById("edit-opt1").value = q.options[1] || "";
             document.getElementById("edit-opt2").value = q.options[2] || "";
             document.getElementById("edit-opt3").value = q.options[3] || "";
+            syncEditCorrectChoices(Array.isArray(q.options) && q.options.length === 2 ? 2 : 4);
             document.getElementById("edit-correct").value = String(q.correctIndex);
             document.getElementById("edit-difficulty").value = q.difficulty || "";
             document.getElementById("edit-study").value = q.studyBody || "";
@@ -2216,19 +2297,31 @@
           var id = parseInt(document.getElementById("edit-id").value, 10);
           var body = {
             prompt: document.getElementById("edit-prompt").value.trim(),
-            options: [
-              document.getElementById("edit-opt0").value.trim(),
-              document.getElementById("edit-opt1").value.trim(),
-              document.getElementById("edit-opt2").value.trim(),
-              document.getElementById("edit-opt3").value.trim()
-            ],
-            correctIndex: parseInt(document.getElementById("edit-correct").value, 10),
             studyBody: document.getElementById("edit-study").value,
             difficulty: document.getElementById("edit-difficulty").value.trim(),
             subcategoryKey: document.getElementById("edit-subcategory").value || "general_default"
           };
-          if (!body.prompt || body.options.some(function (o) { return !o; })) {
+          var optionsInput = [
+              document.getElementById("edit-opt0").value.trim(),
+              document.getElementById("edit-opt1").value.trim(),
+              document.getElementById("edit-opt2").value.trim(),
+              document.getElementById("edit-opt3").value.trim()
+            ];
+          var normalized = buildNormalizedOptions(optionsInput);
+          if (normalized.error) {
+            em.textContent = normalized.error;
+            em.className = "msg err";
+            return;
+          }
+          body.options = normalized.options;
+          body.correctIndex = parseInt(document.getElementById("edit-correct").value, 10);
+          if (!body.prompt) {
             em.textContent = "أكمل الحقول.";
+            em.className = "msg err";
+            return;
+          }
+          if (!Number.isInteger(body.correctIndex) || body.correctIndex < 0 || body.correctIndex >= body.options.length) {
+            em.textContent = "الإجابة الصحيحة يجب أن تكون ضمن عدد الخيارات.";
             em.className = "msg err";
             return;
           }
@@ -2251,6 +2344,9 @@
             }
           } catch (e) { em.textContent = "خطأ في الاتصال."; em.className = "msg err"; }
         };
+        ["edit-opt0", "edit-opt1", "edit-opt2", "edit-opt3"].forEach(function (id) {
+          document.getElementById(id).addEventListener("input", syncEditCorrectFromInputs);
+        });
         window.openEditModal = openEditModal;
       })();
     </script>

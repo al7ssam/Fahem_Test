@@ -15,22 +15,35 @@ import {
 } from "../services/cleanup";
 
 const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
+const questionOptionsSchema = z
+  .array(z.string().trim().min(1).max(500))
+  .refine((arr) => arr.length === 2 || arr.length === 4, {
+    message: "options must contain exactly 2 or 4 items",
+  });
 
 const questionBodySchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
-  options: z.array(z.string().trim().min(1).max(500)).length(4),
+  options: questionOptionsSchema,
   correctIndex: z.number().int().min(0).max(3),
   difficulty: questionDifficultySchema,
   studyBody: z.string().max(50_000).optional(),
   study_body: z.string().max(50_000).optional(),
   subcategoryKey: z.string().trim().min(1).max(120).optional(),
   subcategory_key: z.string().trim().min(1).max(120).optional(),
+}).superRefine((d, ctx) => {
+  if (d.correctIndex >= d.options.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["correctIndex"],
+      message: "correctIndex must be within options range",
+    });
+  }
 });
 
 const importItemSchema = z
   .object({
     prompt: z.string().trim().min(1).max(2000),
-    options: z.array(z.string().trim().min(1).max(500)).length(4),
+    options: questionOptionsSchema,
     correctIndex: z.number().int().min(0).max(3).optional(),
     correct_index: z.number().int().min(0).max(3).optional(),
     difficulty: questionDifficultySchema,
@@ -41,6 +54,16 @@ const importItemSchema = z
   })
   .refine((d) => d.correctIndex !== undefined || d.correct_index !== undefined, {
     message: "correctIndex or correct_index required",
+  })
+  .superRefine((d, ctx) => {
+    const idx = d.correctIndex ?? d.correct_index;
+    if (idx === undefined || idx < 0 || idx >= d.options.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["correctIndex"],
+        message: "correctIndex must be within options range",
+      });
+    }
   })
   .transform((d) => ({
     prompt: d.prompt,
@@ -103,7 +126,7 @@ const cleanupSettingsPatchSchema = z.object({
 
 const questionPatchSchema = z.object({
   prompt: z.string().trim().min(1).max(2000).optional(),
-  options: z.array(z.string().trim().min(1).max(500)).length(4).optional(),
+  options: questionOptionsSchema.optional(),
   correctIndex: z.number().int().min(0).max(3).optional(),
   correct_index: z.number().int().min(0).max(3).optional(),
   difficulty: questionDifficultySchema,
@@ -1370,6 +1393,14 @@ export function registerAdminRoutes(app: Express): void {
       }
       const nextCorrect =
         correctIdx !== undefined ? correctIdx : row.correct_index;
+      if (!Number.isInteger(nextCorrect) || nextCorrect < 0 || nextCorrect >= nextOptions.length) {
+        res.status(400).json({
+          ok: false,
+          error: "invalid_body",
+          message: "correctIndex must be within options range",
+        });
+        return;
+      }
       const nextDiff = d.difficulty;
       const nextSubcategoryKey = String(
         d.subcategoryKey ?? d.subcategory_key ?? row.subcategory_key,

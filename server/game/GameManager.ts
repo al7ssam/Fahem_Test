@@ -15,7 +15,7 @@ const joinLobbySchema = z.object({
 
 const answerSchema = z.object({
   questionId: z.number().int().positive(),
-  choiceIndex: z.number().int().min(0).max(3),
+  choiceIndex: z.number().int().min(0),
 });
 
 const abilityHeartSchema = z.object({
@@ -585,6 +585,10 @@ export class GameManager {
       const match = this.socketToMatch.get(socket.id);
       const parsed = answerSchema.safeParse(raw);
       if (!match || !parsed.success) {
+        cb?.({ ok: false });
+        return;
+      }
+      if (!match.canAcceptChoice(parsed.data.questionId, parsed.data.choiceIndex)) {
         cb?.({ ok: false });
         return;
       }

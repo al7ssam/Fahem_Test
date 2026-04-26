@@ -66,6 +66,7 @@ export class Match {
   private round = 0;
   private currentQuestionId: number | null = null;
   private currentCorrectIndex: number | null = null;
+  private currentOptionsCount: number | null = null;
   private questionStartedAt = 0;
   private answerDeadline = 0;
   private pendingAnswers = new Map<string, number>();
@@ -398,6 +399,13 @@ export class Match {
     }
   }
 
+  canAcceptChoice(questionId: number, choiceIndex: number): boolean {
+    if (this.currentQuestionId !== questionId) return false;
+    const optionsCount = this.currentOptionsCount ?? 0;
+    if (optionsCount <= 0) return false;
+    return Number.isInteger(choiceIndex) && choiceIndex >= 0 && choiceIndex < optionsCount;
+  }
+
   handleDisconnect(socketId: string): void {
     const p = this.players.get(socketId);
     if (!p || p.eliminated) return;
@@ -419,6 +427,7 @@ export class Match {
       this.roundClosed = true;
       this.currentQuestionId = null;
       this.currentCorrectIndex = null;
+      this.currentOptionsCount = null;
       this.resolveRound?.();
       this.resolveRound = null;
       this.declareWinner();
@@ -709,6 +718,7 @@ export class Match {
     this.skipSocketsForQuestion.clear();
     this.currentQuestionId = q.id;
     this.currentCorrectIndex = q.correct_index;
+    this.currentOptionsCount = q.options.length;
     this.questionStartedAt = Date.now();
     this.answerDeadline = Date.now() + this.questionMs;
     this.pendingAnswers.clear();
@@ -764,6 +774,7 @@ export class Match {
     const correctIndex = this.currentCorrectIndex ?? 0;
     this.currentQuestionId = null;
     this.currentCorrectIndex = null;
+    this.currentOptionsCount = null;
 
     const results: Array<{
       socketId: string;
