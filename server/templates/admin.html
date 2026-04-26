@@ -411,6 +411,23 @@
         font-size: 0.78rem;
         color: #d1bf93;
       }
+      .factory-advanced {
+        margin-top: 0.65rem;
+        padding: 0.65rem;
+        border-radius: 0.65rem;
+        border: 1px solid rgba(223, 187, 106, 0.18);
+        background: rgba(6, 10, 20, 0.55);
+      }
+      .factory-advanced > .factory-advanced-title {
+        display: block;
+        margin: 0 0 0.45rem;
+        font-weight: 700;
+        color: #e8d4a8;
+        font-size: 0.88rem;
+      }
+      .af-reasoning-wrap {
+        min-width: 0;
+      }
       .guide-title {
         margin: 0 0 0.4rem;
         font-weight: 800;
@@ -852,26 +869,37 @@
             </div>
             <label style="margin-top:0.7rem">اختيار النموذج لكل طبقة</label>
             <div class="factory-grid">
-              <div><label for="af-model-architect">Architect</label><select id="af-model-architect"><option value="gemini-3-flash">gemini-3-flash</option><option value="gemini-1.5-flash">gemini-1.5-flash</option><option value="gemini-1.5-pro">gemini-1.5-pro</option></select></div>
-              <div><label for="af-model-creator">Creator</label><select id="af-model-creator"><option value="gemini-3-flash">gemini-3-flash</option><option value="gemini-1.5-flash">gemini-1.5-flash</option><option value="gemini-1.5-pro">gemini-1.5-pro</option></select></div>
-              <div><label for="af-model-auditor">Auditor</label><select id="af-model-auditor"><option value="gemini-3-flash">gemini-3-flash</option><option value="gemini-1.5-flash">gemini-1.5-flash</option><option value="gemini-1.5-pro">gemini-1.5-pro</option></select></div>
-              <div><label for="af-model-refiner">Refiner</label><select id="af-model-refiner"><option value="gemini-3-flash">gemini-3-flash</option><option value="gemini-1.5-flash">gemini-1.5-flash</option><option value="gemini-1.5-pro">gemini-1.5-pro</option></select></div>
+              <div><label for="af-model-architect">Architect</label><select id="af-model-architect"></select></div>
+              <div><label for="af-model-creator">Creator</label><select id="af-model-creator"></select></div>
+              <div><label for="af-model-auditor">Auditor</label><select id="af-model-auditor"></select></div>
+              <div><label for="af-model-refiner">Refiner</label><select id="af-model-refiner"></select></div>
             </div>
-            <label style="margin-top:0.5rem" title="مستويات التفكير العالية تزيد من دقة النتائج ولكن تستهلك من الحد المجاني للـ API بسرعة أكبر">مستوى التفكير لكل طبقة</label>
+            <label style="margin-top:0.5rem" title="مستويات التفكير العالية تزيد من دقة النتائج ولكن تستهلك من الحد المجاني للـ API بسرعة أكبر">مستوى التفكير لكل طبقة (يظهر فقط لموديلات Gemini 3 الداعمة)</label>
             <div class="factory-grid">
-              <div><label for="af-reasoning-architect">تفكير Architect</label><select id="af-reasoning-architect"><option value="none">بدون تفكير</option><option value="low">منخفض</option><option value="medium">متوسط</option><option value="high">مرتفع</option></select><div class="factory-help" id="af-reasoning-help-architect"></div></div>
-              <div><label for="af-reasoning-creator">تفكير Creator</label><select id="af-reasoning-creator"><option value="none">بدون تفكير</option><option value="low">منخفض</option><option value="medium">متوسط</option><option value="high">مرتفع</option></select><div class="factory-help" id="af-reasoning-help-creator"></div></div>
-              <div><label for="af-reasoning-auditor">تفكير Auditor</label><select id="af-reasoning-auditor"><option value="none">بدون تفكير</option><option value="low">منخفض</option><option value="medium">متوسط</option><option value="high">مرتفع</option></select><div class="factory-help" id="af-reasoning-help-auditor"></div></div>
-              <div><label for="af-reasoning-refiner">تفكير Refiner</label><select id="af-reasoning-refiner"><option value="none">بدون تفكير</option><option value="low">منخفض</option><option value="medium">متوسط</option><option value="high">مرتفع</option></select><div class="factory-help" id="af-reasoning-help-refiner"></div></div>
+              <div class="af-reasoning-wrap" id="af-reasoning-wrap-architect"><label for="af-reasoning-architect">تفكير Architect</label><select id="af-reasoning-architect"></select><div class="factory-help" id="af-reasoning-help-architect"></div></div>
+              <div class="af-reasoning-wrap" id="af-reasoning-wrap-creator"><label for="af-reasoning-creator">تفكير Creator</label><select id="af-reasoning-creator"></select><div class="factory-help" id="af-reasoning-help-creator"></div></div>
+              <div class="af-reasoning-wrap" id="af-reasoning-wrap-auditor"><label for="af-reasoning-auditor">تفكير Auditor</label><select id="af-reasoning-auditor"></select><div class="factory-help" id="af-reasoning-help-auditor"></div></div>
+              <div class="af-reasoning-wrap" id="af-reasoning-wrap-refiner"><label for="af-reasoning-refiner">تفكير Refiner</label><select id="af-reasoning-refiner"></select><div class="factory-help" id="af-reasoning-help-refiner"></div></div>
             </div>
             <div class="factory-grid" style="margin-top:0.4rem">
-              <div><label for="af-key-env">API Key Env</label><input id="af-key-env" type="text" value="GEMINI_API_KEY" /></div>
-              <div><label for="af-temp">Temperature</label><input id="af-temp" type="text" inputmode="decimal" value="0.4" /></div>
-              <div><label for="af-max-tokens">Max Tokens</label><input id="af-max-tokens" type="text" inputmode="numeric" value="8192" /></div>
+              <div style="grid-column: 1 / -1"><label for="af-key-env">API Key Env (مشترك)</label><input id="af-key-env" type="text" value="GEMINI_API_KEY" /></div>
+            </div>
+            <div class="factory-advanced">
+              <span class="factory-advanced-title">درجة الحرارة والحد الأقصى للتوكنز لكل طبقة</span>
+              <div class="factory-grid">
+                <div><label for="af-temp-architect">Architect — Temperature</label><input id="af-temp-architect" type="number" step="0.01" min="0" max="2" value="0.4" /></div>
+                <div><label for="af-max-tokens-architect">Architect — Max tokens</label><input id="af-max-tokens-architect" type="number" min="256" max="65536" step="1" value="8192" /></div>
+                <div><label for="af-temp-creator">Creator — Temperature</label><input id="af-temp-creator" type="number" step="0.01" min="0" max="2" value="0.4" /></div>
+                <div><label for="af-max-tokens-creator">Creator — Max tokens</label><input id="af-max-tokens-creator" type="number" min="256" max="65536" step="1" value="8192" /></div>
+                <div><label for="af-temp-auditor">Auditor — Temperature</label><input id="af-temp-auditor" type="number" step="0.01" min="0" max="2" value="0.4" /></div>
+                <div><label for="af-max-tokens-auditor">Auditor — Max tokens</label><input id="af-max-tokens-auditor" type="number" min="256" max="65536" step="1" value="8192" /></div>
+                <div><label for="af-temp-refiner">Refiner — Temperature</label><input id="af-temp-refiner" type="number" step="0.01" min="0" max="2" value="0.4" /></div>
+                <div><label for="af-max-tokens-refiner">Refiner — Max tokens</label><input id="af-max-tokens-refiner" type="number" min="256" max="65536" step="1" value="8192" /></div>
+              </div>
             </div>
             <label style="margin-top:0.7rem">تشغيل يدوي</label>
             <div class="factory-grid">
-              <div><label for="af-run-subcategory">المفتاح الفرعي</label><input id="af-run-subcategory" type="text" placeholder="math_geometry" /></div>
+              <div><label for="af-run-subcategory">التصنيف الفرعي</label><select id="af-run-subcategory"><option value="">— اختر التصنيف الفرعي —</option></select></div>
               <div><label for="af-run-difficulty">الصعوبة</label>
                 <select id="af-run-difficulty">
                   <option value="mix">مزيج</option>
@@ -2473,10 +2501,7 @@
         function val(id) { return document.getElementById(id).value.trim(); }
         function supportsThinkingModel(modelName) {
           var m = String(modelName || "");
-          if (thinkingLevelModelIds.length) {
-            return thinkingLevelModelIds.indexOf(m) >= 0;
-          }
-          return m === "gemini-3-flash" || m === "gemini-3-flash-preview";
+          return thinkingLevelModelIds.length > 0 && thinkingLevelModelIds.indexOf(m) >= 0;
         }
         function ensureReasoningOptions(selectId, options, fallback) {
           var el = document.getElementById(selectId);
@@ -2499,15 +2524,18 @@
           var modelEl = document.getElementById("af-model-" + layerName);
           var reasoningEl = document.getElementById("af-reasoning-" + layerName);
           var helpEl = document.getElementById("af-reasoning-help-" + layerName);
-          if (!modelEl || !reasoningEl || !helpEl) return;
+          var wrap = document.getElementById("af-reasoning-wrap-" + layerName);
+          if (!modelEl || !reasoningEl) return;
           var supported = supportsThinkingModel(modelEl.value);
           if (!supported) {
             reasoningEl.value = "none";
             reasoningEl.disabled = true;
-            helpEl.textContent = "هذا الموديل لا يدعم التفكير المنهجي؛ تم ضبط المستوى على (بدون تفكير).";
+            if (wrap) wrap.style.display = "none";
+            if (helpEl) helpEl.textContent = "";
           } else {
             reasoningEl.disabled = false;
-            helpEl.textContent = "";
+            if (wrap) wrap.style.display = "";
+            if (helpEl) helpEl.textContent = "";
           }
         }
         function bindReasoningGuards() {
@@ -2576,17 +2604,41 @@
             if (el) el.value = String(m.modelName || "");
             var reasoningEl = document.getElementById("af-reasoning-" + m.layerName);
             if (reasoningEl) reasoningEl.value = String(m.reasoningLevel || fallbackReasoning);
+            var tempEl = document.getElementById("af-temp-" + m.layerName);
+            var maxEl = document.getElementById("af-max-tokens-" + m.layerName);
+            if (tempEl) tempEl.value = String(m.temperature ?? 0.4);
+            if (maxEl) maxEl.value = String(m.maxOutputTokens ?? 8192);
             if (m.layerName === "architect") {
               document.getElementById("af-key-env").value = String(m.apiKeyEnv || defaultApiKeyEnv || "GEMINI_API_KEY");
-              document.getElementById("af-temp").value = String(m.temperature ?? 0.4);
-              document.getElementById("af-max-tokens").value = String(m.maxOutputTokens ?? 8192);
             }
           });
           bindReasoningGuards();
         }
-        async function loadFactory() {
+        function populateFactorySubcategorySelect() {
+          var sel = document.getElementById("af-run-subcategory");
+          if (!sel) return;
+          var prev = sel.value;
+          sel.innerHTML = '<option value="">— اختر التصنيف الفرعي —</option>';
+          (typeof categoriesCache !== "undefined" ? categoriesCache : []).forEach(function (m) {
+            var og = document.createElement("optgroup");
+            og.label = (m.icon || "📚") + " " + (m.nameAr || m.mainKey) + " (" + (m.mainKey || "") + ")";
+            (m.subcategories || []).forEach(function (s) {
+              var o = document.createElement("option");
+              o.value = s.subcategoryKey;
+              o.textContent = (s.nameAr || s.subcategoryKey) + " — " + s.subcategoryKey;
+              og.appendChild(o);
+            });
+            if (og.children.length) sel.appendChild(og);
+          });
+          if (prev && Array.from(sel.options).some(function (o) { return o.value === prev; })) sel.value = prev;
+        }
+        async function loadFactory(silent) {
           if (!secret()) return;
           try {
+            if (typeof loadCategoriesForUi === "function") {
+              await loadCategoriesForUi(secret()).catch(function () {});
+            }
+            populateFactorySubcategorySelect();
             var [stRes, modelRes, statusRes, jobsRes] = await Promise.all([
               fetch("/api/admin/ai-factory/settings", { headers: { "X-Admin-Secret": secret() } }),
               fetch("/api/admin/ai-factory/models", { headers: { "X-Admin-Secret": secret() } }),
@@ -2603,10 +2655,16 @@
             }
             if (statusRes.ok && status.ok) setStatus(status.runtime);
             if (jobsRes.ok && jobs.ok) renderJobs(jobs.items || []);
-            msg("تم تحميل بيانات المصنع.", true);
+            if (!silent) msg("تم تحميل بيانات المصنع.", true);
           } catch (e) {
             msg("تعذر تحميل بيانات المصنع.", false);
           }
+        }
+        function layerNumeric(id, fallback) {
+          var raw = val(id);
+          if (raw === "") return fallback;
+          var n = Number(raw);
+          return Number.isFinite(n) ? n : fallback;
         }
         function modelPayload(layerName) {
           return {
@@ -2614,8 +2672,8 @@
             provider: "gemini",
             modelName: val("af-model-" + layerName) || "gemini-3-flash",
             apiKeyEnv: val("af-key-env") || "GEMINI_API_KEY",
-            temperature: Number(val("af-temp") || "0.4"),
-            maxOutputTokens: Number(val("af-max-tokens") || "8192"),
+            temperature: layerNumeric("af-temp-" + layerName, 0.4),
+            maxOutputTokens: Math.round(layerNumeric("af-max-tokens-" + layerName, 8192)),
             isEnabled: true,
             reasoningLevel: val("af-reasoning-" + layerName) || "none"
           };
@@ -2650,7 +2708,8 @@
             var r = await fetch("/api/admin/ai-factory/models", { method: "PATCH", headers: hdr(), body: JSON.stringify(body) });
             var j = await r.json();
             if (!r.ok || !j.ok) throw new Error("save_models_failed");
-            msg("تم حفظ إعدادات النماذج.", true);
+            await loadFactory(true);
+            msg("تم حفظ إعدادات النماذج وتحديث العرض.", true);
           } catch (e) {
             msg("تعذر حفظ النماذج.", false);
           }
@@ -2661,7 +2720,7 @@
               subcategoryKey: val("af-run-subcategory"),
               difficultyMode: document.getElementById("af-run-difficulty").value || "mix"
             };
-            if (!body.subcategoryKey) return msg("أدخل المفتاح الفرعي أولاً.", false);
+            if (!body.subcategoryKey) return msg("اختر التصنيف الفرعي من القائمة أولاً.", false);
             var r = await fetch("/api/admin/ai-factory/run-now", { method: "POST", headers: hdr(), body: JSON.stringify(body) });
             var j = await r.json();
             if (!r.ok || !j.ok) throw new Error("run_now_failed");
