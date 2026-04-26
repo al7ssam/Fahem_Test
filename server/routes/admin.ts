@@ -7,6 +7,12 @@ import { config } from "../config";
 import { getPool } from "../db/pool";
 import { getResultMessages } from "../db/resultCopy";
 import { Match } from "../game/Match";
+import {
+  countExpiredQuestions,
+  getCleanupSettings,
+  performCleanup,
+  updateCleanupSettings,
+} from "../services/cleanup";
 
 const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
 
@@ -88,6 +94,11 @@ const keysSettingsPatchSchema = z.object({
   abilityAttackStudyEnabled: z.boolean(),
   abilityRevealDirectEnabled: z.boolean(),
   abilityRevealStudyEnabled: z.boolean(),
+});
+
+const cleanupSettingsPatchSchema = z.object({
+  autoDeleteEnabled: z.boolean(),
+  deletionThresholdDays: z.number().int().min(1).max(3650),
 });
 
 const questionPatchSchema = z.object({
@@ -629,6 +640,75 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true });
     } catch {
       res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.get("/api/admin/cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getCleanupSettings();
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = cleanupSettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const settings = await updateCleanupSettings(parsed.data);
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/cleanup/preview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getCleanupSettings();
+      const expiredCount = await countExpiredQuestions(settings.deletionThresholdDays);
+      res.json({
+        ok: true,
+        expiredCount,
+        deletionThresholdDays: settings.deletionThresholdDays,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "preview_failed" });
+    }
+  });
+
+  app.post("/api/admin/cleanup/run", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const result = await performCleanup({ source: "manual", forceRun: true });
+      res.json({
+        ok: true,
+        deletedCount: result.deletedCount,
+        deletionThresholdDays: result.thresholdDays,
+        runDate: result.runDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "cleanup_failed" });
     }
   });
 

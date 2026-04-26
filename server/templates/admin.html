@@ -689,6 +689,29 @@
       </div>
 
       <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="cleanup-settings">
+          <span class="accordion-title">صلاحية الأسئلة والتنظيف التلقائي</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <label for="cl-enabled">تفعيل الحذف التلقائي</label>
+            <input id="cl-enabled" type="checkbox" />
+            <label for="cl-days">عدد أيام الصلاحية</label>
+            <input id="cl-days" type="text" inputmode="numeric" value="30" />
+            <label for="cl-last-run">آخر تشغيل ناجح</label>
+            <input id="cl-last-run" type="text" value="—" disabled />
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="cl-load-btn">تحميل</button>
+              <button type="button" class="btn" id="cl-save-btn">حفظ</button>
+              <button type="button" class="btn btn-danger" id="cl-run-btn">حذف الأسئلة القديمة الآن</button>
+            </div>
+            <div class="msg" id="cl-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="categories">
           <span class="accordion-title">إدارة التصنيفات</span>
           <span class="accordion-icon">⌄</span>
@@ -822,6 +845,21 @@
             </div>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="cleanup-modal" hidden>
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3 style="margin: 0">تأكيد حذف الأسئلة القديمة</h3>
+          <button type="button" id="cleanup-close">✕</button>
+        </div>
+        <p id="cleanup-preview-text" style="margin: 0.3rem 0 0.7rem"></p>
+        <div class="btn-row">
+          <button type="button" class="btn btn-secondary" id="cleanup-cancel-btn">إلغاء</button>
+          <button type="button" class="btn btn-danger" id="cleanup-confirm-btn">تأكيد الحذف</button>
+        </div>
+        <div class="msg" id="cleanup-modal-msg"></div>
       </div>
     </div>
 
@@ -1429,6 +1467,140 @@
             else setKsMsg("تعذر الحفظ.", false);
           } catch (e) { setKsMsg("خطأ في الاتصال.", false); }
           finally { ksSave.disabled = false; }
+        });
+      })();
+
+      (function () {
+        var clLoad = document.getElementById("cl-load-btn");
+        var clSave = document.getElementById("cl-save-btn");
+        var clRun = document.getElementById("cl-run-btn");
+        var clMsg = document.getElementById("cl-msg");
+        var clEnabled = document.getElementById("cl-enabled");
+        var clDays = document.getElementById("cl-days");
+        var clLastRun = document.getElementById("cl-last-run");
+        var cleanupModal = document.getElementById("cleanup-modal");
+        var cleanupPreviewText = document.getElementById("cleanup-preview-text");
+        var cleanupModalMsg = document.getElementById("cleanup-modal-msg");
+        var cleanupConfirmBtn = document.getElementById("cleanup-confirm-btn");
+        var cleanupCancelBtn = document.getElementById("cleanup-cancel-btn");
+        var cleanupCloseBtn = document.getElementById("cleanup-close");
+
+        function setClMsg(t, ok) { clMsg.textContent = t || ""; clMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function setCleanupModalMsg(t, ok) { cleanupModalMsg.textContent = t || ""; cleanupModalMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        function closeCleanupModal() {
+          cleanupModal.hidden = true;
+          setCleanupModalMsg("", true);
+        }
+
+        async function loadCleanupSettings() {
+          var s = secret();
+          if (!s) return setClMsg("أدخل مفتاح الإدارة.", false);
+          clLoad.disabled = true;
+          try {
+            var r = await fetch("/api/admin/cleanup-settings", { headers: { "X-Admin-Secret": s } });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) {
+              clEnabled.checked = j.autoDeleteEnabled === true;
+              clDays.value = String(j.deletionThresholdDays ?? 30);
+              clLastRun.value = j.lastRunDate ? String(j.lastRunDate) : "—";
+              setClMsg("تم التحميل.", true);
+            } else {
+              setClMsg("تعذر التحميل.", false);
+            }
+          } catch (e) {
+            setClMsg("خطأ في الاتصال.", false);
+          } finally {
+            clLoad.disabled = false;
+          }
+        }
+
+        clLoad.addEventListener("click", loadCleanupSettings);
+        clSave.addEventListener("click", async function () {
+          var s = secret();
+          if (!s) return setClMsg("أدخل مفتاح الإدارة.", false);
+          var days = parseInt(clDays.value, 10);
+          if (!days || days < 1) return setClMsg("عدد الأيام يجب أن يكون 1 أو أكثر.", false);
+          clSave.disabled = true;
+          try {
+            var r = await fetch("/api/admin/cleanup-settings", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s },
+              body: JSON.stringify({
+                autoDeleteEnabled: clEnabled.checked,
+                deletionThresholdDays: days
+              })
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) {
+              clEnabled.checked = j.autoDeleteEnabled === true;
+              clDays.value = String(j.deletionThresholdDays ?? days);
+              clLastRun.value = j.lastRunDate ? String(j.lastRunDate) : "—";
+              setClMsg("تم حفظ الإعدادات.", true);
+            } else {
+              setClMsg("تعذر الحفظ.", false);
+            }
+          } catch (e) {
+            setClMsg("خطأ في الاتصال.", false);
+          } finally {
+            clSave.disabled = false;
+          }
+        });
+
+        clRun.addEventListener("click", async function () {
+          var s = secret();
+          if (!s) return setClMsg("أدخل مفتاح الإدارة.", false);
+          clRun.disabled = true;
+          try {
+            var previewResp = await fetch("/api/admin/cleanup/preview", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s }
+            });
+            var previewJson = await previewResp.json().catch(function () { return {}; });
+            if (!previewResp.ok || !previewJson.ok) {
+              setClMsg("تعذر جلب معاينة الحذف.", false);
+              return;
+            }
+            var count = Number(previewJson.expiredCount || 0);
+            var days = Number(previewJson.deletionThresholdDays || 30);
+            cleanupPreviewText.textContent =
+              "سيتم حذف " + count + " سؤالاً أقدم من " + days + " يومًا. هل تريد المتابعة؟";
+            cleanupModal.hidden = false;
+          } catch (e) {
+            setClMsg("خطأ في الاتصال.", false);
+          } finally {
+            clRun.disabled = false;
+          }
+        });
+
+        cleanupModal.addEventListener("click", function (e) {
+          if (e.target === cleanupModal) closeCleanupModal();
+        });
+        cleanupCancelBtn.addEventListener("click", closeCleanupModal);
+        cleanupCloseBtn.addEventListener("click", closeCleanupModal);
+        cleanupConfirmBtn.addEventListener("click", async function () {
+          var s = secret();
+          if (!s) return setCleanupModalMsg("أدخل مفتاح الإدارة.", false);
+          cleanupConfirmBtn.disabled = true;
+          try {
+            var r = await fetch("/api/admin/cleanup/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s }
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) {
+              setClMsg("تم حذف " + String(j.deletedCount || 0) + " سؤال قديم.", true);
+              clLastRun.value = j.runDate ? String(j.runDate) : "—";
+              closeCleanupModal();
+              if (window.loadTotal) window.loadTotal().catch(function () {});
+            } else {
+              setCleanupModalMsg("تعذر تنفيذ الحذف.", false);
+            }
+          } catch (e) {
+            setCleanupModalMsg("خطأ في الاتصال.", false);
+          } finally {
+            cleanupConfirmBtn.disabled = false;
+          }
         });
       })();
 
