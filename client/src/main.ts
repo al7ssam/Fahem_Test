@@ -2090,6 +2090,9 @@ function connectSocket(
       lastPrivateRoomCode = payload.roomCode;
       isPrivateRoomSession = true;
       await ensurePrivateQrDataUrl(inviteUrl);
+      if (phase === "result") {
+        return;
+      }
       if (phase !== "countdown") {
         phase = "private_room_lobby";
       }
