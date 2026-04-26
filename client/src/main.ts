@@ -914,7 +914,7 @@ function render(): void {
               <div id="private-players-list" class="private-players-list text-sm text-slate-200"></div>
             </div>
             <div class="w-full flex flex-col sm:flex-row gap-3">
-              <button id="cancel-search-btn" type="button" class="ui-btn ui-btn--ghost w-full py-3 text-base">إلغاء البحث</button>
+              <button id="cancel-search-btn" type="button" class="ui-btn ui-btn--ghost w-full py-3 text-base ${isPrivateLobby ? "hidden" : ""}">إلغاء البحث</button>
               <button id="home-search-btn" type="button" class="ui-btn ui-btn--primary w-full py-3 text-base">الصفحة الرئيسية</button>
             </div>
           </div>
@@ -1018,7 +1018,6 @@ function render(): void {
           </div>
           <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem] max-w-md mt-4">${escapeHtml(lobbyNotice)}</p>
           <div class="w-full flex flex-col sm:flex-row gap-3 mt-2">
-            <button id="cancel-search-btn" type="button" class="ui-btn ui-btn--ghost w-full py-3 text-base">إلغاء البحث</button>
             <button id="home-search-btn" type="button" class="ui-btn ui-btn--primary w-full py-3 text-base">الصفحة الرئيسية</button>
           </div>
         </div>
@@ -1080,7 +1079,6 @@ function render(): void {
         render();
       });
     });
-    app.querySelector<HTMLButtonElement>("#cancel-search-btn")?.addEventListener("click", returnToDifficultyFromSearch);
     app.querySelector<HTMLButtonElement>("#home-search-btn")?.addEventListener("click", returnToHomeFromSearch);
     return;
   }
@@ -2083,7 +2081,7 @@ function connectSocket(
         mySocketId &&
         payload.participantSocketIds.includes(mySocketId)
       ) {
-        phase = "countdown";
+        lobbyNotice = "جاري بدء الجولة...";
       }
       render();
     },
@@ -2143,6 +2141,12 @@ function connectSocket(
         participants.length > 0 &&
         isSelected
       ) {
+        if (phase === "private_room_lobby" || Boolean(privateRoomCodeState)) {
+          lobbyNotice = "جاري بدء الجولة...";
+          lobbyPlayersList = payload.players;
+          render();
+          return;
+        }
         lobbyNotice = "";
         lobbyPlayersList = payload.players;
         phase = "countdown";
@@ -2191,6 +2195,11 @@ function connectSocket(
     }
     if (phase === "countdown") {
       startCountdownTicks(Math.max(1, payload.seconds));
+      return;
+    }
+    if (phase === "private_room_lobby" || Boolean(privateRoomCodeState)) {
+      lobbyNotice = "جاري بدء الجولة...";
+      render();
       return;
     }
     if (phase !== "matchmaking" && phase !== "private_room_lobby") return;
