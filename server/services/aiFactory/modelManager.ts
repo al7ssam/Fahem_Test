@@ -86,6 +86,15 @@ class RateLimitError extends Error {
 }
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
+const GEMINI_V1_MODEL_IDS = new Set<string>([
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-001",
+  "gemini-2.0-flash-lite-001",
+  "gemini-2.0-flash-lite",
+  "gemini-2.5-flash-lite",
+]);
 
 /** Strip accidental `models/` prefix so the SDK path is not doubled. */
 function normalizeGeminiModelId(raw: string): string {
@@ -101,6 +110,12 @@ function logGeminiRequestUrl(apiVersion: string, modelId: string): void {
   console.log("[callGemini] POST", path);
 }
 
+function selectApiVersion(modelId: string, reasoningLevel: FactoryReasoningLevel): "v1" | "v1beta" {
+  const needsThinking = supportsThinkingLevel(modelId) && reasoningLevel !== "none";
+  if (needsThinking) return "v1beta";
+  return GEMINI_V1_MODEL_IDS.has(modelId) ? "v1" : "v1beta";
+}
+
 function isQuotaOrRateLimitMessage(msg: string): boolean {
   const m = msg.toLowerCase();
   if (m.includes("resource_exhausted")) return true;
@@ -111,17 +126,19 @@ function isQuotaOrRateLimitMessage(msg: string): boolean {
   return false;
 }
 
-function mapUnknownErrorToProviderError(error: unknown): Error {
+function mapUnknownErrorToProviderError(error: unknown, ctx?: { modelId?: string; apiVersion?: string }): Error {
   const msg = error instanceof Error ? error.message : String(error);
   const short = msg.length > 220 ? `${msg.slice(0, 220)}…` : msg;
-  return new Error(`provider_error:${short}`);
+  const suffix =
+    ctx?.modelId || ctx?.apiVersion ? ` model=${ctx?.modelId ?? "?"} api=${ctx?.apiVersion ?? "?"}` : "";
+  return new Error(`provider_error:${short}${suffix}`);
 }
 
 /**
  * Maps SDK / HTTP failures to RateLimitError where backoff helps, else a short Error for last_error.
  * @google/generative-ai is legacy; Google recommends @google/genai for long-term support.
  */
-function mapGeminiProviderError(error: unknown): Error {
+function mapGeminiProviderError(error: unknown, ctx?: { modelId: string; apiVersion: string }): Error {
   if (error instanceof RateLimitError) return error;
 
   if (error instanceof GoogleGenerativeAIFetchError) {
@@ -133,15 +150,15 @@ function mapGeminiProviderError(error: unknown): Error {
       return new RateLimitError("provider_503", 2000);
     }
     if (status === 404) {
-      return new Error("provider_404_model_or_version");
+      return new Error(`provider_404_model_or_version:model=${ctx?.modelId ?? "?"}:api=${ctx?.apiVersion ?? "?"}`);
     }
     if (status === 401 || status === 403) {
-      return new Error("provider_401_403_auth");
+      return new Error(`provider_401_403_auth:model=${ctx?.modelId ?? "?"}:api=${ctx?.apiVersion ?? "?"}`);
     }
     if (isQuotaOrRateLimitMessage(error.message)) {
       return new RateLimitError("provider_quota_or_rate_limit", 3000);
     }
-    return new Error(`provider_http_${status}`);
+    return new Error(`provider_http_${status}:model=${ctx?.modelId ?? "?"}:api=${ctx?.apiVersion ?? "?"}`);
   }
 
   if (error instanceof GoogleGenerativeAIResponseError) {
@@ -150,14 +167,16 @@ function mapGeminiProviderError(error: unknown): Error {
       return new RateLimitError("provider_quota_or_rate_limit", 3000);
     }
     const short = msg.length > 180 ? `${msg.slice(0, 180)}…` : msg;
-    return new Error(`provider_response:${short || "blocked_or_invalid"}`);
+    return new Error(
+      `provider_response:${short || "blocked_or_invalid"}:model=${ctx?.modelId ?? "?"}:api=${ctx?.apiVersion ?? "?"}`,
+    );
   }
 
   if (error instanceof Error && isQuotaOrRateLimitMessage(error.message)) {
     return new RateLimitError("provider_quota_or_rate_limit", 3000);
   }
 
-  return mapUnknownErrorToProviderError(error);
+  return mapUnknownErrorToProviderError(error, ctx);
 }
 
 function isNonRetryableLayerError(error: unknown): boolean {
@@ -289,7 +308,7 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
 
   const normalizedId = normalizeGeminiModelId(config.modelName);
   const needsThinking = supportsThinkingLevel(normalizedId) && config.reasoningLevel !== "none";
-  const apiVersion = needsThinking ? "v1beta" : "v1";
+  const apiVersion = selectApiVersion(normalizedId, config.reasoningLevel);
 
   logGeminiRequestUrl(apiVersion, normalizedId);
 
@@ -319,7 +338,7 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
       provider: config.provider,
     };
   } catch (error) {
-    throw mapGeminiProviderError(error);
+    throw mapGeminiProviderError(error, { modelId: normalizedId, apiVersion });
   }
 }
 
