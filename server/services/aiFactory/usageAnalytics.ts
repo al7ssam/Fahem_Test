@@ -20,6 +20,8 @@ export type GeminiCostResult = UsageTokens & {
 export type UsageFilters = {
   subject?: string;
   modelId?: string;
+  from?: string;
+  to?: string;
 };
 
 function toSafeTokens(value: unknown): number {
@@ -97,6 +99,14 @@ function applyFilters(baseSql: string, filters: UsageFilters, args: unknown[]): 
     args.push(filters.modelId);
     clauses.push(`model_id = $${args.length}`);
   }
+  if (filters.from) {
+    args.push(filters.from);
+    clauses.push(`created_at >= $${args.length}::timestamptz`);
+  }
+  if (filters.to) {
+    args.push(filters.to);
+    clauses.push(`created_at < ($${args.length}::date + INTERVAL '1 day')`);
+  }
   if (!clauses.length) return { sql: baseSql, args };
   return { sql: `${baseSql} AND ${clauses.join(" AND ")}`, args };
 }
@@ -110,8 +120,19 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
   generatedQuestions: number;
 }> {
   const pool = getPool();
-  const args: unknown[] = [30];
-  const baseSql = `
+  const args: unknown[] = [];
+  let baseSql = `
+    SELECT
+      COALESCE(SUM(cost_usd), 0)::float8 AS total_cost_usd,
+      COALESCE(SUM(cost_sar), 0)::float8 AS total_cost_sar,
+      COALESCE(SUM(input_tokens), 0)::bigint AS total_input_tokens,
+      COALESCE(SUM(output_tokens), 0)::bigint AS total_output_tokens
+    FROM ai_usage_logs
+    WHERE TRUE
+  `;
+  if (!filters.from && !filters.to) {
+    args.push(30);
+    baseSql = `
     SELECT
       COALESCE(SUM(cost_usd), 0)::float8 AS total_cost_usd,
       COALESCE(SUM(cost_sar), 0)::float8 AS total_cost_sar,
@@ -120,6 +141,7 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
     FROM ai_usage_logs
     WHERE created_at >= NOW() - ($1::text || ' days')::interval
   `;
+  }
   const usageQuery = applyFilters(baseSql, filters, args);
   const usage = await pool.query<{
     total_cost_usd: number;
@@ -128,31 +150,52 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
     total_output_tokens: string;
   }>(usageQuery.sql, usageQuery.args);
 
-  const qArgs: unknown[] = [30];
+  const qArgs: unknown[] = [];
   let qSql = `
     SELECT COALESCE(SUM(COALESCE((j.result_summary->>'inserted')::int, 0)), 0)::bigint AS generated_questions
     FROM ai_factory_jobs j
     WHERE j.status = 'succeeded'
-      AND j.created_at >= NOW() - ($1::text || ' days')::interval
   `;
-  if (filters.subject || filters.modelId) {
-    const subArgs: unknown[] = [];
-    const clauses: string[] = [];
-    if (filters.subject) {
-      subArgs.push(filters.subject);
-      clauses.push(`u.subject = $${subArgs.length + 1}`);
+  if (!filters.from && !filters.to) {
+    qArgs.push(30);
+    qSql += ` AND j.created_at >= NOW() - ($1::text || ' days')::interval`;
+  } else {
+    if (filters.from) {
+      qArgs.push(filters.from);
+      qSql += ` AND j.created_at >= $${qArgs.length}::timestamptz`;
     }
-    if (filters.modelId) {
-      subArgs.push(filters.modelId);
-      clauses.push(`u.model_id = $${subArgs.length + 1}`);
+    if (filters.to) {
+      qArgs.push(filters.to);
+      qSql += ` AND j.created_at < ($${qArgs.length}::date + INTERVAL '1 day')`;
     }
+  }
+  const subClauses: string[] = [];
+  if (!filters.from && !filters.to) {
+    subClauses.push(`u.created_at >= NOW() - ($1::text || ' days')::interval`);
+  } else {
+    if (filters.from) {
+      qArgs.push(filters.from);
+      subClauses.push(`u.created_at >= $${qArgs.length}::timestamptz`);
+    }
+    if (filters.to) {
+      qArgs.push(filters.to);
+      subClauses.push(`u.created_at < ($${qArgs.length}::date + INTERVAL '1 day')`);
+    }
+  }
+  if (filters.subject) {
+    qArgs.push(filters.subject);
+    subClauses.push(`u.subject = $${qArgs.length}`);
+  }
+  if (filters.modelId) {
+    qArgs.push(filters.modelId);
+    subClauses.push(`u.model_id = $${qArgs.length}`);
+  }
+  if (subClauses.length) {
     qSql += ` AND EXISTS (
       SELECT 1 FROM ai_usage_logs u
       WHERE u.job_id = j.id
-        AND u.created_at >= NOW() - ($1::text || ' days')::interval
-        AND ${clauses.join(" AND ")}
+        AND ${subClauses.join(" AND ")}
     )`;
-    qArgs.push(...subArgs);
   }
   const questions = await pool.query<{ generated_questions: string }>(qSql, qArgs);
   const row = usage.rows[0];
@@ -170,8 +213,18 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
 
 export async function getUsageDailyCost(filters: UsageFilters): Promise<Array<{ day: string; costUsd: number; costSar: number }>> {
   const pool = getPool();
-  const args: unknown[] = [7];
-  const baseSql = `
+  const args: unknown[] = [];
+  let baseSql = `
+    SELECT
+      to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
+      COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd,
+      COALESCE(SUM(cost_sar), 0)::float8 AS cost_sar
+    FROM ai_usage_logs
+    WHERE TRUE
+  `;
+  if (!filters.from && !filters.to) {
+    args.push(7);
+    baseSql = `
     SELECT
       to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
       COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd,
@@ -179,6 +232,7 @@ export async function getUsageDailyCost(filters: UsageFilters): Promise<Array<{ 
     FROM ai_usage_logs
     WHERE created_at >= NOW() - ($1::text || ' days')::interval
   `;
+  }
   const q = applyFilters(baseSql, filters, args);
   const r = await pool.query<{ day: string; cost_usd: number; cost_sar: number }>(
     `${q.sql} GROUP BY 1 ORDER BY 1 ASC`,
@@ -210,14 +264,23 @@ export async function getRecentUsage(
   }>
 > {
   const pool = getPool();
-  const args: unknown[] = [Math.min(100, Math.max(1, Number(limit) || 20))];
+  const sqlArgs: unknown[] = [];
   let sql = `
     SELECT id, job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, subject, status, created_at
     FROM ai_usage_logs
     WHERE TRUE
   `;
-  const q = applyFilters(sql, filters, args);
-  sql = `${q.sql} ORDER BY id DESC LIMIT $1`;
+  if (!filters.from && !filters.to) {
+    sqlArgs.push(30);
+    sql = `
+    SELECT id, job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, subject, status, created_at
+    FROM ai_usage_logs
+    WHERE created_at >= NOW() - ($1::text || ' days')::interval
+  `;
+  }
+  const q = applyFilters(sql, filters, sqlArgs);
+  q.args.push(Math.min(100, Math.max(1, Number(limit) || 20)));
+  sql = `${q.sql} ORDER BY id DESC LIMIT $${q.args.length}`;
   const r = await pool.query<{
     id: number;
     job_id: number;

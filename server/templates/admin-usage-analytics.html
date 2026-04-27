@@ -30,8 +30,14 @@
       .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 0.25rem; }
       .toolbar {
         display: grid;
-        grid-template-columns: 1fr 1fr auto auto;
+        grid-template-columns: 1.2fr 1fr 1fr auto auto auto;
         gap: 0.6rem;
+      }
+      .time-toolbar {
+        display: grid;
+        grid-template-columns: repeat(8, minmax(90px, 1fr));
+        gap: 0.6rem;
+        margin-top: 0.6rem;
       }
       input, select, button {
         border-radius: 10px;
@@ -67,10 +73,22 @@
 
       <div class="card">
         <div class="toolbar">
+          <input id="admin-secret" type="password" placeholder="مفتاح الإدارة ADMIN_SECRET" />
           <select id="subject-filter"><option value="">كل المواد</option></select>
           <select id="model-filter"><option value="">كل الموديلات</option></select>
+          <button id="save-secret-btn" type="button">حفظ المفتاح</button>
           <button id="refresh-btn" type="button">تحديث</button>
           <button id="back-btn" type="button" onclick="window.location.href='/admin'">العودة للوحة الإدارة</button>
+        </div>
+        <div class="time-toolbar">
+          <button id="preset-today" type="button">اليوم</button>
+          <button id="preset-yesterday" type="button">أمس</button>
+          <button id="preset-week" type="button">آخر أسبوع</button>
+          <button id="preset-month" type="button">آخر شهر</button>
+          <input id="from-date" type="date" />
+          <input id="to-date" type="date" />
+          <button id="apply-date-btn" type="button">تطبيق الفلترة</button>
+          <button id="reset-date-btn" type="button">إعادة ضبط</button>
         </div>
         <div class="msg" id="page-msg"></div>
       </div>
@@ -83,7 +101,7 @@
       </div>
 
       <div class="card">
-        <h3 style="margin-top:0;">التكلفة اليومية (آخر 7 أيام)</h3>
+        <h3 style="margin-top:0;" id="daily-title">التكلفة اليومية</h3>
         <div id="daily-bars" class="bars"></div>
       </div>
 
@@ -103,14 +121,27 @@
     </div>
     <script>
       const $ = (id) => document.getElementById(id);
-      const adminSecret = () => localStorage.getItem("adminSecret") || "";
+      const adminSecret = () => ($("admin-secret").value || localStorage.getItem("adminSecret") || "").trim();
       const fmtInt = (n) => Number(n || 0).toLocaleString("en-US");
       const fmtMoney = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 6 });
       const setMsg = (t, ok = false) => { const el = $("page-msg"); el.textContent = t || ""; el.style.color = ok ? "#35d07f" : "#ff8e8e"; };
+      function saveAdminSecret() {
+        const val = $("admin-secret").value.trim();
+        if (!val) {
+          setMsg("أدخل مفتاح الإدارة أولًا.", false);
+          return false;
+        }
+        localStorage.setItem("adminSecret", val);
+        setMsg("تم حفظ مفتاح الإدارة.", true);
+        return true;
+      }
 
       async function api(path) {
         const r = await fetch(path, { headers: { "x-admin-secret": adminSecret() } });
         let j = null; try { j = await r.json(); } catch {}
+        if (r.status === 403 || j?.error === "forbidden") {
+          throw new Error("forbidden: تحقق من مفتاح الإدارة");
+        }
         if (!r.ok || !j?.ok) throw new Error(j?.error || ("http_" + r.status));
         return j;
       }
@@ -119,6 +150,8 @@
         return {
           subject: $("subject-filter").value || "",
           modelId: $("model-filter").value || "",
+          from: $("from-date").value || "",
+          to: $("to-date").value || "",
         };
       }
 
@@ -126,7 +159,55 @@
         const p = new URLSearchParams();
         if (filters.subject) p.set("subject", filters.subject);
         if (filters.modelId) p.set("modelId", filters.modelId);
+        if (filters.from) p.set("from", filters.from);
+        if (filters.to) p.set("to", filters.to);
         return p.toString() ? "?" + p.toString() : "";
+      }
+
+      function toDateValue(d) {
+        const x = new Date(d);
+        const y = x.getFullYear();
+        const m = String(x.getMonth() + 1).padStart(2, "0");
+        const day = String(x.getDate()).padStart(2, "0");
+        return `${y}-${m}-${day}`;
+      }
+
+      function setRange(fromDate, toDate) {
+        $("from-date").value = fromDate;
+        $("to-date").value = toDate;
+      }
+
+      function applyPreset(name) {
+        const now = new Date();
+        const today = toDateValue(now);
+        if (name === "today") {
+          setRange(today, today);
+          return;
+        }
+        if (name === "yesterday") {
+          const y = new Date(now);
+          y.setDate(now.getDate() - 1);
+          const v = toDateValue(y);
+          setRange(v, v);
+          return;
+        }
+        if (name === "week") {
+          const f = new Date(now);
+          f.setDate(now.getDate() - 6);
+          setRange(toDateValue(f), today);
+          return;
+        }
+        if (name === "month") {
+          const f = new Date(now);
+          f.setDate(now.getDate() - 29);
+          setRange(toDateValue(f), today);
+        }
+      }
+
+      function updateDateTitle() {
+        const f = $("from-date").value;
+        const t = $("to-date").value;
+        $("daily-title").textContent = f || t ? `التكلفة اليومية (${f || "..." } → ${t || "..."})` : "التكلفة اليومية (آخر 7 أيام)";
       }
 
       async function loadFilters() {
@@ -184,10 +265,14 @@
         $("sum-questions").textContent = fmtInt(summary.generatedQuestions);
         renderDaily(daily.items || []);
         renderRecent(recent.items || []);
+        updateDateTitle();
       }
 
       async function bootstrap() {
         try {
+          if (!$("admin-secret").value.trim() && localStorage.getItem("adminSecret")) {
+            $("admin-secret").value = String(localStorage.getItem("adminSecret") || "");
+          }
           await loadFilters();
           await loadData();
           setMsg("تم تحميل بيانات الاستخدام بنجاح.", true);
@@ -197,8 +282,21 @@
       }
 
       $("refresh-btn").addEventListener("click", bootstrap);
+      $("save-secret-btn").addEventListener("click", saveAdminSecret);
+      $("admin-secret").addEventListener("change", () => {
+        if ($("admin-secret").value.trim()) localStorage.setItem("adminSecret", $("admin-secret").value.trim());
+      });
       $("subject-filter").addEventListener("change", loadData);
       $("model-filter").addEventListener("change", loadData);
+      $("apply-date-btn").addEventListener("click", loadData);
+      $("reset-date-btn").addEventListener("click", () => {
+        setRange("", "");
+        loadData();
+      });
+      $("preset-today").addEventListener("click", () => { applyPreset("today"); loadData(); });
+      $("preset-yesterday").addEventListener("click", () => { applyPreset("yesterday"); loadData(); });
+      $("preset-week").addEventListener("click", () => { applyPreset("week"); loadData(); });
+      $("preset-month").addEventListener("click", () => { applyPreset("month"); loadData(); });
       bootstrap();
     </script>
   </body>

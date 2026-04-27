@@ -326,12 +326,18 @@ function zodIssuesSummary(err: z.ZodError, limit = 5): Array<{ path: string; mes
   }));
 }
 
-function parseAnalyticsFilters(req: Request): { subject?: string; modelId?: string } {
+function parseAnalyticsFilters(req: Request): { subject?: string; modelId?: string; from?: string; to?: string } {
   const subjectRaw = String(req.query.subject ?? "").trim();
   const modelRaw = String(req.query.modelId ?? "").trim();
+  const fromRaw = String(req.query.from ?? "").trim();
+  const toRaw = String(req.query.to ?? "").trim();
+  const from = fromRaw && !Number.isNaN(Date.parse(fromRaw)) ? fromRaw : undefined;
+  const to = toRaw && !Number.isNaN(Date.parse(toRaw)) ? toRaw : undefined;
   return {
     subject: subjectRaw || undefined,
     modelId: modelRaw || undefined,
+    from,
+    to,
   };
 }
 
