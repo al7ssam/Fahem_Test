@@ -19,11 +19,13 @@ export type FactoryJobPayload = {
   targetCount: number;
   batchSize: number;
   difficultyMode: FactoryDifficulty;
+  promptVariant?: "baseline" | "optimized";
 };
 
 export type FactoryAuditReport = {
   summary: string;
   issues: string[];
+  requiresRefine: boolean;
 };
 
 export type FactoryValidationError = {

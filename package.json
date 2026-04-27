@@ -14,7 +14,10 @@
     "dev:client": "vite --config client/vite.config.ts --port 5173",
     "db:migrate": "tsx server/scripts/migrate.ts",
     "db:seed": "tsx server/scripts/seed.ts",
-    "list-gemini-models": "tsx server/scripts/list-gemini-models.ts"
+    "list-gemini-models": "tsx server/scripts/list-gemini-models.ts",
+    "ai-factory:baseline": "tsx server/scripts/aiFactoryBaselineMetrics.ts",
+    "ai-factory:ab-report": "tsx server/scripts/aiFactoryAbReport.ts",
+    "ai-factory:tune-reasoning": "tsx server/scripts/tuneFactoryReasoning.ts"
   },
   "engines": {
     "node": ">=20"

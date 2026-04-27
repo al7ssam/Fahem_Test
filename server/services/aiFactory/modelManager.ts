@@ -56,6 +56,13 @@ export const AI_FACTORY_DEFAULT_MODEL = "gemini-3-flash-preview";
 export const AI_FACTORY_DEFAULT_API_KEY_ENV = "GEMINI_API_KEY";
 export const AI_FACTORY_AVAILABLE_REASONING_LEVELS = ["none", "low", "medium", "high"] as const;
 export const AI_FACTORY_DEFAULT_REASONING_LEVEL: FactoryReasoningLevel = "none";
+const REASONING_ORDER: FactoryReasoningLevel[] = ["none", "low", "medium", "high"];
+const REASONING_CAP_DEFAULTS: Record<FactoryLayer, FactoryReasoningLevel> = {
+  architect: "low",
+  creator: "low",
+  auditor: "none",
+  refiner: "none",
+};
 
 /**
  * Models that use `generationConfig.thinkingConfig.thinkingLevel` (Gemini 3 family on `v1beta`).
@@ -114,6 +121,8 @@ class RateLimitError extends Error {
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
 const GEMINI_REQUEST_TIMEOUT_MS = 120_000;
+/** Extra guard if the SDK does not abort the HTTP call when `timeout` elapses. */
+const GEMINI_PROCESS_LEVEL_TIMEOUT_MS = GEMINI_REQUEST_TIMEOUT_MS + 30_000;
 const GEMINI_V1_MODEL_IDS = new Set<string>([
   "gemini-2.5-flash",
   "gemini-2.5-pro",
@@ -232,6 +241,27 @@ function getEnvValue(name: string): string {
   return String(process.env[name] ?? "").trim();
 }
 
+function parseReasoningLevel(raw: string): FactoryReasoningLevel | null {
+  const v = raw.trim().toLowerCase();
+  if (v === "none" || v === "low" || v === "medium" || v === "high") return v;
+  return null;
+}
+
+function minReasoningLevel(a: FactoryReasoningLevel, b: FactoryReasoningLevel): FactoryReasoningLevel {
+  return REASONING_ORDER[Math.min(REASONING_ORDER.indexOf(a), REASONING_ORDER.indexOf(b))] ?? "none";
+}
+
+function resolveReasoningCap(layer: FactoryLayer): FactoryReasoningLevel {
+  const fromLayerEnv = parseReasoningLevel(getEnvValue(`AI_FACTORY_REASONING_CAP_${layer.toUpperCase()}`));
+  return fromLayerEnv ?? REASONING_CAP_DEFAULTS[layer];
+}
+
+function applyReasoningPolicy(layer: FactoryLayer, configured: FactoryReasoningLevel): FactoryReasoningLevel {
+  const mode = getEnvValue("AI_FACTORY_REASONING_POLICY_MODE").toLowerCase() || "cap";
+  if (mode === "off") return configured;
+  return minReasoningLevel(configured, resolveReasoningCap(layer));
+}
+
 async function readLayerConfig(layer: FactoryLayer): Promise<LayerModelConfig> {
   const pool = getPool();
   const r = await pool.query<{
@@ -265,7 +295,10 @@ async function readLayerConfig(layer: FactoryLayer): Promise<LayerModelConfig> {
     temperature: Number(row.temperature),
     maxOutputTokens: Number(row.max_output_tokens),
     isEnabled: row.is_enabled,
-    reasoningLevel: row.reasoning_level ?? AI_FACTORY_DEFAULT_REASONING_LEVEL,
+    reasoningLevel: applyReasoningPolicy(
+      row.layer_name,
+      (row.reasoning_level ?? AI_FACTORY_DEFAULT_REASONING_LEVEL) as FactoryReasoningLevel,
+    ),
   };
 }
 
@@ -369,7 +402,14 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
   );
 
   try {
-    const result = await model.generateContent(prompt);
+    const result = await Promise.race([
+      model.generateContent(prompt),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error("gemini_process_timeout_exceeded"));
+        }, GEMINI_PROCESS_LEVEL_TIMEOUT_MS);
+      }),
+    ]);
     const rawResponseText = JSON.stringify(result.response ?? {}, null, 2);
     const text = String(result.response.text() ?? "").trim();
     const usageRaw = (result.response as { usageMetadata?: unknown })?.usageMetadata;

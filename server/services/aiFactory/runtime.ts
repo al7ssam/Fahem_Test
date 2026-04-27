@@ -1,6 +1,10 @@
 import cron, { type ScheduledTask } from "node-cron";
 import { getPool } from "../../db/pool";
-import { runFactoryJob } from "./orchestrator";
+import {
+  reclaimStaleRunningJobsOnStartup,
+  recoverFactoryJobAfterUnhandledError,
+  runFactoryJob,
+} from "./orchestrator";
 import type { FactoryDifficulty } from "./types";
 
 type FactorySettings = {
@@ -23,6 +27,8 @@ type ClaimedJob = {
   max_attempts: number;
 };
 
+type PromptVariant = "baseline" | "optimized";
+
 const SETTING_KEYS = {
   enabled: "ai_factory_enabled",
   batchSize: "ai_factory_batch_size",
@@ -40,6 +46,21 @@ function toInt(v: string | undefined, d: number, min: number, max: number): numb
   const n = Number(v ?? d);
   if (!Number.isFinite(n)) return d;
   return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+function parsePromptVariant(v: unknown): PromptVariant | null {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (s === "baseline" || s === "optimized") return s;
+  return null;
+}
+
+function resolvePromptVariantForNewJob(): PromptVariant {
+  const abPercent = Number(process.env.AI_FACTORY_AB_OPTIMIZED_PERCENT ?? 0);
+  if (Number.isFinite(abPercent) && abPercent > 0) {
+    const p = Math.max(0, Math.min(100, abPercent));
+    return Math.random() * 100 < p ? "optimized" : "baseline";
+  }
+  return parsePromptVariant(process.env.AI_FACTORY_PROMPT_VARIANT) ?? "optimized";
 }
 
 export async function readFactorySettings(): Promise<FactorySettings> {
@@ -112,6 +133,13 @@ async function enqueueJob(input: {
   payload?: unknown;
 }): Promise<number> {
   const pool = getPool();
+  const payloadObj =
+    input.payload && typeof input.payload === "object"
+      ? ({ ...(input.payload as Record<string, unknown>) } as Record<string, unknown>)
+      : {};
+  if (!parsePromptVariant(payloadObj.promptVariant)) {
+    payloadObj.promptVariant = resolvePromptVariantForNewJob();
+  }
   const r = await pool.query<{ id: number }>(
     `INSERT INTO ai_factory_jobs (
        subcategory_key, difficulty_mode, target_count, batch_size, status, payload, next_run_at
@@ -123,7 +151,7 @@ async function enqueueJob(input: {
       input.difficultyMode,
       input.targetCount,
       input.batchSize,
-      JSON.stringify(input.payload ?? {}),
+      JSON.stringify(payloadObj),
     ],
   );
   return Number(r.rows[0]?.id ?? 0);
@@ -238,7 +266,11 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
     );
     await client.query("COMMIT");
     return row;
-  } catch {
+  } catch (e) {
+    console.error(
+      "[ai-factory] claim_next_job_failed",
+      e instanceof Error ? e.message : String(e),
+    );
     try {
       await client.query("ROLLBACK");
     } catch {
@@ -409,10 +441,23 @@ export class AIFactoryRuntime {
   private async workerTick(): Promise<void> {
     if (this.workerBusy || this.shuttingDown) return;
     this.workerBusy = true;
+    let claimed: ClaimedJob | null = null;
     try {
-      const job = await claimNextJob();
-      if (!job) return;
-      await runFactoryJob(job);
+      claimed = await claimNextJob();
+      if (!claimed) return;
+      await runFactoryJob(claimed);
+    } catch (e) {
+      console.error("[ai-factory] worker_tick failed", e instanceof Error ? e.message : String(e));
+      if (claimed) {
+        try {
+          await recoverFactoryJobAfterUnhandledError(claimed, e);
+        } catch (recoveryErr) {
+          console.error(
+            "[ai-factory] worker_recovery_failed",
+            recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr),
+          );
+        }
+      }
     } finally {
       this.workerBusy = false;
     }
@@ -422,6 +467,9 @@ export class AIFactoryRuntime {
     if (this.started) return;
     this.started = true;
     this.shuttingDown = false;
+    await reclaimStaleRunningJobsOnStartup().catch((e) => {
+      console.error("[ai-factory] stale_running_reclaim_error", e instanceof Error ? e.message : String(e));
+    });
     this.workerTimer = setInterval(() => {
       void this.workerTick();
     }, 2500);

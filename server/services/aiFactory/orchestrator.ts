@@ -222,6 +222,49 @@ function chooseDifficulty(mode: "mix" | "easy" | "medium" | "hard", index: numbe
   return order[index % order.length];
 }
 
+type FactoryPromptVariant = "baseline" | "optimized";
+
+type PromptConstraintPack = {
+  schema: string;
+  distribution: string;
+  studyBody: string;
+  output: string;
+};
+
+const SHARED_PROMPT_CONSTRAINTS: PromptConstraintPack = {
+  schema:
+    "Each question must contain: prompt, options, correctIndex, studyBody, subcategoryKey, difficulty, questionType. options length must be 2 or 4, correctIndex must be in range.",
+  distribution:
+    "questionType distribution target per batch: 30% conceptual, 30% procedural, 40% application.",
+  studyBody:
+    "studyBody must be exactly [principle/rule] + [why correct] + [memory tip], concise and flashcard-friendly.",
+  output: "Return ONLY valid JSON (no markdown fences, no commentary).",
+};
+
+function resolvePromptVariant(payload: unknown): FactoryPromptVariant {
+  const fromPayload =
+    payload && typeof payload === "object" ? String((payload as Record<string, unknown>).promptVariant ?? "") : "";
+  if (fromPayload === "baseline" || fromPayload === "optimized") return fromPayload;
+  const fromEnv = String(process.env.AI_FACTORY_PROMPT_VARIANT ?? "").trim().toLowerCase();
+  if (fromEnv === "baseline" || fromEnv === "optimized") return fromEnv;
+  return "optimized";
+}
+
+function buildPromptArchitectureAnalysis(input: {
+  variant: FactoryPromptVariant;
+  subcategoryKey: string;
+  subcategoryName: string;
+  mainCategoryName: string;
+}): Record<string, unknown> {
+  return {
+    variant: input.variant,
+    subcategoryKey: input.subcategoryKey,
+    subcategoryName: input.subcategoryName,
+    mainCategoryName: input.mainCategoryName,
+    sharedConstraintPack: SHARED_PROMPT_CONSTRAINTS,
+  };
+}
+
 function buildArchitectPrompt(input: {
   subcategoryKey: string;
   subcategoryName: string;
@@ -229,31 +272,45 @@ function buildArchitectPrompt(input: {
   mainCategoryName: string;
   difficultyMode: "mix" | "easy" | "medium" | "hard";
   targetCount: number;
+  variant: FactoryPromptVariant;
 }): string {
+  if (input.variant === "baseline") {
+    return [
+      "You are The Architect layer for an educational content factory.",
+      "Create a concise domain-specific prompt in Arabic for generating pedagogical study quiz questions.",
+      `Main category: ${input.mainCategoryName || "N/A"}`,
+      `Subcategory: ${input.subcategoryName} (${input.subcategoryKey})`,
+      `Internal description: ${input.subcategoryDescription || "N/A"}`,
+      `Difficulty mode: ${input.difficultyMode}`,
+      `Target count: ${input.targetCount}`,
+      "Rules:",
+      "- Prompt must enforce JSON array output only.",
+      "- Each question must contain prompt, options, correctIndex, studyBody, subcategoryKey, difficulty, questionType.",
+      "- Enforce pedagogical Bloom-like progression per batch: 30% conceptual, 30% procedural, 40% application.",
+      "- questionType values are strictly: conceptual | procedural | application.",
+      "- difficulty mapping must follow learning progression:",
+      "  easy => foundational concepts and terminology.",
+      "  medium => procedural/relational reasoning and ordered steps.",
+      "  hard => synthesis/problem solving and connecting multiple ideas.",
+      "- options length must be 2 or 4 only.",
+      "- correctIndex must be 0-based and inside options length.",
+      "- studyBody must be a micro-lesson in this exact structure:",
+      "  [scientific principle/rule] + [why this answer is correct] + [quick memory tip].",
+      "- Wording should support active recall and flashcard style (short Q/A friendly).",
+      "- Language should be Arabic and pedagogically clear.",
+      "Return only the prompt text (no markdown).",
+    ].join("\n");
+  }
   return [
-    "You are The Architect layer for an educational content factory.",
-    "Create a concise domain-specific prompt in Arabic for generating pedagogical study quiz questions.",
+    "You are The Architect layer.",
+    "Return a SHORT Arabic domain brief (3-6 lines) that helps generation quality for this subcategory.",
     `Main category: ${input.mainCategoryName || "N/A"}`,
     `Subcategory: ${input.subcategoryName} (${input.subcategoryKey})`,
     `Internal description: ${input.subcategoryDescription || "N/A"}`,
     `Difficulty mode: ${input.difficultyMode}`,
     `Target count: ${input.targetCount}`,
-    "Rules:",
-    "- Prompt must enforce JSON array output only.",
-    "- Each question must contain prompt, options, correctIndex, studyBody, subcategoryKey, difficulty, questionType.",
-    "- Enforce pedagogical Bloom-like progression per batch: 30% conceptual, 30% procedural, 40% application.",
-    "- questionType values are strictly: conceptual | procedural | application.",
-    "- difficulty mapping must follow learning progression:",
-    "  easy => foundational concepts and terminology.",
-    "  medium => procedural/relational reasoning and ordered steps.",
-    "  hard => synthesis/problem solving and connecting multiple ideas.",
-    "- options length must be 2 or 4 only.",
-    "- correctIndex must be 0-based and inside options length.",
-    "- studyBody must be a micro-lesson in this exact structure:",
-    "  [scientific principle/rule] + [why this answer is correct] + [quick memory tip].",
-    "- Wording should support active recall and flashcard style (short Q/A friendly).",
-    "- Language should be Arabic and pedagogically clear.",
-    "Return only the prompt text (no markdown).",
+    "Do not repeat full schema constraints; focus on domain misconceptions, concept boundaries, and pedagogical focus.",
+    "Return plain text only.",
   ].join("\n");
 }
 
@@ -263,53 +320,91 @@ function buildCreatorPrompt(args: {
   batchSize: number;
   difficultyMode: "mix" | "easy" | "medium" | "hard";
   alreadyGenerated: number;
+  variant: FactoryPromptVariant;
 }): string {
+  if (args.variant === "baseline") {
+    return [
+      args.architectPrompt,
+      "",
+      "Now generate a JSON array of questions.",
+      `Batch size: ${args.batchSize}`,
+      `Subcategory key must be exactly: ${args.subcategoryKey}`,
+      `Difficulty mode: ${args.difficultyMode}`,
+      "If difficulty mode is mix, distribute easy/medium/hard fairly.",
+      "Enforce pedagogical question type distribution per batch as close as possible:",
+      "- 30% conceptual",
+      "- 30% procedural",
+      "- 40% application",
+      "Every question must include questionType with one of: conceptual, procedural, application.",
+      "studyBody must be a micro-lesson with mandatory 3-part structure:",
+      "1) Scientific principle/rule",
+      "2) Why the answer is correct",
+      "3) Quick memory tip",
+      "Write prompts and studyBody in an active-recall/flashcard-friendly style.",
+      `Already generated in current run: ${args.alreadyGenerated}`,
+      "Return ONLY valid JSON array.",
+      "Do not wrap in markdown fences.",
+      "No commentary before or after JSON.",
+      "Use standard double quotes for all JSON keys and string values.",
+    ].join("\n");
+  }
   return [
-    args.architectPrompt,
-    "",
-    "Now generate a JSON array of questions.",
+    "You are The Creator layer for educational quiz content in Arabic.",
+    `Domain brief from Architect:\n${args.architectPrompt}`,
+    "Generate the final question array now.",
     `Batch size: ${args.batchSize}`,
     `Subcategory key must be exactly: ${args.subcategoryKey}`,
     `Difficulty mode: ${args.difficultyMode}`,
-    "If difficulty mode is mix, distribute easy/medium/hard fairly.",
-    "Enforce pedagogical question type distribution per batch as close as possible:",
-    "- 30% conceptual",
-    "- 30% procedural",
-    "- 40% application",
-    "Every question must include questionType with one of: conceptual, procedural, application.",
-    "studyBody must be a micro-lesson with mandatory 3-part structure:",
-    "1) Scientific principle/rule",
-    "2) Why the answer is correct",
-    "3) Quick memory tip",
-    "Write prompts and studyBody in an active-recall/flashcard-friendly style.",
+    SHARED_PROMPT_CONSTRAINTS.schema,
+    SHARED_PROMPT_CONSTRAINTS.distribution,
+    "difficulty values must be English only: easy | medium | hard.",
+    SHARED_PROMPT_CONSTRAINTS.studyBody,
+    "Language must be Arabic and suitable for active recall.",
     `Already generated in current run: ${args.alreadyGenerated}`,
-    "Return ONLY valid JSON array.",
-    "Do not wrap in markdown fences.",
-    "No commentary before or after JSON.",
+    SHARED_PROMPT_CONSTRAINTS.output,
     "Use standard double quotes for all JSON keys and string values.",
   ].join("\n");
 }
 
-function buildAuditorPrompt(questions: FactoryQuestion[], validationErrors: FactoryValidationError[]): string {
+function buildAuditorPrompt(
+  questions: FactoryQuestion[],
+  validationErrors: FactoryValidationError[],
+  variant: FactoryPromptVariant,
+): string {
+  if (variant === "baseline") {
+    return [
+      "You are The Auditor layer.",
+      "You are responsible for auditing pedagogical integrity, technical integrity, and content quality.",
+      "Audit the following JSON questions for correctness, pedagogical balance, and technical integrity.",
+      "You MUST verify that difficulty uses English values only: easy, medium, hard.",
+      "If Arabic difficulty values are found (سهل، متوسط، صعب), report them as issues that require fixing.",
+      "Verify questionType exists and uses only: conceptual, procedural, application.",
+      "Check educational distribution target in the batch (closest possible): 30% conceptual, 30% procedural, 40% application.",
+      "Check difficulty-to-learning mapping:",
+      "- easy => foundational concepts/terminology",
+      "- medium => procedural logic and step ordering",
+      "- hard => synthesis/problem-solving",
+      "Check studyBody is a micro-lesson with mandatory structure:",
+      "[principle/rule] + [why correct] + [memory tip].",
+      "Check wording supports active recall/flashcard usage (short, direct, memory-oriented).",
+      "Ensure all JSON keys and values conform to required schema constraints.",
+      `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
+      "Return JSON object with fields: summary (string), issues (array of strings), requiresRefine (boolean).",
+      "If there are no issues, issues should be empty and requiresRefine false.",
+      JSON.stringify(questions),
+    ].join("\n");
+  }
   return [
     "You are The Auditor layer.",
-    "You are responsible for auditing pedagogical integrity, technical integrity, and content quality.",
-    "Audit the following JSON questions for correctness, pedagogical balance, and technical integrity.",
-    "You MUST verify that difficulty uses English values only: easy, medium, hard.",
-    "If Arabic difficulty values are found (سهل، متوسط، صعب), report them as issues that require fixing.",
-    "Verify questionType exists and uses only: conceptual, procedural, application.",
-    "Check educational distribution target in the batch (closest possible): 30% conceptual, 30% procedural, 40% application.",
-    "Check difficulty-to-learning mapping:",
-    "- easy => foundational concepts/terminology",
-    "- medium => procedural logic and step ordering",
-    "- hard => synthesis/problem-solving",
-    "Check studyBody is a micro-lesson with mandatory structure:",
-    "[principle/rule] + [why correct] + [memory tip].",
-    "Check wording supports active recall/flashcard usage (short, direct, memory-oriented).",
-    "Ensure all JSON keys and values conform to required schema constraints.",
+    "Audit only risks not already guaranteed by strict schema validation.",
+    "Focus on: pedagogical mismatch, weak active-recall wording, malformed micro-lesson structure, or wrong conceptual/procedural/application intent.",
+    SHARED_PROMPT_CONSTRAINTS.distribution,
+    "difficulty must be English only: easy | medium | hard.",
+    SHARED_PROMPT_CONSTRAINTS.studyBody,
     `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
-    "Return JSON object with fields: summary (string), issues (array of strings), requiresRefine (boolean).",
-    "If there are no issues, issues should be empty and requiresRefine false.",
+    "Return strict JSON object with fields:",
+    `{"summary":"...", "issues":["..."], "requiresRefine": true|false}`,
+    "Do not use markdown fences.",
     JSON.stringify(questions),
   ].join("\n");
 }
@@ -318,44 +413,89 @@ function buildRefinerPrompt(
   questions: FactoryQuestion[],
   audit: FactoryAuditReport,
   validationErrors: FactoryValidationError[],
+  variant: FactoryPromptVariant,
 ): string {
+  if (variant === "baseline") {
+    return [
+      "You are The Refiner layer.",
+      "Fix the question array based on the audit report and return corrected JSON array only.",
+      "Preserve schema fields exactly.",
+      "You must repair technical and pedagogical issues before final output.",
+      "Constraints: options length 2 or 4, correctIndex in-range, non-empty studyBody, valid difficulty.",
+      "questionType is mandatory and must be one of: conceptual, procedural, application.",
+      "Rebalance questionType distribution in the batch as close as possible to: 30% conceptual, 30% procedural, 40% application.",
+      "Align difficulty with pedagogical mapping:",
+      "- easy foundational concepts",
+      "- medium procedural reasoning",
+      "- hard synthesis/problem-solving",
+      "Difficulty must be English only (easy, medium, hard).",
+      "studyBody must follow exact micro-lesson structure:",
+      "[principle/rule] + [why correct] + [memory tip].",
+      "Use active-recall and flashcard-friendly style when rewriting.",
+      "Fix any invalid values and malformed structures whenever possible.",
+      "Return ONLY valid JSON array.",
+      "Do not wrap in markdown fences.",
+      "No commentary before or after JSON.",
+      "Use standard double quotes for all JSON keys and string values.",
+      `Audit summary: ${audit.summary}`,
+      `Audit issues: ${JSON.stringify(audit.issues)}`,
+      `Validation errors from server: ${JSON.stringify(validationErrors)}`,
+      JSON.stringify(questions),
+    ].join("\n");
+  }
   return [
     "You are The Refiner layer.",
-    "Fix the question array based on the audit report and return corrected JSON array only.",
-    "Preserve schema fields exactly.",
-    "You must repair technical and pedagogical issues before final output.",
-    "Constraints: options length 2 or 4, correctIndex in-range, non-empty studyBody, valid difficulty.",
-    "questionType is mandatory and must be one of: conceptual, procedural, application.",
-    "Rebalance questionType distribution in the batch as close as possible to: 30% conceptual, 30% procedural, 40% application.",
-    "Align difficulty with pedagogical mapping:",
-    "- easy foundational concepts",
-    "- medium procedural reasoning",
-    "- hard synthesis/problem-solving",
-    "Difficulty must be English only (easy, medium, hard).",
-    "studyBody must follow exact micro-lesson structure:",
-    "[principle/rule] + [why correct] + [memory tip].",
-    "Use active-recall and flashcard-friendly style when rewriting.",
-    "Fix any invalid values and malformed structures whenever possible.",
-    "Return ONLY valid JSON array.",
-    "Do not wrap in markdown fences.",
-    "No commentary before or after JSON.",
+    "Repair only issues reported by Auditor and validator while keeping valid rows unchanged as much as possible.",
+    SHARED_PROMPT_CONSTRAINTS.schema,
+    SHARED_PROMPT_CONSTRAINTS.distribution,
+    SHARED_PROMPT_CONSTRAINTS.studyBody,
+    SHARED_PROMPT_CONSTRAINTS.output,
     "Use standard double quotes for all JSON keys and string values.",
     `Audit summary: ${audit.summary}`,
     `Audit issues: ${JSON.stringify(audit.issues)}`,
+    `requiresRefine: ${String(audit.requiresRefine)}`,
     `Validation errors from server: ${JSON.stringify(validationErrors)}`,
     JSON.stringify(questions),
   ].join("\n");
 }
 
+function extractJsonPayload(text: string): string | null {
+  const raw = String(text ?? "").trim();
+  if (!raw) return null;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) return fenced[1].trim();
+  if (raw.startsWith("{") && raw.endsWith("}")) return raw;
+  const first = raw.indexOf("{");
+  const last = raw.lastIndexOf("}");
+  if (first >= 0 && last > first) return raw.slice(first, last + 1).trim();
+  return null;
+}
+
 function parseAuditReport(text: string): FactoryAuditReport {
+  const payload = extractJsonPayload(text);
+  if (!payload) {
+    return {
+      summary: "Audit returned non-JSON output.",
+      issues: ["non_json_audit_output"],
+      requiresRefine: true,
+    };
+  }
   try {
-    const parsed = JSON.parse(text) as { summary?: unknown; issues?: unknown };
+    const parsed = JSON.parse(payload) as { summary?: unknown; issues?: unknown; requiresRefine?: unknown };
+    const issues = Array.isArray(parsed.issues) ? parsed.issues.map((x) => String(x)) : [];
+    const requiresRefine =
+      typeof parsed.requiresRefine === "boolean" ? parsed.requiresRefine : issues.length > 0;
     return {
       summary: String(parsed.summary ?? "").trim() || "Audit completed.",
-      issues: Array.isArray(parsed.issues) ? parsed.issues.map((x) => String(x)) : [],
+      issues,
+      requiresRefine,
     };
   } catch {
-    return { summary: "Audit returned non-JSON output.", issues: ["non_json_audit_output"] };
+    return {
+      summary: "Audit returned invalid JSON payload.",
+      issues: ["invalid_json_audit_output"],
+      requiresRefine: true,
+    };
   }
 }
 
@@ -479,24 +619,129 @@ async function refreshPipelineState(
   );
 }
 
-export async function runFactoryJob(job: JobRow): Promise<void> {
-  await appendJobLog(job.id, "info", `Job started at ${nowIso()}`);
-  await setJobState(job.id, {
-    status: "running",
-    started: true,
-    currentLayer: "architect",
-    incrementAttempt: true,
-    lastError: null,
-  });
-  await refreshPipelineState(job.subcategory_key, {
-    lastJobId: job.id,
-    lastStatus: "running",
-    lastLayer: "architect",
+/**
+ * Safety net: if runFactoryJob rejects outside its catch (should be rare after preamble moved inside try),
+ * transition the job from running using the same retry policy as the main catch (uses claim-time attempt_count).
+ */
+export async function recoverFactoryJobAfterUnhandledError(job: JobRow, err: unknown): Promise<void> {
+  const r = await getPool().query<{ status: string }>(
+    `SELECT status FROM ai_factory_jobs WHERE id = $1 LIMIT 1`,
+    [job.id],
+  );
+  if (String(r.rows[0]?.status || "") !== "running") return;
+
+  const errMessage =
+    err instanceof Error ? `worker_orchestrator_unhandled:${err.message}` : "worker_orchestrator_unhandled:unknown_error";
+  const subKey = job.subcategory_key;
+
+  await appendJobLog(job.id, "error", "Orchestrator exited unexpectedly", undefined, {
+    error: errMessage,
   });
 
+  if (job.attempt_count + 1 < job.max_attempts) {
+    const backoffMinutes = Math.min(30, Math.max(1, 2 ** (job.attempt_count + 1)));
+    const nextRunAt = new Date(Date.now() + backoffMinutes * 60_000);
+    await setJobState(job.id, {
+      status: "queued",
+      finished: false,
+      currentLayer: null,
+      lastError: errMessage,
+      nextRunAt,
+    });
+    await appendJobLog(job.id, "warn", "Job re-queued after worker safety recovery", undefined, {
+      nextRunAt: nextRunAt.toISOString(),
+      backoffMinutes,
+    });
+  } else {
+    await setJobState(job.id, {
+      status: "failed",
+      finished: true,
+      currentLayer: null,
+      lastError: errMessage,
+    });
+    await refreshPipelineState(subKey, {
+      lastJobId: job.id,
+      lastStatus: "failed",
+      lastLayer: null,
+      lastError: errMessage,
+    });
+  }
+}
+
+/** Jobs left `running` (e.g. process crash) with no progress for this long are re-queued or failed on server start. */
+const STALE_RUNNING_THRESHOLD_MINUTES = 60;
+
+export async function reclaimStaleRunningJobsOnStartup(): Promise<number> {
+  const pool = getPool();
+  const stale = await pool.query<{
+    id: number;
+    attempt_count: number;
+    max_attempts: number;
+    subcategory_key: string;
+  }>(
+    `SELECT id, attempt_count, max_attempts, subcategory_key
+     FROM ai_factory_jobs
+     WHERE status = 'running'
+       AND updated_at < NOW() - (INTERVAL '1 minute' * $1::int)`,
+    [STALE_RUNNING_THRESHOLD_MINUTES],
+  );
+  let reclaimed = 0;
+  for (const row of stale.rows) {
+    const errTag = "stale_running_reclaimed_on_startup";
+    await appendJobLog(row.id, "warn", errTag, undefined, {
+      staleAfterMinutes: STALE_RUNNING_THRESHOLD_MINUTES,
+    });
+    if (row.attempt_count < row.max_attempts) {
+      const backoffMinutes = Math.min(30, Math.max(1, 2 ** row.attempt_count));
+      const nextRunAt = new Date(Date.now() + backoffMinutes * 60_000);
+      await setJobState(row.id, {
+        status: "queued",
+        finished: false,
+        currentLayer: null,
+        lastError: errTag,
+        nextRunAt,
+      });
+      await appendJobLog(row.id, "warn", "Stale running job re-queued on startup", undefined, {
+        nextRunAt: nextRunAt.toISOString(),
+        backoffMinutes,
+      });
+    } else {
+      await setJobState(row.id, {
+        status: "failed",
+        finished: true,
+        currentLayer: null,
+        lastError: errTag,
+      });
+      await refreshPipelineState(row.subcategory_key, {
+        lastJobId: row.id,
+        lastStatus: "failed",
+        lastLayer: null,
+        lastError: errTag,
+      });
+    }
+    reclaimed += 1;
+  }
+  return reclaimed;
+}
+
+export async function runFactoryJob(job: JobRow): Promise<void> {
   let failedLayer: FactoryLayer | null = "architect";
   let jobSubject = "غير محدد";
+  const promptVariant = resolvePromptVariant(job.payload);
   try {
+    await appendJobLog(job.id, "info", `Job started at ${nowIso()}`);
+    await setJobState(job.id, {
+      status: "running",
+      started: true,
+      currentLayer: "architect",
+      incrementAttempt: true,
+      lastError: null,
+    });
+    await refreshPipelineState(job.subcategory_key, {
+      lastJobId: job.id,
+      lastStatus: "running",
+      lastLayer: "architect",
+    });
     await assertNotCancelled(job.id, failedLayer);
     const architectHealth = await getLayerConfigHealth("architect");
     if (architectHealth.status === "fail") {
@@ -504,6 +749,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     }
     const context = await readSubcategoryContext(job.subcategory_key);
     jobSubject = context.mainCategoryName || context.subcategoryName || job.subcategory_key;
+    await appendJobLog(job.id, "info", "Prompt architecture analysis", "architect", {
+      analysis: buildPromptArchitectureAnalysis({
+        variant: promptVariant,
+        subcategoryKey: job.subcategory_key,
+        subcategoryName: context.subcategoryName,
+        mainCategoryName: context.mainCategoryName,
+      }),
+    });
 
     const architectPrompt = buildArchitectPrompt({
       subcategoryKey: job.subcategory_key,
@@ -512,6 +765,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       mainCategoryName: context.mainCategoryName,
       difficultyMode: job.difficulty_mode,
       targetCount: job.target_count,
+      variant: promptVariant,
     });
     const architect = await runLayerModel("architect", architectPrompt);
     await assertNotCancelled(job.id, failedLayer);
@@ -550,6 +804,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       batchSize: job.batch_size,
       difficultyMode: job.difficulty_mode,
       alreadyGenerated: 0,
+      variant: promptVariant,
     });
     await appendJobLog(job.id, "info", "Creator layer started", "creator");
     const creator = await runLayerModel("creator", creatorPrompt);
@@ -588,7 +843,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       lastStatus: "running",
       lastLayer: "auditor",
     });
-    const auditorPrompt = buildAuditorPrompt(creatorQuestions, creatorNormalized.validationErrors);
+    const auditorPrompt = buildAuditorPrompt(creatorQuestions, creatorNormalized.validationErrors, promptVariant);
     await appendJobLog(job.id, "info", "Auditor layer started", "auditor");
     const auditor = await runLayerModel("auditor", auditorPrompt);
     await assertNotCancelled(job.id, failedLayer);
@@ -613,44 +868,70 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     await appendJobLog(job.id, "info", "Auditor layer completed", "auditor", {
       summary: auditReport.summary,
       issuesCount: auditReport.issues.length,
+      requiresRefine: auditReport.requiresRefine,
       issues: auditReport.issues,
       model: auditor.modelName,
     });
 
-    failedLayer = "refiner";
-    await assertNotCancelled(job.id, failedLayer);
-    await setJobState(job.id, { currentLayer: "refiner" });
-    await refreshPipelineState(job.subcategory_key, {
-      lastJobId: job.id,
-      lastStatus: "running",
-      lastLayer: "refiner",
+    const shouldRunRefiner =
+      creatorNormalized.validationErrors.length > 0 ||
+      auditReport.issues.length > 0 ||
+      auditReport.requiresRefine;
+    await appendJobLog(job.id, "info", "Refiner gating decision", undefined, {
+      shouldRunRefiner,
+      reasons: {
+        validationErrors: creatorNormalized.validationErrors.length,
+        auditIssues: auditReport.issues.length,
+        requiresRefine: auditReport.requiresRefine,
+      },
+      promptVariant,
     });
-    const refinerPrompt = buildRefinerPrompt(
-      creatorQuestions,
-      auditReport,
-      creatorNormalized.validationErrors,
-    );
-    await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
-    const refiner = await runLayerModel("refiner", refinerPrompt);
-    await assertNotCancelled(job.id, failedLayer);
-    await appendInspectionLog({
-      jobId: job.id,
-      layer: "refiner",
-      promptText: refinerPrompt,
-      rawResponseText: refiner.rawResponseText,
-      provider: refiner.provider,
-      modelName: refiner.modelName,
-      apiVersion: refiner.apiVersion,
-    });
-    await appendAiUsageLogSafe({
-      jobId: job.id,
-      subject: jobSubject,
-      layer: "refiner",
-      modelId: refiner.modelName,
-      status: "success",
-      usage: refiner.usageMetadata,
-    });
-    let finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
+
+    let finalQuestions = creatorQuestions;
+    let finalLayerUsed: FactoryLayer = "creator";
+    if (shouldRunRefiner) {
+      failedLayer = "refiner";
+      await assertNotCancelled(job.id, failedLayer);
+      await setJobState(job.id, { currentLayer: "refiner" });
+      await refreshPipelineState(job.subcategory_key, {
+        lastJobId: job.id,
+        lastStatus: "running",
+        lastLayer: "refiner",
+      });
+      const refinerPrompt = buildRefinerPrompt(
+        creatorQuestions,
+        auditReport,
+        creatorNormalized.validationErrors,
+        promptVariant,
+      );
+      await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
+      const refiner = await runLayerModel("refiner", refinerPrompt);
+      await assertNotCancelled(job.id, failedLayer);
+      await appendInspectionLog({
+        jobId: job.id,
+        layer: "refiner",
+        promptText: refinerPrompt,
+        rawResponseText: refiner.rawResponseText,
+        provider: refiner.provider,
+        modelName: refiner.modelName,
+        apiVersion: refiner.apiVersion,
+      });
+      await appendAiUsageLogSafe({
+        jobId: job.id,
+        subject: jobSubject,
+        layer: "refiner",
+        modelId: refiner.modelName,
+        status: "success",
+        usage: refiner.usageMetadata,
+      });
+      finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
+      finalLayerUsed = "refiner";
+    } else {
+      await appendJobLog(job.id, "info", "Refiner skipped by gate", undefined, {
+        promptVariant,
+      });
+    }
+
     if (finalQuestions.length > job.batch_size) {
       finalQuestions = finalQuestions.slice(0, job.batch_size);
     }
@@ -674,6 +955,9 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       resultSummary: {
         inserted,
         auditedIssues: auditReport.issues.length,
+        finalLayerUsed,
+        promptVariant,
+        refinerSkipped: !shouldRunRefiner,
       },
       lastError: null,
     });
@@ -684,9 +968,11 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       generatedDelta: inserted,
       lastError: null,
     });
-    await appendJobLog(job.id, "info", "Refiner layer committed batch successfully", "refiner", {
+    await appendJobLog(job.id, "info", "Final batch committed successfully", finalLayerUsed, {
       inserted,
-      model: refiner.modelName,
+      finalLayerUsed,
+      promptVariant,
+      refinerSkipped: !shouldRunRefiner,
     });
     failedLayer = null;
   } catch (error) {
