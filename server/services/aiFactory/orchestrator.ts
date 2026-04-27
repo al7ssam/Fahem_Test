@@ -37,13 +37,17 @@ const PEDAGOGICAL_NORMS_ANCHOR = [
   "  medium: conceptIdsReferenced.length=2 and crossConceptCount<=1",
   "  hard: conceptIdsReferenced.length>=3 or crossConceptCount>=2",
   "- question is rejected if answer is rote-only, adds no new learning, or studyBody is insufficient.",
-  "- studyBody must include exactly these sections in Arabic:",
-  "  [principle] + [why_correct] + [why_others_wrong] + [memory_tip].",
+  "- studyBody is a single integrated paragraph (no sections, no brackets).",
+  "- studyBody_char_length must be between 80 and 250.",
+  "- studyBody must include at least one reasoning connector: لأن | بسبب | حيث | إذ | لذلك.",
+  "- studyBody must include at least one contrast pattern: وليس | بينما | على عكس | لكن.",
   "- True/False mode (2 options) is allowed but must include a misconception and explanatory resolution.",
   "- Output must be pure JSON only, no markdown.",
 ].join("\n");
 const MAX_CORRECTION_CYCLE = 1;
 const MAX_PATCHES_FACTOR = 2;
+const SMART_STUDYBODY_MIN_CHARS = 80;
+const SMART_STUDYBODY_MAX_CHARS = 250;
 
 class JobCancelledError extends Error {
   readonly layer: FactoryLayer | null;
@@ -329,8 +333,10 @@ function buildArchitectPrompt(input: {
     "- difficulty must be set using measurable signals only (isAnswerExplicit, explicitFactCount, crossConceptCount).",
     "- options length must be 2 or 4 only.",
     "- correctIndex must be 0-based and inside options length.",
-    "- studyBody must be a micro-lesson in this exact structure:",
-    "  [scientific principle/rule] + [why this answer is correct] + [quick memory tip].",
+    "- studyBody must be a single educational paragraph (no sections/brackets).",
+    `- studyBody_char_length must be between ${SMART_STUDYBODY_MIN_CHARS} and ${SMART_STUDYBODY_MAX_CHARS}.`,
+    "- studyBody must include one reasoning connector: لأن | بسبب | حيث | إذ | لذلك.",
+    "- studyBody must include one contrast pattern: وليس | بينما | على عكس | لكن.",
     "- Wording should support active recall and flashcard style (short Q/A friendly).",
     "- Language should be Arabic and pedagogically clear.",
     "Return only the prompt text (no markdown).",
@@ -371,14 +377,16 @@ function buildCreatorPrompt(args: {
     "DO NOT infer difficulty from questionType.",
     "Each question must satisfy at least one learning-value condition (to be verified by OutputGate):",
     "- concept_introduced OR concept_clarified OR misconception_corrected OR concept_applied_new_context.",
-    "studyBody must include mandatory 4-part structure:",
-    "1) [principle]",
-    "2) [why_correct]",
-    "3) [why_others_wrong]",
-    "4) [memory_tip]",
-    "Self-contained rules:",
-    "- studyBody must include a definition/rule covering target concept.",
-    "- studyBody must include explanation mapped directly to the correct option.",
+    `studyBody must be a single concise paragraph with char length between ${SMART_STUDYBODY_MIN_CHARS} and ${SMART_STUDYBODY_MAX_CHARS}.`,
+    "It must teach the concept clearly.",
+    "It must explain why the correct answer is correct.",
+    "It must briefly indicate why other options are incorrect or misleading.",
+    "It must include one reasoning connector: لأن | بسبب | حيث | إذ | لذلك.",
+    "It must include one contrast pattern: وليس | بينما | على عكس | لكن.",
+    "Avoid pure definitions without reasoning.",
+    "Avoid generic or vague explanations.",
+    "Avoid repeating the question text.",
+    "No internal sections, no brackets, no labels.",
     "Distractors rules:",
     "- Wrong options must represent common mistakes, not random noise.",
     "- For each distractor: sharedConceptWithCorrect >= 1 and sameSubcategoryKey = true.",
@@ -433,7 +441,10 @@ function buildAuditorPrompt(
     "- rote_question (blocking)",
     "- fake_application (blocking)",
     "- no_new_learning (blocking)",
-    "- studyBody_missing_explanation (blocking)",
+    "- studyBody_out_of_range (blocking)",
+    "- studyBody_missing_reasoning_connector (blocking)",
+    "- studyBody_missing_contrast (blocking)",
+    "- studyBody_repeats_prompt (blocking)",
     "- weak_distractors (non_blocking)",
     "- weak_true_false_statement (blocking)",
     "- true_false_without_justification (blocking)",
@@ -464,7 +475,11 @@ function buildRefinerPrompt(
     "If a patch would break schema, skip that patch and keep object valid.",
     "If question is rote, add explanatory context.",
     "If distractors are weak, replace with realistic same-domain misconceptions.",
-    "If studyBody is missing required parts, complete the 4-part structure.",
+    `If studyBody is weak, rewrite it as one integrated paragraph (${SMART_STUDYBODY_MIN_CHARS}-${SMART_STUDYBODY_MAX_CHARS} chars).`,
+    "The rewritten studyBody must include: concept explanation + why correct answer is correct + misconception hint.",
+    "Include at least one reasoning connector: لأن | بسبب | حيث | إذ | لذلك.",
+    "Include at least one contrast pattern: وليس | بينما | على عكس | لكن.",
+    "Do not use sections, brackets, or internal labels in studyBody.",
     "For true/false, ensure truth-condition is unambiguous and misconception is explicitly resolved.",
     "Return ONLY valid JSON array.",
     "Do not wrap in markdown fences.",
@@ -746,27 +761,35 @@ function extractConceptIdsFromText(text: string, conceptIds: string[]): Set<stri
 }
 
 function hasLogicalConnector(text: string): boolean {
-  return /(because|therefore|thus|نتيجة|لذلك|بسبب|يؤدي إلى|لان|لأن)/i.test(String(text || ""));
+  return /(لأن|لان|بسبب|حيث|إذ|لذلك|because|therefore|thus)/i.test(String(text || ""));
 }
 
-function splitStudyBodySections(text: string): {
-  principle: string;
-  whyCorrect: string;
-  whyOthersWrong: string;
-  memoryTip: string;
-} | null {
-  const raw = String(text || "");
-  const principleM = raw.match(/\[principle\]([\s\S]*?)(?=\[why_correct\]|$)/i);
-  const whyCorrectM = raw.match(/\[why_correct\]([\s\S]*?)(?=\[why_others_wrong\]|$)/i);
-  const whyOthersM = raw.match(/\[why_others_wrong\]([\s\S]*?)(?=\[memory_tip\]|$)/i);
-  const memoryM = raw.match(/\[memory_tip\]([\s\S]*?)$/i);
-  if (!principleM || !whyCorrectM || !whyOthersM || !memoryM) return null;
-  return {
-    principle: principleM[1].trim(),
-    whyCorrect: whyCorrectM[1].trim(),
-    whyOthersWrong: whyOthersM[1].trim(),
-    memoryTip: memoryM[1].trim(),
-  };
+function hasContrastPattern(text: string): boolean {
+  return /(وليس|بينما|على عكس|لكن)/i.test(String(text || ""));
+}
+
+function stripWhitespace(input: string): string {
+  return String(input || "").replace(/\s+/g, " ").trim();
+}
+
+function studyBodyCharLength(text: string): number {
+  return stripWhitespace(text).length;
+}
+
+function isSemanticallyThin(text: string): boolean {
+  return tokenizeArabicAndLatin(text).length < 8;
+}
+
+function promptOverlapRatio(prompt: string, studyBody: string): number {
+  const promptTokens = tokenizeArabicAndLatin(prompt);
+  const bodyTokens = tokenizeArabicAndLatin(studyBody);
+  if (bodyTokens.length === 0 || promptTokens.length === 0) return 0;
+  const promptSet = setFrom(promptTokens);
+  let overlap = 0;
+  for (const t of bodyTokens) {
+    if (promptSet.has(t)) overlap += 1;
+  }
+  return overlap / Math.max(1, bodyTokens.length);
 }
 
 type GateIssue = { code: string; severity: "blocking" | "warning"; note: string };
@@ -776,25 +799,37 @@ function evaluateQuestionGateIssues(question: FactoryQuestion): GateIssue[] {
   const conceptIds = Array.isArray(question.conceptIdsReferenced) ? question.conceptIdsReferenced : [];
   const promptConcepts = extractConceptIdsFromText(question.prompt, conceptIds);
   const studyConcepts = extractConceptIdsFromText(question.studyBody, conceptIds);
-  const sections = splitStudyBodySections(question.studyBody);
-  if (!sections) {
-    issues.push({ code: "studyBody_missing_explanation", severity: "blocking", note: "missing required sections" });
-    return issues;
+  const bodyLen = studyBodyCharLength(question.studyBody);
+  const hasReasoning = hasLogicalConnector(question.studyBody);
+  const hasContrast = hasContrastPattern(question.studyBody);
+  const repeatedPrompt = promptOverlapRatio(question.prompt, question.studyBody) > 0.72;
+  const semanticallyThin = isSemanticallyThin(question.studyBody);
+
+  if (bodyLen < SMART_STUDYBODY_MIN_CHARS || bodyLen > SMART_STUDYBODY_MAX_CHARS) {
+    issues.push({ code: "studyBody_out_of_range", severity: "blocking", note: `studyBody_char_length=${bodyLen}` });
+  }
+  if (!hasReasoning) {
+    issues.push({ code: "studyBody_missing_reasoning_connector", severity: "blocking", note: "missing reasoning connector" });
+  }
+  if (!hasContrast) {
+    issues.push({ code: "studyBody_missing_contrast", severity: "blocking", note: "missing contrast pattern" });
+  }
+  if (repeatedPrompt) {
+    issues.push({ code: "studyBody_repeats_prompt", severity: "blocking", note: "studyBody mostly repeats prompt text" });
+  }
+  if (semanticallyThin) {
+    issues.push({ code: "studyBody_semantically_empty", severity: "blocking", note: "insufficient semantic content" });
   }
 
   const conceptIntroduced = [...studyConcepts].some((x) => !promptConcepts.has(x));
-  const conceptClarified =
-    [...promptConcepts].some((x) => studyConcepts.has(x)) &&
-    /(يعني|هو|تعريف|قاعدة|المقصود)/i.test(sections.principle);
-  const misconceptionCorrected =
-    sections.whyOthersWrong.length > 10 &&
-    /(خاطئ|غير صحيح|خطأ|ليس صحيح|لا يصح)/i.test(sections.whyOthersWrong);
+  const conceptClarified = [...promptConcepts].some((x) => studyConcepts.has(x)) && hasReasoning;
+  const misconceptionCorrected = hasContrast && /(خاطئ|غير صحيح|خطأ|ليس صحيح|لا يصح|وهم|مضلل)/i.test(question.studyBody);
   const contextShift =
     JSON.stringify([...promptConcepts].sort()) !== JSON.stringify([...studyConcepts].sort());
   const conceptAppliedNewContext = studyConcepts.size > 0 && contextShift;
   const learningValueScore = Number(conceptIntroduced) + Number(conceptClarified) + Number(misconceptionCorrected) + Number(conceptAppliedNewContext);
-  const roteQuestion = question.options.length >= 2 && sections.whyCorrect.length < 20;
-  const strengthOk = hasLogicalConnector(sections.whyCorrect);
+  const roteQuestion = question.options.length >= 2 && !hasReasoning;
+  const strengthOk = hasReasoning && !semanticallyThin;
 
   if (learningValueScore < 1 || roteQuestion || !strengthOk) {
     issues.push({ code: "no_new_learning", severity: "blocking", note: "insufficient learning value" });
@@ -830,7 +865,7 @@ function evaluateQuestionGateIssues(question: FactoryQuestion): GateIssue[] {
     if (!hasTfPair) {
       issues.push({ code: "ambiguous_truth_value", severity: "blocking", note: "2-options question not true/false pair" });
     }
-    if (!misconceptionCorrected) {
+    if (!hasContrast) {
       issues.push({ code: "true_false_without_justification", severity: "blocking", note: "missing misconception resolution" });
     }
   }
