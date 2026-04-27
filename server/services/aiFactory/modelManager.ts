@@ -355,6 +355,18 @@ export async function runLayerModel(layer: FactoryLayer, prompt: string): Promis
   const config = await readLayerConfig(layer);
   let attempt = 0;
   let waitMs = 1000;
+  let lastActualError: Error | null = null;
+
+  function extractProviderCode(input: string): string | null {
+    const m = input.match(/\b(4\d{2}|5\d{2}|429|503)\b/);
+    if (m?.[1]) return m[1];
+    if (input.includes("provider_429")) return "429";
+    if (input.includes("provider_503")) return "503";
+    const http = input.match(/provider_http_(\d{3})/);
+    if (http?.[1]) return http[1];
+    return null;
+  }
+
   while (attempt < 4) {
     attempt += 1;
     try {
@@ -363,6 +375,11 @@ export async function runLayerModel(layer: FactoryLayer, prompt: string): Promis
       }
       return await callGemini(config, prompt);
     } catch (error) {
+      if (error instanceof Error) {
+        lastActualError = error;
+      } else {
+        lastActualError = new Error(String(error));
+      }
       if (isNonRetryableLayerError(error)) {
         throw error;
       }
@@ -377,5 +394,8 @@ export async function runLayerModel(layer: FactoryLayer, prompt: string): Promis
       waitMs = Math.min(30_000, Math.floor(waitMs * 2));
     }
   }
-  throw new Error(`layer_${layer}_failed_after_retries`);
+  const reason = lastActualError?.message || "unknown_provider_error";
+  const code = extractProviderCode(reason);
+  const suffix = code ? ` (${code})` : "";
+  throw new Error(`${layer}_failed: ${reason}${suffix}`);
 }
