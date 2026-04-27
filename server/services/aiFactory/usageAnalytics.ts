@@ -510,7 +510,23 @@ export async function getSimplificationKpisComparison(input: {
     }>(
       `SELECT
          COALESCE(SUM(CASE WHEN status = 'succeeded' THEN COALESCE((result_summary->>'inserted')::int, 0) ELSE 0 END), 0)::bigint AS inserted_questions,
-         COALESCE(SUM(CASE WHEN status = 'failed' AND (last_error ILIKE 'creator_invalid_schema%' OR last_error ILIKE 'schema_gate_%') THEN 1 ELSE 0 END), 0)::bigint AS creator_schema_fail_count,
+         COALESCE(
+           SUM(
+             CASE
+               WHEN status = 'failed'
+                 AND (
+                   last_error ILIKE 'creator_invalid_schema%'
+                   OR last_error ILIKE 'creator_missing_field%'
+                   OR last_error ILIKE 'creator_invalid_question%'
+                   OR last_error ILIKE 'schema_gate_%'
+                   OR last_error ILIKE 'gate_lite_%'
+                 )
+               THEN 1
+               ELSE 0
+             END
+           ),
+           0
+         )::bigint AS creator_schema_fail_count,
          COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0)::bigint AS total_failed_count
        FROM ai_factory_jobs
        WHERE created_at >= $1::timestamptz

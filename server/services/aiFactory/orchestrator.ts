@@ -380,7 +380,7 @@ function buildCreatorPrompt(args: {
     "You are Generate step for AI Factory.",
     `Main category: ${args.mainCategoryName || "N/A"}`,
     `Subcategory: ${args.subcategoryName} (${args.subcategoryKey})`,
-    "Now generate JSON array only. Reuse architect norms; do not restate them.",
+    "Now generate JSON array only using the contract below.",
     `Batch size: ${args.batchSize}`,
     `Subcategory key must be exactly: ${args.subcategoryKey}`,
     `Difficulty mode: ${args.difficultyMode}`,

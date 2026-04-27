@@ -74,15 +74,36 @@ export function extractJsonArray(raw: string): unknown[] | null {
   return null;
 }
 
+function readStringFromAliases(obj: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return "";
+}
+
+function readNumberFromAliases(obj: Record<string, unknown>, keys: string[]): number {
+  for (const key of keys) {
+    const value = obj[key];
+    const n = Number(value);
+    if (Number.isFinite(n)) {
+      return n;
+    }
+  }
+  return Number.NaN;
+}
+
 export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQuestion {
   if (!item || typeof item !== "object") {
     throw new Error(`question_${idx + 1}_invalid_object`);
   }
   const o = item as Record<string, unknown>;
-  const prompt = String(o.prompt ?? "").trim();
+  const prompt = readStringFromAliases(o, ["prompt", "question", "questionText", "question_text", "stem", "title"]);
   const options = Array.isArray(o.options) ? o.options.map((x) => String(x ?? "").trim()) : [];
-  const correctIndex = Number(o.correctIndex ?? o.correct_index);
-  const studyBody = String(o.studyBody ?? o.study_body ?? "").trim();
+  const correctIndex = readNumberFromAliases(o, ["correctIndex", "correct_index", "answerIndex", "answer_index"]);
+  const studyBody = readStringFromAliases(o, ["studyBody", "study_body", "explanation", "rationale", "reasoning"]);
   const subcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
   const difficulty = String(o.difficulty ?? "").trim().toLowerCase();
   const questionType = mapQuestionTypeAlias(String(o.questionType ?? o.question_type ?? ""));
@@ -212,10 +233,10 @@ export function normalizeFactoryQuestionsLenient(
       continue;
     }
     const o = item as Record<string, unknown>;
-    const prompt = String(o.prompt ?? "").trim();
+    const prompt = readStringFromAliases(o, ["prompt", "question", "questionText", "question_text", "stem", "title"]);
     const optionsList = Array.isArray(o.options) ? o.options.map((x) => String(x ?? "").trim()) : [];
-    const correctIndex = Number(o.correctIndex ?? o.correct_index);
-    const studyBody = String(o.studyBody ?? o.study_body ?? "").trim();
+    const correctIndex = readNumberFromAliases(o, ["correctIndex", "correct_index", "answerIndex", "answer_index"]);
+    const studyBody = readStringFromAliases(o, ["studyBody", "study_body", "explanation", "rationale", "reasoning"]);
     const rawSubcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
     const mappedDifficulty = mapDifficultyAlias(String(o.difficulty ?? ""));
     const mappedQuestionType = mapQuestionTypeAlias(String(o.questionType ?? o.question_type ?? ""));
