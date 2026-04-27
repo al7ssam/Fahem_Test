@@ -110,6 +110,20 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
           crossConceptCount: Math.max(0, Math.floor(Number(rawSignals.crossConceptCount))),
         }
       : undefined;
+  const rawLearningSignals =
+    o.learningSignals && typeof o.learningSignals === "object"
+      ? (o.learningSignals as Record<string, unknown>)
+      : o.learning_signals && typeof o.learning_signals === "object"
+        ? (o.learning_signals as Record<string, unknown>)
+        : null;
+  const learningSignals = rawLearningSignals
+    ? {
+        introducesNewConcept: Boolean(rawLearningSignals.introducesNewConcept),
+        clarifiesMisconception: Boolean(rawLearningSignals.clarifiesMisconception),
+        requiresUnderstanding: Boolean(rawLearningSignals.requiresUnderstanding),
+        notPureRecall: Boolean(rawLearningSignals.notPureRecall),
+      }
+    : undefined;
 
   if (!prompt) throw new Error(`question_${idx + 1}_missing_prompt`);
   if (!(options.length === 2 || options.length === 4)) {
@@ -135,6 +149,7 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
     questionType,
     conceptIdsReferenced,
     difficultySignals,
+    learningSignals,
   };
 }
 
@@ -228,6 +243,20 @@ export function normalizeFactoryQuestionsLenient(
             crossConceptCount: Math.max(0, Math.floor(Number(rawSignals.crossConceptCount))),
           }
         : undefined;
+    const rawLearningSignals =
+      o.learningSignals && typeof o.learningSignals === "object"
+        ? (o.learningSignals as Record<string, unknown>)
+        : o.learning_signals && typeof o.learning_signals === "object"
+          ? (o.learning_signals as Record<string, unknown>)
+          : null;
+    const learningSignals = rawLearningSignals
+      ? {
+          introducesNewConcept: Boolean(rawLearningSignals.introducesNewConcept),
+          clarifiesMisconception: Boolean(rawLearningSignals.clarifiesMisconception),
+          requiresUnderstanding: Boolean(rawLearningSignals.requiresUnderstanding),
+          notPureRecall: Boolean(rawLearningSignals.notPureRecall),
+        }
+      : undefined;
     const forcedDifficulty =
       options.forcedDifficultyMode === "mix" ? null : options.forcedDifficultyMode;
 
@@ -368,6 +397,7 @@ export function normalizeFactoryQuestionsLenient(
       questionType,
       conceptIdsReferenced,
       difficultySignals,
+      learningSignals,
     });
   }
 

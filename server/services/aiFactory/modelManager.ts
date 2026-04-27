@@ -203,6 +203,9 @@ function mapGeminiProviderError(error: unknown, ctx?: { modelId: string; apiVers
 
   if (error instanceof GoogleGenerativeAIResponseError) {
     const msg = error.message ?? "";
+    if (/safety|blocked|policy|prohibited|recitation/i.test(msg)) {
+      return new Error("provider_blocked");
+    }
     if (isQuotaOrRateLimitMessage(msg)) {
       return new RateLimitError("provider_quota_or_rate_limit", 3000);
     }
@@ -226,8 +229,14 @@ function isNonRetryableLayerError(error: unknown): boolean {
     error.message.startsWith("provider_401_403") ||
     error.message.includes("_disabled") ||
     error.message.startsWith("unsupported_") ||
-    error.message.startsWith("missing_")
+    error.message.startsWith("missing_") ||
+    error.message.startsWith("provider_empty_response") ||
+    error.message.startsWith("provider_blocked")
   );
+}
+
+function addJitter(ms: number): number {
+  return Math.max(200, ms + Math.floor(Math.random() * 700));
 }
 
 function getEnvValue(name: string): string {
@@ -543,7 +552,7 @@ export async function runLayerModel(layer: FactoryLayer, prompt: string): Promis
         });
       }
       if (error instanceof RateLimitError) {
-        const backoffMs = Math.max(error.retryAfterMs, waitMs);
+        const backoffMs = addJitter(Math.max(error.retryAfterMs, waitMs));
         await sleep(backoffMs);
         waitMs = Math.min(30_000, Math.floor(waitMs * 2));
         continue;
@@ -563,7 +572,7 @@ export async function runLayerModel(layer: FactoryLayer, prompt: string): Promis
           },
         );
       }
-      await sleep(waitMs);
+      await sleep(addJitter(waitMs));
       waitMs = Math.min(30_000, Math.floor(waitMs * 2));
     }
   }

@@ -5,6 +5,7 @@ import { extractJsonArray, normalizeFactoryQuestion } from "./utils";
 import type {
   FactoryAuditReport,
   FactoryJobPayload,
+  FactoryLearningSignals,
   FactoryLayer,
   FactoryQuestion,
   FactoryValidationError,
@@ -48,6 +49,10 @@ const MAX_CORRECTION_CYCLE = 1;
 const MAX_PATCHES_FACTOR = 2;
 const SMART_STUDYBODY_MIN_CHARS = 80;
 const SMART_STUDYBODY_MAX_CHARS = 250;
+const EXECUTION_BATCH_SIZE_CAP = 30;
+const ATTEMPT_BUDGET_PER_JOB = 8;
+const TOKEN_BUDGET_PER_JOB = 200_000;
+const COMPACT_MODE_BY_DEFAULT = true;
 
 class JobCancelledError extends Error {
   readonly layer: FactoryLayer | null;
@@ -93,12 +98,16 @@ async function appendJobLog(
   layer?: FactoryLayer,
   details?: unknown,
 ): Promise<void> {
-  const pool = getPool();
-  await pool.query(
-    `INSERT INTO ai_factory_job_logs (job_id, layer_name, level, message, details)
-     VALUES ($1, $2, $3, $4, $5::jsonb)`,
-    [jobId, layer ?? null, level, message, JSON.stringify(details ?? {})],
-  );
+  try {
+    const pool = getPool();
+    await pool.query(
+      `INSERT INTO ai_factory_job_logs (job_id, layer_name, level, message, details)
+       VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      [jobId, layer ?? null, level, message, JSON.stringify(details ?? {})],
+    );
+  } catch {
+    // best-effort logging only; never break job flow
+  }
 }
 
 async function appendInspectionLog(input: {
@@ -110,21 +119,25 @@ async function appendInspectionLog(input: {
   modelName: string;
   apiVersion: string;
 }): Promise<void> {
-  const pool = getPool();
-  await pool.query(
-    `INSERT INTO ai_factory_inspection_logs
-      (job_id, layer_name, prompt_text, raw_response_text, provider, model_name, api_version)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [
-      input.jobId,
-      input.layer,
-      input.promptText,
-      input.rawResponseText,
-      input.provider,
-      input.modelName,
-      input.apiVersion,
-    ],
-  );
+  try {
+    const pool = getPool();
+    await pool.query(
+      `INSERT INTO ai_factory_inspection_logs
+        (job_id, layer_name, prompt_text, raw_response_text, provider, model_name, api_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        input.jobId,
+        input.layer,
+        input.promptText,
+        input.rawResponseText,
+        input.provider,
+        input.modelName,
+        input.apiVersion,
+      ],
+    );
+  } catch {
+    // best-effort logging only; never break job flow
+  }
 }
 
 async function appendAiUsageLogSafe(input: {
@@ -137,6 +150,9 @@ async function appendAiUsageLogSafe(input: {
     inputTokens: number;
     outputTokens: number;
   } | null;
+  retryIndex?: number;
+  attemptId?: string;
+  costSource?: "provider_exact" | "estimated";
 }): Promise<void> {
   try {
     const pricing = calculateGeminiCost(
@@ -154,6 +170,9 @@ async function appendAiUsageLogSafe(input: {
       costSar: pricing.costSar,
       subject: input.subject,
       status: input.status,
+      retryIndex: input.retryIndex ?? 0,
+      attemptId: input.attemptId,
+      costSource: input.costSource ?? "estimated",
     });
   } catch (error) {
     await appendJobLog(input.jobId, "warn", "usage_log_write_failed", input.layer, {
@@ -374,9 +393,12 @@ function buildCreatorPrompt(args: {
     "Every question must include conceptIdsReferenced (string[]).",
     "Every question must include difficultySignals object:",
     '{ "isAnswerExplicit": boolean, "explicitFactCount": number, "crossConceptCount": number }',
+    "Every question must include learningSignals object:",
+    '{ "introducesNewConcept": boolean, "clarifiesMisconception": boolean, "requiresUnderstanding": boolean, "notPureRecall": boolean }',
     "DO NOT infer difficulty from questionType.",
-    "Each question must satisfy at least one learning-value condition (to be verified by OutputGate):",
-    "- concept_introduced OR concept_clarified OR misconception_corrected OR concept_applied_new_context.",
+    "learningSignals rules:",
+    "- At least one of introducesNewConcept/clarifiesMisconception/requiresUnderstanding must be true.",
+    "- notPureRecall must be true.",
     `studyBody must be a single concise paragraph with char length between ${SMART_STUDYBODY_MIN_CHARS} and ${SMART_STUDYBODY_MAX_CHARS}.`,
     "It must teach the concept clearly.",
     "It must explain why the correct answer is correct.",
@@ -419,6 +441,7 @@ function compactQuestionForAudit(question: FactoryQuestion): Record<string, unkn
     questionType: question.questionType,
     conceptIdsReferenced: question.conceptIdsReferenced ?? [],
     difficultySignals: question.difficultySignals ?? null,
+    learningSignals: question.learningSignals ?? null,
   };
 }
 
@@ -431,7 +454,7 @@ function buildAuditorPrompt(
   return [
     "You are The Auditor layer.",
     compactMode ? "Use compact mode output." : PEDAGOGICAL_NORMS_ANCHOR,
-    "ROLE CONSTRAINT: Detector-only. No long explanations. No alternative interpretations.",
+    "ROLE CONSTRAINT: Detector-only. No long explanations. No alternative interpretations. Follow NORMS_ANCHOR only.",
     "Detect violations and output machine-executable patches only.",
     "Check schema validity and value constraints.",
     "Check questionType/difficulty independence.",
@@ -449,11 +472,13 @@ function buildAuditorPrompt(
     "- weak_true_false_statement (blocking)",
     "- true_false_without_justification (blocking)",
     "- ambiguous_truth_value (blocking)",
+    "- learning_signals_missing (blocking)",
+    "- learning_signals_inconsistent (blocking)",
     `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
     "Return ONLY valid JSON object with fields:",
     "{",
     '  "issues": [{ "code": string, "index": number, "field": string, "confidence": "high|medium|low", "severity": "blocking|non_blocking" }],',
-    '  "patches": [{ "op": "replace", "index": number, "field": "questionType|difficulty|studyBody|prompt|options|correctIndex|conceptIdsReferenced|difficultySignals", "value": any }]',
+    '  "patches": [{ "op": "replace", "index": number, "field": "questionType|difficulty|studyBody|prompt|options|correctIndex|conceptIdsReferenced|difficultySignals|learningSignals", "value": any }]',
     "}",
     "No markdown. No extra keys.",
     JSON.stringify(payload),
@@ -498,7 +523,6 @@ function parseAuditReport(text: string): FactoryAuditReport {
     const rawIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
     const rawPatches = Array.isArray(parsed.patches) ? parsed.patches : [];
     return {
-      summary: "Audit completed.",
       issues: rawIssues
         .map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : null))
         .filter((x): x is Record<string, unknown> => Boolean(x))
@@ -506,7 +530,6 @@ function parseAuditReport(text: string): FactoryAuditReport {
           code: String(x.code ?? "unknown_issue"),
           index: Number.isInteger(Number(x.index)) ? Number(x.index) : -1,
           field: String(x.field ?? "unknown"),
-          evidence: "",
           confidence:
             String(x.confidence ?? "medium") === "high"
               ? "high"
@@ -530,20 +553,19 @@ function parseAuditReport(text: string): FactoryAuditReport {
             | "options"
             | "correctIndex"
             | "conceptIdsReferenced"
-            | "difficultySignals",
+            | "difficultySignals"
+            | "learningSignals",
           value: x.value,
         }))
         .filter((p) => p.index >= 0),
     };
   } catch {
     return {
-      summary: "Audit returned non-JSON output.",
       issues: [
         {
           code: "auditor_contract_invalid",
           index: -1,
           field: "root",
-          evidence: "non_json_audit_output",
           confidence: "high",
           severity: "blocking",
         },
@@ -557,6 +579,37 @@ function compactSnippet(input: string, max = 180): string {
   const s = String(input || "").replace(/\s+/g, " ").trim();
   if (!s) return "";
   return s.length > max ? `${s.slice(0, max)}...` : s;
+}
+
+function summarizeArchitectOutput(text: string, max = 1200): string {
+  return compactSnippet(text, max);
+}
+
+function classifyFinishReason(finishReason: string | null, candidateTruncated: boolean): string {
+  const reason = String(finishReason || "").toUpperCase();
+  if (candidateTruncated || reason === "MAX_TOKENS") return "contract_truncated_max_tokens";
+  if (reason === "SAFETY" || reason === "RECITATION" || reason === "BLOCKLIST") return "provider_blocked";
+  if (reason === "STOP") return "stop";
+  return reason ? `finish_reason_${reason.toLowerCase()}` : "finish_reason_unknown";
+}
+
+function isDeterministicNonRetryable(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("provider_empty_response") ||
+    errorMessage.includes("provider_blocked") ||
+    errorMessage.includes("auditor_contract_invalid") ||
+    errorMessage.includes("creator_invalid_schema") ||
+    errorMessage.includes("creator_wrong_subcategory")
+  );
+}
+
+function randomJitterMs(maxMs = 1200): number {
+  return Math.floor(Math.random() * Math.max(1, maxMs));
+}
+
+function computeRequeueDelayMinutes(attemptCountAfterFailure: number): number {
+  const base = Math.min(30, Math.max(1, 2 ** attemptCountAfterFailure));
+  return Math.min(45, base + Math.floor(randomJitterMs(90_000) / 60_000));
 }
 
 type NormalizedCreatorBatch = {
@@ -649,6 +702,24 @@ function validateCreatorOutputGate(questions: FactoryQuestion[]): void {
       throw new CreatorGuardError("creator_invalid_schema", `creator_invalid_schema:question_${i + 1}:missing_difficultySignals`, {
         questionIndex: i,
         field: "difficultySignals",
+      });
+    }
+    const learning = q.learningSignals;
+    if (!learning) {
+      throw new CreatorGuardError("creator_invalid_schema", `creator_invalid_schema:question_${i + 1}:missing_learningSignals`, {
+        questionIndex: i,
+        field: "learningSignals",
+      });
+    }
+    if (
+      typeof learning.introducesNewConcept !== "boolean" ||
+      typeof learning.clarifiesMisconception !== "boolean" ||
+      typeof learning.requiresUnderstanding !== "boolean" ||
+      typeof learning.notPureRecall !== "boolean"
+    ) {
+      throw new CreatorGuardError("creator_invalid_schema", `creator_invalid_schema:question_${i + 1}:invalid_learningSignals`, {
+        questionIndex: i,
+        field: "learningSignals",
       });
     }
     const signals = q.difficultySignals;
@@ -794,7 +865,34 @@ function promptOverlapRatio(prompt: string, studyBody: string): number {
 
 type GateIssue = { code: string; severity: "blocking" | "warning"; note: string };
 
-function evaluateQuestionGateIssues(question: FactoryQuestion): GateIssue[] {
+function hasExplanatoryReasoning(text: string): boolean {
+  const body = stripWhitespace(text);
+  return /(لأن|لان|بسبب|حيث|إذ|لذلك)\s+[^.،]{10,}/i.test(body);
+}
+
+function hasMeaningfulContrast(text: string): boolean {
+  const body = stripWhitespace(text);
+  return /(لكن|بينما|وليس|على عكس)\s+[^.،]{8,}/i.test(body);
+}
+
+function evaluateSchemaGateIssues(question: FactoryQuestion): GateIssue[] {
+  const issues: GateIssue[] = [];
+  if (!Array.isArray(question.options) || !(question.options.length === 2 || question.options.length === 4)) {
+    issues.push({ code: "schema_invalid_options", severity: "blocking", note: "options must be 2 or 4" });
+  }
+  if (!Number.isInteger(question.correctIndex) || question.correctIndex < 0 || question.correctIndex >= question.options.length) {
+    issues.push({ code: "schema_invalid_correct_index", severity: "blocking", note: "correctIndex out of range" });
+  }
+  if (!Array.isArray(question.conceptIdsReferenced) || question.conceptIdsReferenced.length === 0) {
+    issues.push({ code: "schema_missing_concepts", severity: "blocking", note: "conceptIdsReferenced required" });
+  }
+  if (!question.learningSignals) {
+    issues.push({ code: "learning_signals_missing", severity: "blocking", note: "learningSignals required" });
+  }
+  return issues;
+}
+
+function evaluatePedagogyGateIssues(question: FactoryQuestion): GateIssue[] {
   const issues: GateIssue[] = [];
   const conceptIds = Array.isArray(question.conceptIdsReferenced) ? question.conceptIdsReferenced : [];
   const promptConcepts = extractConceptIdsFromText(question.prompt, conceptIds);
@@ -802,6 +900,8 @@ function evaluateQuestionGateIssues(question: FactoryQuestion): GateIssue[] {
   const bodyLen = studyBodyCharLength(question.studyBody);
   const hasReasoning = hasLogicalConnector(question.studyBody);
   const hasContrast = hasContrastPattern(question.studyBody);
+  const explanatoryReasoning = hasExplanatoryReasoning(question.studyBody);
+  const meaningfulContrast = hasMeaningfulContrast(question.studyBody);
   const repeatedPrompt = promptOverlapRatio(question.prompt, question.studyBody) > 0.72;
   const semanticallyThin = isSemanticallyThin(question.studyBody);
 
@@ -814,6 +914,12 @@ function evaluateQuestionGateIssues(question: FactoryQuestion): GateIssue[] {
   if (!hasContrast) {
     issues.push({ code: "studyBody_missing_contrast", severity: "blocking", note: "missing contrast pattern" });
   }
+  if (hasReasoning && !explanatoryReasoning) {
+    issues.push({ code: "pedagogy_connector_without_explanation", severity: "blocking", note: "connector exists without causal clause" });
+  }
+  if (hasContrast && !meaningfulContrast) {
+    issues.push({ code: "pedagogy_contrast_without_signal", severity: "blocking", note: "contrast token exists without meaningful clause" });
+  }
   if (repeatedPrompt) {
     issues.push({ code: "studyBody_repeats_prompt", severity: "blocking", note: "studyBody mostly repeats prompt text" });
   }
@@ -822,8 +928,8 @@ function evaluateQuestionGateIssues(question: FactoryQuestion): GateIssue[] {
   }
 
   const conceptIntroduced = [...studyConcepts].some((x) => !promptConcepts.has(x));
-  const conceptClarified = [...promptConcepts].some((x) => studyConcepts.has(x)) && hasReasoning;
-  const misconceptionCorrected = hasContrast && /(خاطئ|غير صحيح|خطأ|ليس صحيح|لا يصح|وهم|مضلل)/i.test(question.studyBody);
+  const conceptClarified = [...promptConcepts].some((x) => studyConcepts.has(x)) && explanatoryReasoning;
+  const misconceptionCorrected = meaningfulContrast && /(خاطئ|غير صحيح|خطأ|ليس صحيح|لا يصح|وهم|مضلل)/i.test(question.studyBody);
   const contextShift =
     JSON.stringify([...promptConcepts].sort()) !== JSON.stringify([...studyConcepts].sort());
   const conceptAppliedNewContext = studyConcepts.size > 0 && contextShift;
@@ -838,6 +944,23 @@ function evaluateQuestionGateIssues(question: FactoryQuestion): GateIssue[] {
     issues.push({ code: "no_new_learning", severity: "blocking", note: "edge-case weak signal" });
   }
   const signals = readDifficultySignals(question);
+  const learningSignals = (question.learningSignals ?? null) as FactoryLearningSignals | null;
+  if (!learningSignals || !learningSignals.notPureRecall) {
+    issues.push({ code: "learning_signals_inconsistent", severity: "blocking", note: "notPureRecall must be true" });
+  } else {
+    const expectedLearning =
+      Number(conceptIntroduced) + Number(misconceptionCorrected) + Number(conceptClarified || conceptAppliedNewContext) >= 1;
+    if (
+      !(
+        learningSignals.introducesNewConcept ||
+        learningSignals.clarifiesMisconception ||
+        learningSignals.requiresUnderstanding
+      ) ||
+      !expectedLearning
+    ) {
+      issues.push({ code: "learning_signals_inconsistent", severity: "blocking", note: "signals do not match measured pedagogy" });
+    }
+  }
   if ((signals?.isAnswerExplicit ?? false) && !(misconceptionCorrected || conceptClarified)) {
     issues.push({ code: "rote_question", severity: "blocking", note: "explicit answer without educational correction" });
   }
@@ -901,11 +1024,20 @@ function ensureQuestionTypeCoverage(questions: FactoryQuestion[], minPct = 0.2):
   }
 }
 
-function runOutputGateChecks(questions: FactoryQuestion[]): void {
+function runSchemaGateChecks(questions: FactoryQuestion[]): void {
+  for (let i = 0; i < questions.length; i += 1) {
+    const issues = evaluateSchemaGateIssues(questions[i]).filter((x) => x.severity === "blocking");
+    if (issues.length) {
+      throw new Error(`schema_gate_blocking_issue_at_${i + 1}:${issues.map((x) => x.code).join("|")}`);
+    }
+  }
+}
+
+function runPedagogyGateChecks(questions: FactoryQuestion[]): void {
   const warnings: GateIssue[] = [];
   for (let i = 0; i < questions.length; i += 1) {
     const q = questions[i];
-    const issues = evaluateQuestionGateIssues(q);
+    const issues = evaluatePedagogyGateIssues(q);
     const blocking = issues.filter((x) => x.severity === "blocking");
     if (blocking.length) {
       throw new Error(`output_gate_blocking_issue_at_${i + 1}:${blocking.map((x) => x.code).join("|")}`);
@@ -919,7 +1051,7 @@ function runOutputGateChecks(questions: FactoryQuestion[]): void {
       else if (conceptCount === 2 && signals.crossConceptCount <= 1) expected = "medium";
       else if (conceptCount >= 3 || signals.crossConceptCount >= 2) expected = "hard";
       if (q.difficulty !== expected) {
-        throw new Error(`output_gate_difficulty_mismatch_at_${i + 1}:expected_${expected}:got_${q.difficulty}`);
+        throw new Error(`pedagogy_gate_difficulty_mismatch_at_${i + 1}:expected_${expected}:got_${q.difficulty}`);
       }
     }
   }
@@ -1000,6 +1132,7 @@ async function refreshPipelineState(
 }
 
 export async function runFactoryJob(job: JobRow): Promise<void> {
+  const effectiveBatchSize = Math.min(Math.max(1, job.batch_size), EXECUTION_BATCH_SIZE_CAP);
   await appendJobLog(job.id, "info", `Job started at ${nowIso()}`);
   await setJobState(job.id, {
     status: "running",
@@ -1017,6 +1150,8 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
   let failedLayer: FactoryLayer | null = "architect";
   let jobSubject = "غير محدد";
   let correctionCycle = 0;
+  let attemptBudgetUsed = 0;
+  let tokenBudgetUsed = 0;
   try {
     await assertNotCancelled(job.id, failedLayer);
     const architectHealth = await getLayerConfigHealth("architect");
@@ -1035,6 +1170,8 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       targetCount: job.target_count,
     });
     const architect = await runLayerModel("architect", architectPrompt);
+    attemptBudgetUsed += 1;
+    tokenBudgetUsed += architect.usageMetadata.totalTokens;
     await assertNotCancelled(job.id, failedLayer);
     await appendInspectionLog({
       jobId: job.id,
@@ -1052,6 +1189,9 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       modelId: architect.modelName,
       status: "success",
       usage: architect.usageMetadata,
+      retryIndex: 0,
+      attemptId: `${job.id}-architect-1`,
+      costSource: "provider_exact",
     });
     await appendJobLog(job.id, "info", "Architect layer completed", "architect", {
       model: architect.modelName,
@@ -1068,9 +1208,9 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       lastLayer: "creator",
     });
     const creatorPrompt = buildCreatorPrompt({
-      architectPrompt: architect.text,
+      architectPrompt: summarizeArchitectOutput(architect.text),
       subcategoryKey: job.subcategory_key,
-      batchSize: job.batch_size,
+      batchSize: effectiveBatchSize,
       difficultyMode: job.difficulty_mode,
       alreadyGenerated: 0,
       globalTypeDistribution: await readGlobalQuestionTypeDistribution(job.subcategory_key),
@@ -1083,7 +1223,12 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     let creatorCandidateTruncated = false;
     while (creatorAttempt < 2) {
       creatorAttempt += 1;
+      if (attemptBudgetUsed >= ATTEMPT_BUDGET_PER_JOB || tokenBudgetUsed >= TOKEN_BUDGET_PER_JOB) {
+        throw new Error("job_budget_exhausted_before_creator");
+      }
       const creator = await runLayerModel("creator", creatorPrompt);
+      attemptBudgetUsed += 1;
+      tokenBudgetUsed += creator.usageMetadata.totalTokens;
       creatorModelName = creator.modelName;
       creatorFinishReason = creator.finishReason;
       creatorCandidateTruncated = creator.candidateTruncated;
@@ -1104,6 +1249,9 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         modelId: creator.modelName,
         status: "success",
         usage: creator.usageMetadata,
+        retryIndex: creatorAttempt - 1,
+        attemptId: `${job.id}-creator-${creatorAttempt}`,
+        costSource: "provider_exact",
       });
       try {
         creatorNormalized = normalizeQuestionsFromCreatorStrict(creator.text, job);
@@ -1158,9 +1306,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       const auditorPrompt = buildAuditorPrompt(
         creatorQuestions,
         creatorNormalized.validationErrors,
-        auditorAttempt > 1,
+        COMPACT_MODE_BY_DEFAULT || auditorAttempt > 1,
       );
+      if (attemptBudgetUsed >= ATTEMPT_BUDGET_PER_JOB || tokenBudgetUsed >= TOKEN_BUDGET_PER_JOB) {
+        throw new Error("job_budget_exhausted_before_auditor");
+      }
       const auditor = await runLayerModel("auditor", auditorPrompt);
+      attemptBudgetUsed += 1;
+      tokenBudgetUsed += auditor.usageMetadata.totalTokens;
       auditorModelName = auditor.modelName;
       auditorFinishReason = auditor.finishReason;
       auditorCandidateTruncated = auditor.candidateTruncated;
@@ -1181,6 +1334,9 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         modelId: auditor.modelName,
         status: "success",
         usage: auditor.usageMetadata,
+        retryIndex: auditorAttempt - 1,
+        attemptId: `${job.id}-auditor-${auditorAttempt}`,
+        costSource: "provider_exact",
       });
       const parsedAudit = parseAuditReport(auditor.text);
       const hasContractInvalid = parsedAudit.issues.some((x) => x.code === "auditor_contract_invalid");
@@ -1192,10 +1348,11 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
           willRetry: canRetry,
           finishReason: auditor.finishReason,
           candidateTruncated: auditor.candidateTruncated,
-          errorCode: likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_invalid_json",
+          finishReasonCode: classifyFinishReason(auditor.finishReason, auditor.candidateTruncated),
+          errorCode: likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_contract_invalid",
         });
         if (canRetry) continue;
-        throw new Error(likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_invalid_json");
+        throw new Error(likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_contract_invalid");
       }
       const maxPatchesPerBatch = Math.max(1, MAX_PATCHES_FACTOR * creatorQuestions.length);
       if (parsedAudit.patches.length > maxPatchesPerBatch) {
@@ -1214,7 +1371,6 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       (x) => x.severity === "blocking" && x.confidence === "medium",
     ).length;
     await appendJobLog(job.id, "info", "Auditor layer completed", "auditor", {
-      summary: auditReport.summary,
       issuesCount: auditReport.issues.length,
       patchesCount: auditReport.patches.length,
       auditorAttempts: auditorAttempt,
@@ -1251,9 +1407,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         patchPreparedQuestions,
         auditReport,
         creatorNormalized.validationErrors,
-        refinerAttempt > 1,
+        COMPACT_MODE_BY_DEFAULT || refinerAttempt > 1,
       );
+      if (attemptBudgetUsed >= ATTEMPT_BUDGET_PER_JOB || tokenBudgetUsed >= TOKEN_BUDGET_PER_JOB) {
+        throw new Error("job_budget_exhausted_before_refiner");
+      }
       const refiner = await runLayerModel("refiner", refinerPrompt);
+      attemptBudgetUsed += 1;
+      tokenBudgetUsed += refiner.usageMetadata.totalTokens;
       refinerModelName = refiner.modelName;
       refinerFinishReason = refiner.finishReason;
       refinerCandidateTruncated = refiner.candidateTruncated;
@@ -1274,6 +1435,9 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         modelId: refiner.modelName,
         status: "success",
         usage: refiner.usageMetadata,
+        retryIndex: refinerAttempt - 1,
+        attemptId: `${job.id}-refiner-${refinerAttempt}`,
+        costSource: "provider_exact",
       });
       try {
         finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
@@ -1289,6 +1453,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
           error: message,
           finishReason: refiner.finishReason,
           candidateTruncated: refiner.candidateTruncated,
+          finishReasonCode: classifyFinishReason(refiner.finishReason, refiner.candidateTruncated),
         });
         if (canRetry) continue;
         throw error;
@@ -1297,13 +1462,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     if (!finalQuestions) {
       throw new Error("refiner_no_valid_output");
     }
-    if (finalQuestions.length > job.batch_size) {
-      finalQuestions = finalQuestions.slice(0, job.batch_size);
+    if (finalQuestions.length > effectiveBatchSize) {
+      finalQuestions = finalQuestions.slice(0, effectiveBatchSize);
     }
     if (finalQuestions.length === 0) {
       throw new Error("refiner_returned_empty_batch");
     }
-    runOutputGateChecks(finalQuestions);
+    runSchemaGateChecks(finalQuestions);
+    runPedagogyGateChecks(finalQuestions);
     await saveJobFinalOutput(job.id, finalQuestions);
     await assertNotCancelled(job.id, failedLayer);
     const inserted = await insertQuestionsAllOrNothing(finalQuestions);
@@ -1315,6 +1481,8 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       resultSummary: {
         inserted,
         auditedIssues: auditReport.issues.length,
+        attemptBudgetUsed,
+        tokenBudgetUsed,
       },
       lastError: null,
     });
@@ -1353,6 +1521,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       return;
     }
     const errMessage = error instanceof Error ? error.message : "unknown_error";
+    const failureCode = errMessage.split(":")[0] || "unknown_error";
     const layerMeta = error instanceof LayerExecutionError ? error.meta : null;
     const creatorMeta =
       error instanceof CreatorGuardError
@@ -1371,6 +1540,9 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         modelId: layerMeta.modelName,
         status: "failed",
         usage: null,
+        retryIndex: Math.max(0, job.attempt_count),
+        attemptId: `${job.id}-${failedLayer}-failed`,
+        costSource: "estimated",
       });
     }
     await appendJobLog(job.id, "error", "Job failed", failedLayer ?? undefined, {
@@ -1387,9 +1559,10 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       creatorQuestionIndex: creatorMeta?.questionIndex ?? null,
       creatorField: creatorMeta?.field ?? null,
       creatorRawSnippet: creatorMeta?.rawSnippet ?? null,
+      failureCode,
     });
-    if (job.attempt_count + 1 < job.max_attempts) {
-      const backoffMinutes = Math.min(30, Math.max(1, 2 ** (job.attempt_count + 1)));
+    if (job.attempt_count + 1 < job.max_attempts && !isDeterministicNonRetryable(errMessage)) {
+      const backoffMinutes = computeRequeueDelayMinutes(job.attempt_count + 1);
       const nextRunAt = new Date(Date.now() + backoffMinutes * 60_000);
       await setJobState(job.id, {
         status: "queued",
@@ -1401,6 +1574,12 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       await appendJobLog(job.id, "warn", "Job re-queued after failure", undefined, {
         nextRunAt: nextRunAt.toISOString(),
         backoffMinutes,
+      });
+      await refreshPipelineState(job.subcategory_key, {
+        lastJobId: job.id,
+        lastStatus: "failed",
+        lastLayer: failedLayer,
+        lastError: errMessage,
       });
     } else {
       await setJobState(job.id, {

@@ -116,7 +116,13 @@ async function enqueueJob(input: {
     `INSERT INTO ai_factory_jobs (
        subcategory_key, difficulty_mode, target_count, batch_size, status, payload, next_run_at
      )
-     VALUES ($1, $2, $3, $4, 'queued', $5::jsonb, NOW())
+     SELECT $1, $2, $3, $4, 'queued', $5::jsonb, NOW()
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM ai_factory_jobs j
+       WHERE j.subcategory_key = $1
+         AND j.status IN ('queued', 'running')
+     )
      RETURNING id`,
     [
       input.subcategoryKey,
@@ -270,6 +276,9 @@ export class AIFactoryRuntime {
       batchSize: input.batchSize,
       payload: { manual: true },
     });
+    if (!jobId) {
+      throw new Error("duplicate_job_guard_blocked");
+    }
     return { jobId };
   }
 

@@ -144,12 +144,15 @@ export async function insertAiUsageLog(input: {
   costSar: number;
   subject: string;
   status: "success" | "failed";
+  retryIndex?: number;
+  attemptId?: string;
+  costSource?: "provider_exact" | "estimated";
 }): Promise<void> {
   const pool = getPool();
   await pool.query(
     `INSERT INTO ai_usage_logs
-      (job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, subject, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      (job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, subject, status, retry_index, attempt_id, cost_source)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       input.jobId,
       input.modelId,
@@ -160,6 +163,9 @@ export async function insertAiUsageLog(input: {
       roundMoney(input.costSar),
       String(input.subject || "غير محدد").trim() || "غير محدد",
       input.status,
+      Math.max(0, Math.floor(Number(input.retryIndex ?? 0) || 0)),
+      String(input.attemptId || "").trim() || null,
+      input.costSource === "provider_exact" ? "provider_exact" : "estimated",
     ],
   );
 }

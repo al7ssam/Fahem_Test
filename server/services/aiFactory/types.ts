@@ -3,6 +3,12 @@ export type FactoryReasoningLevel = "none" | "low" | "medium" | "high";
 
 export type FactoryDifficulty = "mix" | "easy" | "medium" | "hard";
 export type FactoryQuestionType = "conceptual" | "procedural" | "application";
+export type FactoryLearningSignals = {
+  introducesNewConcept: boolean;
+  clarifiesMisconception: boolean;
+  requiresUnderstanding: boolean;
+  notPureRecall: boolean;
+};
 
 export type FactoryQuestion = {
   prompt: string;
@@ -18,6 +24,7 @@ export type FactoryQuestion = {
     explicitFactCount: number;
     crossConceptCount: number;
   };
+  learningSignals?: FactoryLearningSignals;
 };
 
 export type FactoryJobPayload = {
@@ -28,12 +35,10 @@ export type FactoryJobPayload = {
 };
 
 export type FactoryAuditReport = {
-  summary: string;
   issues: Array<{
     code: string;
     index: number;
     field: string;
-    evidence: string;
     confidence: "high" | "medium" | "low";
     severity: "blocking" | "non_blocking";
   }>;
@@ -48,7 +53,8 @@ export type FactoryAuditReport = {
       | "options"
       | "correctIndex"
       | "conceptIdsReferenced"
-      | "difficultySignals";
+      | "difficultySignals"
+      | "learningSignals";
     value: unknown;
   }>;
 };
