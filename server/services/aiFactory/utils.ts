@@ -1,4 +1,4 @@
-import type { FactoryQuestion } from "./types";
+import type { FactoryDifficulty, FactoryQuestion, FactoryValidationError } from "./types";
 
 function normalizeJsonLikeText(input: string): string {
   return input
@@ -107,6 +107,175 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
     subcategoryKey,
     difficulty,
   };
+}
+
+function mapDifficultyAlias(raw: string): FactoryQuestion["difficulty"] | null {
+  const v = String(raw || "").trim().toLowerCase();
+  if (!v) return null;
+  if (v === "easy" || v === "medium" || v === "hard") return v;
+  if (v === "سهل") return "easy";
+  if (v === "متوسط") return "medium";
+  if (v === "صعب") return "hard";
+  return null;
+}
+
+function pushValidationError(
+  into: FactoryValidationError[],
+  input: Omit<FactoryValidationError, "index"> & { index: number },
+): void {
+  into.push({
+    code: input.code,
+    field: input.field,
+    index: input.index,
+    message: input.message,
+    before: input.before,
+    after: input.after,
+  });
+}
+
+export function normalizeFactoryQuestionsLenient(
+  items: unknown[],
+  options: {
+    fallbackSubcategoryKey: string;
+    forcedDifficultyMode: FactoryDifficulty;
+  },
+): { questions: FactoryQuestion[]; validationErrors: FactoryValidationError[] } {
+  const validationErrors: FactoryValidationError[] = [];
+  const questions: FactoryQuestion[] = [];
+
+  for (let idx = 0; idx < items.length; idx += 1) {
+    const item = items[idx];
+    if (!item || typeof item !== "object") {
+      pushValidationError(validationErrors, {
+        code: "invalid_object",
+        field: "question",
+        index: idx,
+        message: `question_${idx + 1}_invalid_object`,
+      });
+      continue;
+    }
+    const o = item as Record<string, unknown>;
+    const prompt = String(o.prompt ?? "").trim();
+    const optionsList = Array.isArray(o.options) ? o.options.map((x) => String(x ?? "").trim()) : [];
+    const correctIndex = Number(o.correctIndex ?? o.correct_index);
+    const studyBody = String(o.studyBody ?? o.study_body ?? "").trim();
+    const rawSubcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
+    const mappedDifficulty = mapDifficultyAlias(String(o.difficulty ?? ""));
+    const forcedDifficulty =
+      options.forcedDifficultyMode === "mix" ? null : options.forcedDifficultyMode;
+
+    if (!prompt) {
+      pushValidationError(validationErrors, {
+        code: "missing_prompt",
+        field: "prompt",
+        index: idx,
+        message: `question_${idx + 1}_missing_prompt`,
+      });
+      continue;
+    }
+    if (!(optionsList.length === 2 || optionsList.length === 4)) {
+      pushValidationError(validationErrors, {
+        code: "options_must_be_2_or_4",
+        field: "options",
+        index: idx,
+        message: `question_${idx + 1}_options_must_be_2_or_4`,
+        before: optionsList.length,
+      });
+      continue;
+    }
+    if (optionsList.some((v) => !v)) {
+      pushValidationError(validationErrors, {
+        code: "empty_option",
+        field: "options",
+        index: idx,
+        message: `question_${idx + 1}_empty_option`,
+      });
+      continue;
+    }
+    if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= optionsList.length) {
+      pushValidationError(validationErrors, {
+        code: "invalid_correct_index",
+        field: "correctIndex",
+        index: idx,
+        message: `question_${idx + 1}_invalid_correct_index`,
+        before: o.correctIndex ?? o.correct_index,
+      });
+      continue;
+    }
+    if (!studyBody) {
+      pushValidationError(validationErrors, {
+        code: "missing_study_body",
+        field: "studyBody",
+        index: idx,
+        message: `question_${idx + 1}_missing_study_body`,
+      });
+      continue;
+    }
+
+    let subcategoryKey = rawSubcategoryKey;
+    if (!rawSubcategoryKey || rawSubcategoryKey !== options.fallbackSubcategoryKey) {
+      subcategoryKey = options.fallbackSubcategoryKey;
+      pushValidationError(validationErrors, {
+        code: !rawSubcategoryKey ? "missing_subcategory_key" : "invalid_subcategory_key",
+        field: "subcategoryKey",
+        index: idx,
+        message: !rawSubcategoryKey
+          ? `question_${idx + 1}_missing_subcategory_key`
+          : `question_${idx + 1}_invalid_subcategory_key`,
+        before: rawSubcategoryKey || null,
+        after: subcategoryKey,
+      });
+    }
+
+    let difficulty: FactoryQuestion["difficulty"];
+    if (forcedDifficulty) {
+      difficulty = forcedDifficulty;
+      if (mappedDifficulty !== forcedDifficulty) {
+        pushValidationError(validationErrors, {
+          code: "difficulty_overridden_by_mode",
+          field: "difficulty",
+          index: idx,
+          message: `question_${idx + 1}_difficulty_overridden_by_mode`,
+          before: o.difficulty ?? null,
+          after: forcedDifficulty,
+        });
+      }
+    } else if (mappedDifficulty) {
+      difficulty = mappedDifficulty;
+      const rawDifficulty = String(o.difficulty ?? "").trim().toLowerCase();
+      if (rawDifficulty && rawDifficulty !== mappedDifficulty) {
+        pushValidationError(validationErrors, {
+          code: "difficulty_alias_normalized",
+          field: "difficulty",
+          index: idx,
+          message: `question_${idx + 1}_difficulty_alias_normalized`,
+          before: o.difficulty ?? null,
+          after: mappedDifficulty,
+        });
+      }
+    } else {
+      difficulty = "medium";
+      pushValidationError(validationErrors, {
+        code: "invalid_difficulty",
+        field: "difficulty",
+        index: idx,
+        message: `question_${idx + 1}_invalid_difficulty`,
+        before: o.difficulty ?? null,
+        after: difficulty,
+      });
+    }
+
+    questions.push({
+      prompt,
+      options: optionsList,
+      correctIndex,
+      studyBody,
+      subcategoryKey,
+      difficulty,
+    });
+  }
+
+  return { questions, validationErrors };
 }
 
 export function sleep(ms: number): Promise<void> {

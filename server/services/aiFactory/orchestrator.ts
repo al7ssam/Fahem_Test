@@ -1,7 +1,13 @@
 import { getPool } from "../../db/pool";
 import { runLayerModel } from "./modelManager";
-import { extractJsonArray, normalizeFactoryQuestion } from "./utils";
-import type { FactoryAuditReport, FactoryJobPayload, FactoryLayer, FactoryQuestion } from "./types";
+import { extractJsonArray, normalizeFactoryQuestion, normalizeFactoryQuestionsLenient } from "./utils";
+import type {
+  FactoryAuditReport,
+  FactoryJobPayload,
+  FactoryLayer,
+  FactoryQuestion,
+  FactoryValidationError,
+} from "./types";
 
 type JobRow = {
   id: number;
@@ -204,28 +210,41 @@ function buildCreatorPrompt(args: {
   ].join("\n");
 }
 
-function buildAuditorPrompt(questions: FactoryQuestion[]): string {
+function buildAuditorPrompt(questions: FactoryQuestion[], validationErrors: FactoryValidationError[]): string {
   return [
     "You are The Auditor layer.",
-    "Audit the following JSON questions for correctness, quality, and difficulty fit.",
+    "You are responsible for auditing technical integrity in addition to content quality.",
+    "Audit the following JSON questions for correctness, quality, and technical integrity.",
+    "You MUST verify that difficulty uses English values only: easy, medium, hard.",
+    "If Arabic difficulty values are found (سهل، متوسط، صعب), report them as issues that require fixing.",
+    "Ensure all JSON keys and values conform to required schema constraints.",
+    `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
     "Return JSON object with fields: summary (string), issues (array of strings), requiresRefine (boolean).",
     "If there are no issues, issues should be empty and requiresRefine false.",
     JSON.stringify(questions),
   ].join("\n");
 }
 
-function buildRefinerPrompt(questions: FactoryQuestion[], audit: FactoryAuditReport): string {
+function buildRefinerPrompt(
+  questions: FactoryQuestion[],
+  audit: FactoryAuditReport,
+  validationErrors: FactoryValidationError[],
+): string {
   return [
     "You are The Refiner layer.",
     "Fix the question array based on the audit report and return corrected JSON array only.",
     "Preserve schema fields exactly.",
+    "You must repair technical issues before final output.",
     "Constraints: options length 2 or 4, correctIndex in-range, non-empty studyBody, valid difficulty.",
+    "Difficulty must be English only (easy, medium, hard).",
+    "Fix any invalid values and malformed structures whenever possible.",
     "Return ONLY valid JSON array.",
     "Do not wrap in markdown fences.",
     "No commentary before or after JSON.",
     "Use standard double quotes for all JSON keys and string values.",
     `Audit summary: ${audit.summary}`,
     `Audit issues: ${JSON.stringify(audit.issues)}`,
+    `Validation errors from server: ${JSON.stringify(validationErrors)}`,
     JSON.stringify(questions),
   ].join("\n");
 }
@@ -248,18 +267,45 @@ function compactSnippet(input: string, max = 180): string {
   return s.length > max ? `${s.slice(0, max)}...` : s;
 }
 
-function normalizeQuestionsFromModel(rawText: string, job: JobRow, layer: "creator" | "refiner"): FactoryQuestion[] {
+type NormalizedCreatorBatch = {
+  questions: FactoryQuestion[];
+  validationErrors: FactoryValidationError[];
+};
+
+function normalizeQuestionsFromCreator(rawText: string, job: JobRow): NormalizedCreatorBatch {
   const arr = extractJsonArray(rawText);
   if (!arr) {
-    throw new Error(`invalid_json_output:layer=${layer}:snippet=${compactSnippet(rawText)}`);
+    return {
+      questions: [],
+      validationErrors: [
+        {
+          code: "invalid_json_output",
+          field: "root",
+          index: -1,
+          message: `invalid_json_output:layer=creator:snippet=${compactSnippet(rawText)}`,
+          before: compactSnippet(rawText, 300),
+        },
+      ],
+    };
+  }
+  return normalizeFactoryQuestionsLenient(arr, {
+    fallbackSubcategoryKey: job.subcategory_key,
+    forcedDifficultyMode: job.difficulty_mode,
+  });
+}
+
+function normalizeQuestionsFromRefinerStrict(rawText: string, job: JobRow): FactoryQuestion[] {
+  const arr = extractJsonArray(rawText);
+  if (!arr) {
+    throw new Error(`invalid_json_output:layer=refiner:snippet=${compactSnippet(rawText)}`);
   }
   return arr.map((item, idx) => {
     const q = normalizeFactoryQuestion(item, idx);
     if (q.subcategoryKey !== job.subcategory_key) {
-      q.subcategoryKey = job.subcategory_key;
+      throw new Error(`question_${idx + 1}_invalid_subcategory_key_after_refiner`);
     }
-    if (job.difficulty_mode !== "mix") {
-      q.difficulty = job.difficulty_mode;
+    if (job.difficulty_mode !== "mix" && q.difficulty !== job.difficulty_mode) {
+      throw new Error(`question_${idx + 1}_invalid_difficulty_after_refiner`);
     }
     return q;
   });
@@ -398,9 +444,12 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       modelName: creator.modelName,
       apiVersion: creator.apiVersion,
     });
-    const creatorQuestions = normalizeQuestionsFromModel(creator.text, job, "creator");
+    const creatorNormalized = normalizeQuestionsFromCreator(creator.text, job);
+    const creatorQuestions = creatorNormalized.questions;
     await appendJobLog(job.id, "info", "Creator layer completed", "creator", {
       generated: creatorQuestions.length,
+      validationErrorsCount: creatorNormalized.validationErrors.length,
+      validationErrors: creatorNormalized.validationErrors,
       model: creator.modelName,
     });
 
@@ -410,7 +459,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       lastStatus: "running",
       lastLayer: "auditor",
     });
-    const auditorPrompt = buildAuditorPrompt(creatorQuestions);
+    const auditorPrompt = buildAuditorPrompt(creatorQuestions, creatorNormalized.validationErrors);
     await appendJobLog(job.id, "info", "Auditor layer started", "auditor");
     const auditor = await runLayerModel("auditor", auditorPrompt);
     await appendInspectionLog({
@@ -436,7 +485,11 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       lastStatus: "running",
       lastLayer: "refiner",
     });
-    const refinerPrompt = buildRefinerPrompt(creatorQuestions, auditReport);
+    const refinerPrompt = buildRefinerPrompt(
+      creatorQuestions,
+      auditReport,
+      creatorNormalized.validationErrors,
+    );
     await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
     const refiner = await runLayerModel("refiner", refinerPrompt);
     await appendInspectionLog({
@@ -448,7 +501,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       modelName: refiner.modelName,
       apiVersion: refiner.apiVersion,
     });
-    let finalQuestions = normalizeQuestionsFromModel(refiner.text, job, "refiner");
+    let finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
     if (finalQuestions.length > job.batch_size) {
       finalQuestions = finalQuestions.slice(0, job.batch_size);
     }

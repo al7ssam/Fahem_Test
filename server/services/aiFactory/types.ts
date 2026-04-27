@@ -24,6 +24,15 @@ export type FactoryAuditReport = {
   issues: string[];
 };
 
+export type FactoryValidationError = {
+  code: string;
+  field: string;
+  index: number;
+  message: string;
+  before?: unknown;
+  after?: unknown;
+};
+
 export type LayerModelConfig = {
   layerName: FactoryLayer;
   provider: string;
