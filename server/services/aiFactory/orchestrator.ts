@@ -43,6 +43,7 @@ const PEDAGOGICAL_NORMS_ANCHOR = [
   "- Output must be pure JSON only, no markdown.",
 ].join("\n");
 const MAX_CORRECTION_CYCLE = 1;
+const MAX_PATCHES_FACTOR = 2;
 
 class JobCancelledError extends Error {
   readonly layer: FactoryLayer | null;
@@ -58,7 +59,8 @@ class CreatorGuardError extends Error {
     | "creator_not_array"
     | "creator_invalid_question"
     | "creator_missing_field"
-    | "creator_wrong_subcategory";
+    | "creator_wrong_subcategory"
+    | "creator_invalid_schema";
   readonly questionIndex: number | null;
   readonly field: string | null;
   readonly rawSnippet: string;
@@ -363,7 +365,9 @@ function buildCreatorPrompt(args: {
     "- 30% procedural",
     "- 40% application",
     "Every question must include questionType with one of: conceptual, procedural, application.",
-    "Every question must include conceptIdsReferenced (string[]), and crossConceptCount number.",
+    "Every question must include conceptIdsReferenced (string[]).",
+    "Every question must include difficultySignals object:",
+    '{ "isAnswerExplicit": boolean, "explicitFactCount": number, "crossConceptCount": number }',
     "DO NOT infer difficulty from questionType.",
     "Each question must satisfy at least one learning-value condition (to be verified by OutputGate):",
     "- concept_introduced OR concept_clarified OR misconception_corrected OR concept_applied_new_context.",
@@ -396,14 +400,34 @@ function buildCreatorPrompt(args: {
   ].join("\n");
 }
 
-function buildAuditorPrompt(questions: FactoryQuestion[], validationErrors: FactoryValidationError[]): string {
+function compactQuestionForAudit(question: FactoryQuestion): Record<string, unknown> {
+  return {
+    prompt: question.prompt,
+    options: question.options,
+    correctIndex: question.correctIndex,
+    studyBody: question.studyBody,
+    subcategoryKey: question.subcategoryKey,
+    difficulty: question.difficulty,
+    questionType: question.questionType,
+    conceptIdsReferenced: question.conceptIdsReferenced ?? [],
+    difficultySignals: question.difficultySignals ?? null,
+  };
+}
+
+function buildAuditorPrompt(
+  questions: FactoryQuestion[],
+  validationErrors: FactoryValidationError[],
+  compactMode = false,
+): string {
+  const payload = compactMode ? questions.map(compactQuestionForAudit) : questions;
   return [
     "You are The Auditor layer.",
-    PEDAGOGICAL_NORMS_ANCHOR,
+    compactMode ? "Use compact mode output." : PEDAGOGICAL_NORMS_ANCHOR,
     "ROLE CONSTRAINT: Detector-only. No long explanations. No alternative interpretations.",
     "Detect violations and output machine-executable patches only.",
     "Check schema validity and value constraints.",
     "Check questionType/difficulty independence.",
+    "DO NOT fully re-derive all difficulties; flag only clear deterministic mismatches.",
     "Use confidence and severity for each issue.",
     "Mandatory issue codes to detect:",
     "- rote_question (blocking)",
@@ -417,12 +441,11 @@ function buildAuditorPrompt(questions: FactoryQuestion[], validationErrors: Fact
     `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
     "Return ONLY valid JSON object with fields:",
     "{",
-    '  "summary": string,',
-    '  "issues": [{ "code": string, "index": number, "field": string, "evidence": string, "confidence": "high|medium|low", "severity": "blocking|non_blocking" }],',
+    '  "issues": [{ "code": string, "index": number, "field": string, "confidence": "high|medium|low", "severity": "blocking|non_blocking" }],',
     '  "patches": [{ "op": "replace", "index": number, "field": "questionType|difficulty|studyBody|prompt|options|correctIndex|conceptIdsReferenced|difficultySignals", "value": any }]',
     "}",
     "No markdown. No extra keys.",
-    JSON.stringify(questions),
+    JSON.stringify(payload),
   ].join("\n");
 }
 
@@ -430,10 +453,12 @@ function buildRefinerPrompt(
   questions: FactoryQuestion[],
   audit: FactoryAuditReport,
   validationErrors: FactoryValidationError[],
+  compactMode = false,
 ): string {
+  const payload = compactMode ? questions.map(compactQuestionForAudit) : questions;
   return [
     "You are The Refiner layer.",
-    PEDAGOGICAL_NORMS_ANCHOR,
+    compactMode ? "Use compact mode output." : PEDAGOGICAL_NORMS_ANCHOR,
     "ROLE CONSTRAINT: Execution-only.",
     "Apply patches exactly. Do not reinterpret, do not add new patches, do not rebalance distributions.",
     "If a patch would break schema, skip that patch and keep object valid.",
@@ -445,21 +470,20 @@ function buildRefinerPrompt(
     "Do not wrap in markdown fences.",
     "No commentary before or after JSON.",
     "Use standard double quotes for all JSON keys and string values.",
-    `Audit summary: ${audit.summary}`,
     `Audit issues: ${JSON.stringify(audit.issues)}`,
     `Audit patches: ${JSON.stringify(audit.patches)}`,
     `Validation errors from server: ${JSON.stringify(validationErrors)}`,
-    JSON.stringify(questions),
+    JSON.stringify(payload),
   ].join("\n");
 }
 
 function parseAuditReport(text: string): FactoryAuditReport {
   try {
-    const parsed = JSON.parse(text) as { summary?: unknown; issues?: unknown; patches?: unknown };
+    const parsed = JSON.parse(text) as { issues?: unknown; patches?: unknown };
     const rawIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
     const rawPatches = Array.isArray(parsed.patches) ? parsed.patches : [];
     return {
-      summary: String(parsed.summary ?? "").trim() || "Audit completed.",
+      summary: "Audit completed.",
       issues: rawIssues
         .map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : null))
         .filter((x): x is Record<string, unknown> => Boolean(x))
@@ -467,7 +491,7 @@ function parseAuditReport(text: string): FactoryAuditReport {
           code: String(x.code ?? "unknown_issue"),
           index: Number.isInteger(Number(x.index)) ? Number(x.index) : -1,
           field: String(x.field ?? "unknown"),
-          evidence: String(x.evidence ?? ""),
+          evidence: "",
           confidence:
             String(x.confidence ?? "medium") === "high"
               ? "high"
@@ -596,7 +620,62 @@ function normalizeQuestionsFromCreatorStrict(rawText: string, job: JobRow): Norm
   return { questions, validationErrors: [] };
 }
 
+function validateCreatorOutputGate(questions: FactoryQuestion[]): void {
+  for (let i = 0; i < questions.length; i += 1) {
+    const q = questions[i];
+    const conceptIds = Array.isArray(q.conceptIdsReferenced) ? q.conceptIdsReferenced : [];
+    if (conceptIds.length === 0) {
+      throw new CreatorGuardError("creator_invalid_schema", `creator_invalid_schema:question_${i + 1}:missing_conceptIdsReferenced`, {
+        questionIndex: i,
+        field: "conceptIdsReferenced",
+      });
+    }
+    if (!q.difficultySignals) {
+      throw new CreatorGuardError("creator_invalid_schema", `creator_invalid_schema:question_${i + 1}:missing_difficultySignals`, {
+        questionIndex: i,
+        field: "difficultySignals",
+      });
+    }
+    const signals = q.difficultySignals;
+    if (
+      !Number.isFinite(signals.explicitFactCount) ||
+      !Number.isFinite(signals.crossConceptCount) ||
+      signals.explicitFactCount < 0 ||
+      signals.crossConceptCount < 0
+    ) {
+      throw new CreatorGuardError("creator_invalid_schema", `creator_invalid_schema:question_${i + 1}:invalid_difficultySignals`, {
+        questionIndex: i,
+        field: "difficultySignals",
+      });
+    }
+    if (conceptIds.length <= 1 && signals.crossConceptCount !== 0) {
+      throw new CreatorGuardError(
+        "creator_invalid_schema",
+        `creator_invalid_schema:question_${i + 1}:crossConceptCount_must_be_zero_for_single_concept`,
+        {
+          questionIndex: i,
+          field: "difficultySignals.crossConceptCount",
+        },
+      );
+    }
+    if (signals.crossConceptCount > Math.max(0, conceptIds.length - 1)) {
+      throw new CreatorGuardError(
+        "creator_invalid_schema",
+        `creator_invalid_schema:question_${i + 1}:crossConceptCount_not_logical`,
+        {
+          questionIndex: i,
+          field: "difficultySignals.crossConceptCount",
+        },
+      );
+    }
+  }
+}
+
 function normalizeQuestionsFromRefinerStrict(rawText: string, job: JobRow): FactoryQuestion[] {
+  const trimmed = String(rawText || "").trim();
+  if (/\]\s*\]$/.test(trimmed) || /\}\s*\}$/.test(trimmed)) {
+    throw new Error(`refiner_invalid_json_trailing_brackets:layer=refiner:snippet=${compactSnippet(rawText)}`);
+  }
   const arr = extractJsonArray(rawText);
   if (!arr) {
     throw new Error(`invalid_json_output:layer=refiner:snippet=${compactSnippet(rawText)}`);
@@ -941,6 +1020,8 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
     await appendJobLog(job.id, "info", "Architect layer completed", "architect", {
       model: architect.modelName,
+      finishReason: architect.finishReason,
+      candidateTruncated: architect.candidateTruncated,
     });
 
     failedLayer = "creator";
@@ -963,10 +1044,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     let creatorAttempt = 0;
     let creatorNormalized: NormalizedCreatorBatch | null = null;
     let creatorModelName = "";
+    let creatorFinishReason: string | null = null;
+    let creatorCandidateTruncated = false;
     while (creatorAttempt < 2) {
       creatorAttempt += 1;
       const creator = await runLayerModel("creator", creatorPrompt);
       creatorModelName = creator.modelName;
+      creatorFinishReason = creator.finishReason;
+      creatorCandidateTruncated = creator.candidateTruncated;
       await assertNotCancelled(job.id, failedLayer);
       await appendInspectionLog({
         jobId: job.id,
@@ -1008,12 +1093,15 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       throw new Error("creator_guard_no_output");
     }
     const creatorQuestions = creatorNormalized.questions;
+    validateCreatorOutputGate(creatorQuestions);
     await appendJobLog(job.id, "info", "Creator layer completed", "creator", {
       generated: creatorQuestions.length,
       validationErrorsCount: creatorNormalized.validationErrors.length,
       validationErrors: creatorNormalized.validationErrors,
       creatorAttempts: creatorAttempt,
       model: creatorModelName,
+      finishReason: creatorFinishReason,
+      candidateTruncated: creatorCandidateTruncated,
     });
 
     failedLayer = "auditor";
@@ -1024,28 +1112,66 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       lastStatus: "running",
       lastLayer: "auditor",
     });
-    const auditorPrompt = buildAuditorPrompt(creatorQuestions, creatorNormalized.validationErrors);
     await appendJobLog(job.id, "info", "Auditor layer started", "auditor");
-    const auditor = await runLayerModel("auditor", auditorPrompt);
-    await assertNotCancelled(job.id, failedLayer);
-    await appendInspectionLog({
-      jobId: job.id,
-      layer: "auditor",
-      promptText: auditorPrompt,
-      rawResponseText: auditor.rawResponseText,
-      provider: auditor.provider,
-      modelName: auditor.modelName,
-      apiVersion: auditor.apiVersion,
-    });
-    await appendAiUsageLogSafe({
-      jobId: job.id,
-      subject: jobSubject,
-      layer: "auditor",
-      modelId: auditor.modelName,
-      status: "success",
-      usage: auditor.usageMetadata,
-    });
-    const auditReport = parseAuditReport(auditor.text);
+    let auditorAttempt = 0;
+    let auditReport: FactoryAuditReport | null = null;
+    let auditorModelName = "";
+    let auditorFinishReason: string | null = null;
+    let auditorCandidateTruncated = false;
+    while (auditorAttempt < 2) {
+      auditorAttempt += 1;
+      const auditorPrompt = buildAuditorPrompt(
+        creatorQuestions,
+        creatorNormalized.validationErrors,
+        auditorAttempt > 1,
+      );
+      const auditor = await runLayerModel("auditor", auditorPrompt);
+      auditorModelName = auditor.modelName;
+      auditorFinishReason = auditor.finishReason;
+      auditorCandidateTruncated = auditor.candidateTruncated;
+      await assertNotCancelled(job.id, failedLayer);
+      await appendInspectionLog({
+        jobId: job.id,
+        layer: "auditor",
+        promptText: auditorPrompt,
+        rawResponseText: auditor.rawResponseText,
+        provider: auditor.provider,
+        modelName: auditor.modelName,
+        apiVersion: auditor.apiVersion,
+      });
+      await appendAiUsageLogSafe({
+        jobId: job.id,
+        subject: jobSubject,
+        layer: "auditor",
+        modelId: auditor.modelName,
+        status: "success",
+        usage: auditor.usageMetadata,
+      });
+      const parsedAudit = parseAuditReport(auditor.text);
+      const hasContractInvalid = parsedAudit.issues.some((x) => x.code === "auditor_contract_invalid");
+      const likelyTruncated = auditor.candidateTruncated || String(auditor.finishReason || "").toUpperCase() === "MAX_TOKENS";
+      if (hasContractInvalid) {
+        const canRetry = auditorAttempt < 2;
+        await appendJobLog(job.id, canRetry ? "warn" : "error", "Auditor contract failed", "auditor", {
+          auditorAttempt,
+          willRetry: canRetry,
+          finishReason: auditor.finishReason,
+          candidateTruncated: auditor.candidateTruncated,
+          errorCode: likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_invalid_json",
+        });
+        if (canRetry) continue;
+        throw new Error(likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_invalid_json");
+      }
+      const maxPatchesPerBatch = Math.max(1, MAX_PATCHES_FACTOR * creatorQuestions.length);
+      if (parsedAudit.patches.length > maxPatchesPerBatch) {
+        throw new Error(`auditor_overcorrection:max=${maxPatchesPerBatch}:got=${parsedAudit.patches.length}`);
+      }
+      auditReport = parsedAudit;
+      break;
+    }
+    if (!auditReport) {
+      throw new Error("auditor_no_valid_report");
+    }
     const blockingHighIssues = auditReport.issues.filter(
       (x) => x.severity === "blocking" && x.confidence === "high",
     ).length;
@@ -1056,10 +1182,13 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       summary: auditReport.summary,
       issuesCount: auditReport.issues.length,
       patchesCount: auditReport.patches.length,
+      auditorAttempts: auditorAttempt,
       blockingHighIssues,
       blockingMediumIssues,
       issues: auditReport.issues,
-      model: auditor.modelName,
+      model: auditorModelName,
+      finishReason: auditorFinishReason,
+      candidateTruncated: auditorCandidateTruncated,
     });
 
     failedLayer = "refiner";
@@ -1075,28 +1204,64 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       throw new Error("max_correction_cycle_exceeded");
     }
     const patchPreparedQuestions = applyAuditorPatchesToQuestions(creatorQuestions, auditReport);
-    const refinerPrompt = buildRefinerPrompt(patchPreparedQuestions, auditReport, creatorNormalized.validationErrors);
     await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
-    const refiner = await runLayerModel("refiner", refinerPrompt);
-    await assertNotCancelled(job.id, failedLayer);
-    await appendInspectionLog({
-      jobId: job.id,
-      layer: "refiner",
-      promptText: refinerPrompt,
-      rawResponseText: refiner.rawResponseText,
-      provider: refiner.provider,
-      modelName: refiner.modelName,
-      apiVersion: refiner.apiVersion,
-    });
-    await appendAiUsageLogSafe({
-      jobId: job.id,
-      subject: jobSubject,
-      layer: "refiner",
-      modelId: refiner.modelName,
-      status: "success",
-      usage: refiner.usageMetadata,
-    });
-    let finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
+    let refinerAttempt = 0;
+    let refinerModelName = "";
+    let refinerFinishReason: string | null = null;
+    let refinerCandidateTruncated = false;
+    let finalQuestions: FactoryQuestion[] | null = null;
+    while (refinerAttempt < 2) {
+      refinerAttempt += 1;
+      const refinerPrompt = buildRefinerPrompt(
+        patchPreparedQuestions,
+        auditReport,
+        creatorNormalized.validationErrors,
+        refinerAttempt > 1,
+      );
+      const refiner = await runLayerModel("refiner", refinerPrompt);
+      refinerModelName = refiner.modelName;
+      refinerFinishReason = refiner.finishReason;
+      refinerCandidateTruncated = refiner.candidateTruncated;
+      await assertNotCancelled(job.id, failedLayer);
+      await appendInspectionLog({
+        jobId: job.id,
+        layer: "refiner",
+        promptText: refinerPrompt,
+        rawResponseText: refiner.rawResponseText,
+        provider: refiner.provider,
+        modelName: refiner.modelName,
+        apiVersion: refiner.apiVersion,
+      });
+      await appendAiUsageLogSafe({
+        jobId: job.id,
+        subject: jobSubject,
+        layer: "refiner",
+        modelId: refiner.modelName,
+        status: "success",
+        usage: refiner.usageMetadata,
+      });
+      try {
+        finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
+        break;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "refiner_invalid_json";
+        const isRetryableJson =
+          message.includes("invalid_json_output:layer=refiner") || message.includes("refiner_invalid_json_trailing_brackets");
+        const canRetry = isRetryableJson && refinerAttempt < 2;
+        await appendJobLog(job.id, canRetry ? "warn" : "error", "Refiner JSON guard failed", "refiner", {
+          refinerAttempt,
+          willRetry: canRetry,
+          error: message,
+          finishReason: refiner.finishReason,
+          candidateTruncated: refiner.candidateTruncated,
+        });
+        if (canRetry) continue;
+        throw error;
+      }
+    }
+    if (!finalQuestions) {
+      throw new Error("refiner_no_valid_output");
+    }
     if (finalQuestions.length > job.batch_size) {
       finalQuestions = finalQuestions.slice(0, job.batch_size);
     }
@@ -1127,7 +1292,10 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
     await appendJobLog(job.id, "info", "Refiner layer committed batch successfully", "refiner", {
       inserted,
-      model: refiner.modelName,
+      refinerAttempts: refinerAttempt,
+      model: refinerModelName,
+      finishReason: refinerFinishReason,
+      candidateTruncated: refinerCandidateTruncated,
     });
     failedLayer = null;
   } catch (error) {

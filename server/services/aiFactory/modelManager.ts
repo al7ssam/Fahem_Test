@@ -77,6 +77,8 @@ type ModelCallResult = {
   apiVersion: "v1" | "v1beta";
   modelName: string;
   provider: string;
+  finishReason: string | null;
+  candidateTruncated: boolean;
   usageMetadata: {
     inputTokens: number;
     outputTokens: number;
@@ -372,6 +374,10 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
     const result = await model.generateContent(prompt);
     const rawResponseText = JSON.stringify(result.response ?? {}, null, 2);
     const text = String(result.response.text() ?? "").trim();
+    const responseObj = result.response as unknown as { candidates?: Array<{ finishReason?: unknown }> };
+    const firstCandidate = Array.isArray(responseObj?.candidates) ? responseObj.candidates[0] : null;
+    const finishReason = firstCandidate ? String(firstCandidate.finishReason ?? "").trim() || null : null;
+    const candidateTruncated = String(finishReason || "").toUpperCase() === "MAX_TOKENS";
     const usageRaw = (result.response as { usageMetadata?: unknown })?.usageMetadata;
     const usageObj = usageRaw && typeof usageRaw === "object" ? (usageRaw as Record<string, unknown>) : {};
     const inputTokens = Math.max(0, Math.floor(Number(usageObj.promptTokenCount ?? 0) || 0));
@@ -389,6 +395,8 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
       apiVersion,
       modelName: config.modelName,
       provider: config.provider,
+      finishReason,
+      candidateTruncated,
       usageMetadata: {
         inputTokens,
         outputTokens,
