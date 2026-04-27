@@ -95,6 +95,14 @@ function readNumberFromAliases(obj: Record<string, unknown>, keys: string[]): nu
   return Number.NaN;
 }
 
+function normalizeCorrectIndex(rawIndex: number, optionsLength: number): number {
+  if (!Number.isInteger(rawIndex)) return Number.NaN;
+  if (rawIndex >= 0 && rawIndex < optionsLength) return rawIndex;
+  // Common model mistake: returns 1-based index (1..N) instead of 0-based (0..N-1).
+  if (rawIndex >= 1 && rawIndex <= optionsLength) return rawIndex - 1;
+  return Number.NaN;
+}
+
 export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQuestion {
   if (!item || typeof item !== "object") {
     throw new Error(`question_${idx + 1}_invalid_object`);
@@ -102,7 +110,8 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
   const o = item as Record<string, unknown>;
   const prompt = readStringFromAliases(o, ["prompt", "question", "questionText", "question_text", "stem", "title"]);
   const options = Array.isArray(o.options) ? o.options.map((x) => String(x ?? "").trim()) : [];
-  const correctIndex = readNumberFromAliases(o, ["correctIndex", "correct_index", "answerIndex", "answer_index"]);
+  const rawCorrectIndex = readNumberFromAliases(o, ["correctIndex", "correct_index", "answerIndex", "answer_index"]);
+  const correctIndex = normalizeCorrectIndex(rawCorrectIndex, options.length);
   const studyBody = readStringFromAliases(o, ["studyBody", "study_body", "explanation", "rationale", "reasoning"]);
   const subcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
   const difficulty = String(o.difficulty ?? "").trim().toLowerCase();
@@ -235,7 +244,8 @@ export function normalizeFactoryQuestionsLenient(
     const o = item as Record<string, unknown>;
     const prompt = readStringFromAliases(o, ["prompt", "question", "questionText", "question_text", "stem", "title"]);
     const optionsList = Array.isArray(o.options) ? o.options.map((x) => String(x ?? "").trim()) : [];
-    const correctIndex = readNumberFromAliases(o, ["correctIndex", "correct_index", "answerIndex", "answer_index"]);
+    const rawCorrectIndex = readNumberFromAliases(o, ["correctIndex", "correct_index", "answerIndex", "answer_index"]);
+    const correctIndex = normalizeCorrectIndex(rawCorrectIndex, optionsList.length);
     const studyBody = readStringFromAliases(o, ["studyBody", "study_body", "explanation", "rationale", "reasoning"]);
     const rawSubcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
     const mappedDifficulty = mapDifficultyAlias(String(o.difficulty ?? ""));
@@ -315,7 +325,7 @@ export function normalizeFactoryQuestionsLenient(
         field: "correctIndex",
         index: idx,
         message: `question_${idx + 1}_invalid_correct_index`,
-        before: o.correctIndex ?? o.correct_index,
+        before: o.correctIndex ?? o.correct_index ?? o.answerIndex ?? o.answer_index,
       });
       continue;
     }

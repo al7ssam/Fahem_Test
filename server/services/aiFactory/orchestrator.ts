@@ -399,6 +399,9 @@ function buildCreatorPrompt(args: {
     `studyBody: one paragraph, ${SMART_STUDYBODY_MIN_CHARS}-${SMART_STUDYBODY_MAX_CHARS} chars, include reasoning connector + contrast pattern.`,
     "No sections/brackets, no prompt repetition, no vague filler.",
     "options must be string[] only (2 for true/false OR 4 MCQ), no key:value text inside options.",
+    "correctIndex is REQUIRED and must be 0-based integer only.",
+    "If options.length = 4 then correctIndex must be one of: 0,1,2,3.",
+    "If options.length = 2 then correctIndex must be one of: 0,1.",
     "Return ONLY valid JSON array. No markdown. No surrounding text.",
   ].join("\n");
 }
