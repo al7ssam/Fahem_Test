@@ -2,8 +2,41 @@ import { getPool } from "../../db/pool";
 import type { FactoryLayer } from "./types";
 
 const USD_TO_SAR_RATE = 3.75;
-const FLASH_INPUT_PER_MILLION = 0.075;
-const FLASH_OUTPUT_PER_MILLION = 0.30;
+type GeminiPricing = {
+  inputPerMillion: number;
+  outputPerMillion: number;
+  source: string;
+};
+
+type GeminiPricingRule = {
+  pattern: RegExp;
+  pricing: GeminiPricing;
+};
+
+const GEMINI_FALLBACK_PRICING: GeminiPricing = {
+  inputPerMillion: 0.075,
+  outputPerMillion: 0.30,
+  source: "fallback:gemini-1.5-flash",
+};
+
+const GEMINI_PRICING_RULES: GeminiPricingRule[] = [
+  {
+    pattern: /gemini-3(?:\.0)?-pro/i,
+    pricing: { inputPerMillion: 1.25, outputPerMillion: 5.0, source: "gemini-3-pro" },
+  },
+  {
+    pattern: /gemini-3(?:\.0)?-flash/i,
+    pricing: { inputPerMillion: 0.5, outputPerMillion: 3.0, source: "gemini-3-flash" },
+  },
+  {
+    pattern: /gemini-1\.5-pro/i,
+    pricing: { inputPerMillion: 3.5, outputPerMillion: 10.5, source: "gemini-1.5-pro" },
+  },
+  {
+    pattern: /gemini-1\.5-flash/i,
+    pricing: { inputPerMillion: 0.075, outputPerMillion: 0.3, source: "gemini-1.5-flash" },
+  },
+];
 
 export type UsageTokens = {
   inputTokens: number;
@@ -35,6 +68,21 @@ function roundMoney(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
+function safeRate(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value < 0) return fallback;
+  return value;
+}
+
+function resolveGeminiPricing(modelId: string): GeminiPricing {
+  const normalized = String(modelId || "").trim().toLowerCase();
+  for (const rule of GEMINI_PRICING_RULES) {
+    if (rule.pattern.test(normalized)) {
+      return rule.pricing;
+    }
+  }
+  return GEMINI_FALLBACK_PRICING;
+}
+
 export function usdToSar(usd: number, rate = USD_TO_SAR_RATE): number {
   const safeUsd = Number.isFinite(usd) ? Math.max(0, usd) : 0;
   const safeRate = Number.isFinite(rate) && rate > 0 ? rate : USD_TO_SAR_RATE;
@@ -45,8 +93,11 @@ export function calculateGeminiCost(inputTokensRaw: unknown, outputTokensRaw: un
   const inputTokens = toSafeTokens(inputTokensRaw);
   const outputTokens = toSafeTokens(outputTokensRaw);
   const totalTokens = inputTokens + outputTokens;
-  const inputCost = (inputTokens / 1_000_000) * FLASH_INPUT_PER_MILLION;
-  const outputCost = (outputTokens / 1_000_000) * FLASH_OUTPUT_PER_MILLION;
+  const pricing = resolveGeminiPricing(modelId);
+  const inputRate = safeRate(pricing.inputPerMillion, GEMINI_FALLBACK_PRICING.inputPerMillion);
+  const outputRate = safeRate(pricing.outputPerMillion, GEMINI_FALLBACK_PRICING.outputPerMillion);
+  const inputCost = (inputTokens / 1_000_000) * inputRate;
+  const outputCost = (outputTokens / 1_000_000) * outputRate;
   const costUsd = roundMoney(inputCost + outputCost);
   const costSar = usdToSar(costUsd);
   return {
@@ -55,9 +106,33 @@ export function calculateGeminiCost(inputTokensRaw: unknown, outputTokensRaw: un
     totalTokens,
     costUsd,
     costSar,
-    pricingSource: `gemini_flash_default:${modelId || "unknown"}`,
+    pricingSource: `${pricing.source}:${modelId || "unknown"}`,
   };
 }
+
+function logPricingVerificationSamples(): void {
+  if (process.env.NODE_ENV === "production") return;
+  const sampleInput = 1_000_000;
+  const sampleOutput = 500_000;
+  const pro15 = calculateGeminiCost(sampleInput, sampleOutput, "gemini-1.5-pro");
+  const flash3 = calculateGeminiCost(sampleInput, sampleOutput, "gemini-3-flash-preview");
+  console.log("[usageAnalytics] pricing-check gemini-1.5-pro", {
+    inputTokens: pro15.inputTokens,
+    outputTokens: pro15.outputTokens,
+    costUsd: pro15.costUsd,
+    costSar: pro15.costSar,
+    source: pro15.pricingSource,
+  });
+  console.log("[usageAnalytics] pricing-check gemini-3-flash-preview", {
+    inputTokens: flash3.inputTokens,
+    outputTokens: flash3.outputTokens,
+    costUsd: flash3.costUsd,
+    costSar: flash3.costSar,
+    source: flash3.pricingSource,
+  });
+}
+
+logPricingVerificationSamples();
 
 export async function insertAiUsageLog(input: {
   jobId: number;
