@@ -164,6 +164,14 @@ function mapUnknownErrorToProviderError(error: unknown, ctx?: { modelId?: string
   return new Error(`provider_error:${short}${suffix}`);
 }
 
+function getProviderFailureCode(error: unknown): string {
+  if (!(error instanceof Error)) return "unknown_provider_error";
+  const msg = String(error.message || "").trim();
+  if (!msg) return "unknown_provider_error";
+  const first = msg.split(":")[0]?.trim() || "";
+  return first || "unknown_provider_error";
+}
+
 function extractProviderCodeFromMessage(input: string): string | null {
   const m = input.match(/\b(4\d{2}|5\d{2}|429|503)\b/);
   if (m?.[1]) return m[1];
@@ -223,15 +231,16 @@ function mapGeminiProviderError(error: unknown, ctx?: { modelId: string; apiVers
 }
 
 function isNonRetryableLayerError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
+  const code = getProviderFailureCode(error);
   return (
-    error.message.startsWith("provider_404") ||
-    error.message.startsWith("provider_401_403") ||
-    error.message.includes("_disabled") ||
-    error.message.startsWith("unsupported_") ||
-    error.message.startsWith("missing_") ||
-    error.message.startsWith("provider_empty_response") ||
-    error.message.startsWith("provider_blocked")
+    code.startsWith("provider_404") ||
+    code.startsWith("provider_401_403") ||
+    code.startsWith("provider_blocked") ||
+    code.startsWith("provider_truncated_max_tokens") ||
+    code.startsWith("provider_empty_response") ||
+    code.includes("_disabled") ||
+    code.startsWith("unsupported_") ||
+    code.startsWith("missing_")
   );
 }
 
@@ -369,7 +378,7 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
   if (needsThinking) {
     generationConfig.thinkingConfig = {
       thinkingLevel: config.reasoningLevel,
-      includeThoughts: true,
+      includeThoughts: false,
     };
   }
 
@@ -396,6 +405,13 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
       ? Math.max(0, Math.floor(totalCandidate))
       : inputTokens + outputTokens;
     if (!text) {
+      const normalizedReason = String(finishReason || "").toUpperCase();
+      if (normalizedReason === "MAX_TOKENS") {
+        throw new Error("provider_truncated_max_tokens");
+      }
+      if (normalizedReason === "SAFETY" || normalizedReason === "RECITATION" || normalizedReason === "BLOCKLIST") {
+        throw new Error("provider_blocked");
+      }
       throw new Error("provider_empty_response");
     }
     return {

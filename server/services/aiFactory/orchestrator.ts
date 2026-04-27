@@ -53,6 +53,7 @@ const EXECUTION_BATCH_SIZE_CAP = 30;
 const ATTEMPT_BUDGET_PER_JOB = 8;
 const TOKEN_BUDGET_PER_JOB = 200_000;
 const COMPACT_MODE_BY_DEFAULT = true;
+const ARCHITECT_SUMMARY_MAX_CHARS = 520;
 
 class JobCancelledError extends Error {
   readonly layer: FactoryLayer | null;
@@ -373,60 +374,30 @@ function buildCreatorPrompt(args: {
     subcategory: { conceptual: number; procedural: number; application: number };
   };
 }): string {
+  const globalDist = args.globalTypeDistribution.global;
+  const subDist = args.globalTypeDistribution.subcategory;
   return [
     args.architectPrompt,
     "",
-    PEDAGOGICAL_NORMS_ANCHOR,
-    "Now generate a JSON array of questions.",
+    "Now generate JSON array only. Reuse architect norms; do not restate them.",
     `Batch size: ${args.batchSize}`,
     `Subcategory key must be exactly: ${args.subcategoryKey}`,
     `Difficulty mode: ${args.difficultyMode}`,
-    "If difficulty mode is mix, distribute easy/medium/hard fairly.",
-    `Current global questionType distribution: ${JSON.stringify(args.globalTypeDistribution.global)}`,
-    `Current subcategory questionType distribution: ${JSON.stringify(args.globalTypeDistribution.subcategory)}`,
-    "If any questionType is below healthy floor in recent distribution, compensate in this batch without violating correctness.",
-    "Enforce pedagogical question type distribution per batch as close as possible:",
-    "- 30% conceptual",
-    "- 30% procedural",
-    "- 40% application",
-    "Every question must include questionType with one of: conceptual, procedural, application.",
-    "Every question must include conceptIdsReferenced (string[]).",
-    "Every question must include difficultySignals object:",
+    "Mix mode: keep easy/medium/hard balanced.",
+    `questionType globalDist=${JSON.stringify(globalDist)} subcategoryDist=${JSON.stringify(subDist)} target=30/30/40.`,
+    "Each item must include:",
+    "- questionType: conceptual|procedural|application",
+    "- conceptIdsReferenced: string[]",
+    "- difficultySignals:",
     '{ "isAnswerExplicit": boolean, "explicitFactCount": number, "crossConceptCount": number }',
-    "Every question must include learningSignals object:",
+    "- learningSignals:",
     '{ "introducesNewConcept": boolean, "clarifiesMisconception": boolean, "requiresUnderstanding": boolean, "notPureRecall": boolean }',
-    "DO NOT infer difficulty from questionType.",
-    "learningSignals rules:",
-    "- At least one of introducesNewConcept/clarifiesMisconception/requiresUnderstanding must be true.",
-    "- notPureRecall must be true.",
-    `studyBody must be a single concise paragraph with char length between ${SMART_STUDYBODY_MIN_CHARS} and ${SMART_STUDYBODY_MAX_CHARS}.`,
-    "It must teach the concept clearly.",
-    "It must explain why the correct answer is correct.",
-    "It must briefly indicate why other options are incorrect or misleading.",
-    "It must include one reasoning connector: لأن | بسبب | حيث | إذ | لذلك.",
-    "It must include one contrast pattern: وليس | بينما | على عكس | لكن.",
-    "Avoid pure definitions without reasoning.",
-    "Avoid generic or vague explanations.",
-    "Avoid repeating the question text.",
-    "No internal sections, no brackets, no labels.",
-    "Distractors rules:",
-    "- Wrong options must represent common mistakes, not random noise.",
-    "- For each distractor: sharedConceptWithCorrect >= 1 and sameSubcategoryKey = true.",
-    "- Each distractor must not be trivially eliminable.",
-    "Application rule:",
-    "- Reject fake application where answer is directly explicit in prompt.",
-    "True/False rule:",
-    "- 2 options are allowed only if statement requires explanation and includes a likely misconception.",
-    "Write prompts and studyBody in an active-recall/flashcard-friendly style.",
+    "learningSignals: at least one of introducesNewConcept/clarifiesMisconception/requiresUnderstanding=true and notPureRecall=true.",
+    `studyBody: one paragraph, ${SMART_STUDYBODY_MIN_CHARS}-${SMART_STUDYBODY_MAX_CHARS} chars, include reasoning connector + contrast pattern.`,
+    "No sections/brackets, no prompt repetition, no vague filler.",
+    "options must be string[] only (2 for true/false OR 4 MCQ), no key:value text inside options.",
     `Already generated in current run: ${args.alreadyGenerated}`,
-    "Return ONLY valid JSON array.",
-    "Do not wrap in markdown fences.",
-    "No commentary before or after JSON.",
-    "Use standard double quotes for all JSON keys and string values.",
-    "options must be array of strings only.",
-    "DO NOT use ':' inside options.",
-    "DO NOT write key:value pairs inside options.",
-    "each option must be pure text string.",
+    "Return ONLY valid JSON array. No markdown. No surrounding text.",
   ].join("\n");
 }
 
@@ -445,37 +416,67 @@ function compactQuestionForAudit(question: FactoryQuestion): Record<string, unkn
   };
 }
 
+function compactQuestionForContract(question: FactoryQuestion): Record<string, unknown> {
+  return {
+    prompt: compactSnippet(question.prompt, 160),
+    options: question.options.map((x) => compactSnippet(x, 100)),
+    correctIndex: question.correctIndex,
+    studyBody: compactSnippet(question.studyBody, 220),
+    difficulty: question.difficulty,
+    questionType: question.questionType,
+    conceptIdsReferenced: (question.conceptIdsReferenced ?? []).slice(0, 4),
+    difficultySignals: question.difficultySignals ?? null,
+    learningSignals: question.learningSignals ?? null,
+  };
+}
+
+function compactValidationErrorsForPrompt(validationErrors: FactoryValidationError[]): Array<Record<string, unknown>> {
+  return validationErrors.slice(0, 12).map((x) => ({
+    code: x.code,
+    index: x.index,
+    field: x.field,
+  }));
+}
+
+function compactAuditIssuesForPrompt(audit: FactoryAuditReport): Array<Record<string, unknown>> {
+  return audit.issues.slice(0, 20).map((x) => ({
+    code: x.code,
+    index: x.index,
+    field: x.field,
+    severity: x.severity,
+  }));
+}
+
+function compactAuditPatchesForPrompt(audit: FactoryAuditReport): Array<Record<string, unknown>> {
+  return audit.patches.slice(0, 20).map((x) => ({
+    op: x.op,
+    index: x.index,
+    field: x.field,
+    value: x.value,
+  }));
+}
+
 function buildAuditorPrompt(
   questions: FactoryQuestion[],
   validationErrors: FactoryValidationError[],
   compactMode = false,
+  ultraCompactMode = false,
 ): string {
-  const payload = compactMode ? questions.map(compactQuestionForAudit) : questions;
+  const payload = ultraCompactMode
+    ? questions.map(compactQuestionForContract)
+    : compactMode
+      ? questions.map(compactQuestionForAudit)
+      : questions;
+  const compactValidation = compactValidationErrorsForPrompt(validationErrors);
   return [
     "You are The Auditor layer.",
-    compactMode ? "Use compact mode output." : PEDAGOGICAL_NORMS_ANCHOR,
+    ultraCompactMode ? "Use ultra-compact mode output." : compactMode ? "Use compact mode output." : PEDAGOGICAL_NORMS_ANCHOR,
     "ROLE CONSTRAINT: Detector-only. No long explanations. No alternative interpretations. Follow NORMS_ANCHOR only.",
-    "Detect violations and output machine-executable patches only.",
-    "Check schema validity and value constraints.",
-    "Check questionType/difficulty independence.",
-    "DO NOT fully re-derive all difficulties; flag only clear deterministic mismatches.",
-    "Use confidence and severity for each issue.",
-    "Mandatory issue codes to detect:",
-    "- rote_question (blocking)",
-    "- fake_application (blocking)",
-    "- no_new_learning (blocking)",
-    "- studyBody_out_of_range (blocking)",
-    "- studyBody_missing_reasoning_connector (blocking)",
-    "- studyBody_missing_contrast (blocking)",
-    "- studyBody_repeats_prompt (blocking)",
-    "- weak_distractors (non_blocking)",
-    "- weak_true_false_statement (blocking)",
-    "- true_false_without_justification (blocking)",
-    "- ambiguous_truth_value (blocking)",
-    "- learning_signals_missing (blocking)",
-    "- learning_signals_inconsistent (blocking)",
-    `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
-    "Return ONLY valid JSON object with fields:",
+    "Detect only deterministic violations and return machine patches only.",
+    "Mandatory checks: schema validity, questionType/difficulty independence, learning_signals consistency.",
+    "Issue codes allowed: rote_question,fake_application,no_new_learning,studyBody_out_of_range,studyBody_missing_reasoning_connector,studyBody_missing_contrast,studyBody_repeats_prompt,weak_distractors,weak_true_false_statement,true_false_without_justification,ambiguous_truth_value,learning_signals_missing,learning_signals_inconsistent.",
+    `Pre-validation errors (compact): ${JSON.stringify(compactValidation)}`,
+    "Return ONLY valid JSON object:",
     "{",
     '  "issues": [{ "code": string, "index": number, "field": string, "confidence": "high|medium|low", "severity": "blocking|non_blocking" }],',
     '  "patches": [{ "op": "replace", "index": number, "field": "questionType|difficulty|studyBody|prompt|options|correctIndex|conceptIdsReferenced|difficultySignals|learningSignals", "value": any }]',
@@ -490,11 +491,19 @@ function buildRefinerPrompt(
   audit: FactoryAuditReport,
   validationErrors: FactoryValidationError[],
   compactMode = false,
+  ultraCompactMode = false,
 ): string {
-  const payload = compactMode ? questions.map(compactQuestionForAudit) : questions;
+  const payload = ultraCompactMode
+    ? questions.map(compactQuestionForContract)
+    : compactMode
+      ? questions.map(compactQuestionForAudit)
+      : questions;
+  const compactValidation = compactValidationErrorsForPrompt(validationErrors);
+  const compactIssues = compactAuditIssuesForPrompt(audit);
+  const compactPatches = compactAuditPatchesForPrompt(audit);
   return [
     "You are The Refiner layer.",
-    compactMode ? "Use compact mode output." : PEDAGOGICAL_NORMS_ANCHOR,
+    ultraCompactMode ? "Use ultra-compact mode output." : compactMode ? "Use compact mode output." : PEDAGOGICAL_NORMS_ANCHOR,
     "ROLE CONSTRAINT: Execution-only.",
     "Apply patches exactly. Do not reinterpret, do not add new patches, do not rebalance distributions.",
     "If a patch would break schema, skip that patch and keep object valid.",
@@ -510,9 +519,9 @@ function buildRefinerPrompt(
     "Do not wrap in markdown fences.",
     "No commentary before or after JSON.",
     "Use standard double quotes for all JSON keys and string values.",
-    `Audit issues: ${JSON.stringify(audit.issues)}`,
-    `Audit patches: ${JSON.stringify(audit.patches)}`,
-    `Validation errors from server: ${JSON.stringify(validationErrors)}`,
+    `Audit issues (compact): ${JSON.stringify(compactIssues)}`,
+    `Audit patches (compact): ${JSON.stringify(compactPatches)}`,
+    `Validation errors (compact): ${JSON.stringify(compactValidation)}`,
     JSON.stringify(payload),
   ].join("\n");
 }
@@ -581,7 +590,7 @@ function compactSnippet(input: string, max = 180): string {
   return s.length > max ? `${s.slice(0, max)}...` : s;
 }
 
-function summarizeArchitectOutput(text: string, max = 1200): string {
+function summarizeArchitectOutput(text: string, max = ARCHITECT_SUMMARY_MAX_CHARS): string {
   return compactSnippet(text, max);
 }
 
@@ -1301,12 +1310,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     let auditorModelName = "";
     let auditorFinishReason: string | null = null;
     let auditorCandidateTruncated = false;
+    let useUltraCompactAuditor = false;
     while (auditorAttempt < 2) {
       auditorAttempt += 1;
       const auditorPrompt = buildAuditorPrompt(
         creatorQuestions,
         creatorNormalized.validationErrors,
         COMPACT_MODE_BY_DEFAULT || auditorAttempt > 1,
+        useUltraCompactAuditor,
       );
       if (attemptBudgetUsed >= ATTEMPT_BUDGET_PER_JOB || tokenBudgetUsed >= TOKEN_BUDGET_PER_JOB) {
         throw new Error("job_budget_exhausted_before_auditor");
@@ -1343,6 +1354,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       const likelyTruncated = auditor.candidateTruncated || String(auditor.finishReason || "").toUpperCase() === "MAX_TOKENS";
       if (hasContractInvalid) {
         const canRetry = auditorAttempt < 2;
+        useUltraCompactAuditor = likelyTruncated || useUltraCompactAuditor;
         await appendJobLog(job.id, canRetry ? "warn" : "error", "Auditor contract failed", "auditor", {
           auditorAttempt,
           willRetry: canRetry,
@@ -1350,6 +1362,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
           candidateTruncated: auditor.candidateTruncated,
           finishReasonCode: classifyFinishReason(auditor.finishReason, auditor.candidateTruncated),
           errorCode: likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_contract_invalid",
+          ultraCompactRetry: useUltraCompactAuditor,
         });
         if (canRetry) continue;
         throw new Error(likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_contract_invalid");
@@ -1401,6 +1414,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     let refinerFinishReason: string | null = null;
     let refinerCandidateTruncated = false;
     let finalQuestions: FactoryQuestion[] | null = null;
+    const useUltraCompactRefiner = auditReport.issues.length > 14 || auditReport.patches.length > 12;
     while (refinerAttempt < 2) {
       refinerAttempt += 1;
       const refinerPrompt = buildRefinerPrompt(
@@ -1408,6 +1422,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         auditReport,
         creatorNormalized.validationErrors,
         COMPACT_MODE_BY_DEFAULT || refinerAttempt > 1,
+        useUltraCompactRefiner || refinerAttempt > 1,
       );
       if (attemptBudgetUsed >= ATTEMPT_BUDGET_PER_JOB || tokenBudgetUsed >= TOKEN_BUDGET_PER_JOB) {
         throw new Error("job_budget_exhausted_before_refiner");

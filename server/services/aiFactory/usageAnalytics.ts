@@ -405,3 +405,62 @@ export async function getUsageFilterOptions(): Promise<{ subjects: string[]; mod
     modelIds: modelsR.rows.map((x) => x.model_id),
   };
 }
+
+export async function getUsageRetryKpis(filters: UsageFilters): Promise<{
+  totalTokens: number;
+  retryTokens: number;
+  retryTokenRatio: number;
+  totalCostUsd: number;
+  retryCostUsd: number;
+  totalCostSar: number;
+  retryCostSar: number;
+}> {
+  const pool = getPool();
+  const args: unknown[] = [];
+  let baseSql = `
+    SELECT
+      COALESCE(SUM(input_tokens + output_tokens), 0)::bigint AS total_tokens,
+      COALESCE(SUM(CASE WHEN retry_index > 0 THEN input_tokens + output_tokens ELSE 0 END), 0)::bigint AS retry_tokens,
+      COALESCE(SUM(cost_usd), 0)::float8 AS total_cost_usd,
+      COALESCE(SUM(CASE WHEN retry_index > 0 THEN cost_usd ELSE 0 END), 0)::float8 AS retry_cost_usd,
+      COALESCE(SUM(cost_sar), 0)::float8 AS total_cost_sar,
+      COALESCE(SUM(CASE WHEN retry_index > 0 THEN cost_sar ELSE 0 END), 0)::float8 AS retry_cost_sar
+    FROM ai_usage_logs
+    WHERE TRUE
+  `;
+  if (!filters.from && !filters.to) {
+    args.push(30);
+    baseSql = `
+      SELECT
+        COALESCE(SUM(input_tokens + output_tokens), 0)::bigint AS total_tokens,
+        COALESCE(SUM(CASE WHEN retry_index > 0 THEN input_tokens + output_tokens ELSE 0 END), 0)::bigint AS retry_tokens,
+        COALESCE(SUM(cost_usd), 0)::float8 AS total_cost_usd,
+        COALESCE(SUM(CASE WHEN retry_index > 0 THEN cost_usd ELSE 0 END), 0)::float8 AS retry_cost_usd,
+        COALESCE(SUM(cost_sar), 0)::float8 AS total_cost_sar,
+        COALESCE(SUM(CASE WHEN retry_index > 0 THEN cost_sar ELSE 0 END), 0)::float8 AS retry_cost_sar
+      FROM ai_usage_logs
+      WHERE created_at >= NOW() - ($1::text || ' days')::interval
+    `;
+  }
+  const q = applyFilters(baseSql, filters, args);
+  const r = await pool.query<{
+    total_tokens: string;
+    retry_tokens: string;
+    total_cost_usd: number;
+    retry_cost_usd: number;
+    total_cost_sar: number;
+    retry_cost_sar: number;
+  }>(q.sql, q.args);
+  const row = r.rows[0];
+  const totalTokens = Number(row?.total_tokens ?? 0);
+  const retryTokens = Number(row?.retry_tokens ?? 0);
+  return {
+    totalTokens,
+    retryTokens,
+    retryTokenRatio: totalTokens > 0 ? Math.round((retryTokens / totalTokens) * 10_000) / 10_000 : 0,
+    totalCostUsd: roundMoney(Number(row?.total_cost_usd ?? 0)),
+    retryCostUsd: roundMoney(Number(row?.retry_cost_usd ?? 0)),
+    totalCostSar: roundMoney(Number(row?.total_cost_sar ?? 0)),
+    retryCostSar: roundMoney(Number(row?.retry_cost_sar ?? 0)),
+  };
+}
