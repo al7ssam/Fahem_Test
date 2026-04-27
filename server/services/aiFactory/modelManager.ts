@@ -77,6 +77,12 @@ type ModelCallResult = {
   apiVersion: "v1" | "v1beta";
   modelName: string;
   provider: string;
+  usageMetadata: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    raw: unknown;
+  };
 };
 
 export type LayerFailureMeta = {
@@ -366,6 +372,14 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
     const result = await model.generateContent(prompt);
     const rawResponseText = JSON.stringify(result.response ?? {}, null, 2);
     const text = String(result.response.text() ?? "").trim();
+    const usageRaw = (result.response as { usageMetadata?: unknown })?.usageMetadata;
+    const usageObj = usageRaw && typeof usageRaw === "object" ? (usageRaw as Record<string, unknown>) : {};
+    const inputTokens = Math.max(0, Math.floor(Number(usageObj.promptTokenCount ?? 0) || 0));
+    const outputTokens = Math.max(0, Math.floor(Number(usageObj.candidatesTokenCount ?? 0) || 0));
+    const totalCandidate = Number(usageObj.totalTokenCount ?? 0);
+    const totalTokens = Number.isFinite(totalCandidate)
+      ? Math.max(0, Math.floor(totalCandidate))
+      : inputTokens + outputTokens;
     if (!text) {
       throw new Error("provider_empty_response");
     }
@@ -375,6 +389,12 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
       apiVersion,
       modelName: config.modelName,
       provider: config.provider,
+      usageMetadata: {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        raw: usageRaw ?? null,
+      },
     };
   } catch (error) {
     throw mapGeminiProviderError(error, { modelId: normalizedId, apiVersion });

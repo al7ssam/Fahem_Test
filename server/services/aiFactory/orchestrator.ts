@@ -1,5 +1,6 @@
 import { getPool } from "../../db/pool";
 import { getLayerConfigHealth, LayerExecutionError, runLayerModel } from "./modelManager";
+import { calculateGeminiCost, insertAiUsageLog } from "./usageAnalytics";
 import { extractJsonArray, normalizeFactoryQuestion, normalizeFactoryQuestionsLenient } from "./utils";
 import type {
   FactoryAuditReport,
@@ -72,6 +73,43 @@ async function appendInspectionLog(input: {
       input.apiVersion,
     ],
   );
+}
+
+async function appendAiUsageLogSafe(input: {
+  jobId: number;
+  subject: string;
+  layer: FactoryLayer;
+  modelId: string;
+  status: "success" | "failed";
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  } | null;
+}): Promise<void> {
+  try {
+    const pricing = calculateGeminiCost(
+      input.usage?.inputTokens ?? 0,
+      input.usage?.outputTokens ?? 0,
+      input.modelId,
+    );
+    await insertAiUsageLog({
+      jobId: input.jobId,
+      modelId: input.modelId,
+      layerType: input.layer,
+      inputTokens: pricing.inputTokens,
+      outputTokens: pricing.outputTokens,
+      costUsd: pricing.costUsd,
+      costSar: pricing.costSar,
+      subject: input.subject,
+      status: input.status,
+    });
+  } catch (error) {
+    await appendJobLog(input.jobId, "warn", "usage_log_write_failed", input.layer, {
+      error: error instanceof Error ? error.message : "unknown_usage_log_error",
+      modelId: input.modelId,
+      status: input.status,
+    });
+  }
 }
 
 async function isJobCancelled(jobId: number): Promise<boolean> {
@@ -457,6 +495,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
   });
 
   let failedLayer: FactoryLayer | null = "architect";
+  let jobSubject = "غير محدد";
   try {
     await assertNotCancelled(job.id, failedLayer);
     const architectHealth = await getLayerConfigHealth("architect");
@@ -464,6 +503,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       throw new Error(`architect_preflight_failed:${architectHealth.reasons.join("|")}`);
     }
     const context = await readSubcategoryContext(job.subcategory_key);
+    jobSubject = context.mainCategoryName || context.subcategoryName || job.subcategory_key;
 
     const architectPrompt = buildArchitectPrompt({
       subcategoryKey: job.subcategory_key,
@@ -483,6 +523,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       provider: architect.provider,
       modelName: architect.modelName,
       apiVersion: architect.apiVersion,
+    });
+    await appendAiUsageLogSafe({
+      jobId: job.id,
+      subject: jobSubject,
+      layer: "architect",
+      modelId: architect.modelName,
+      status: "success",
+      usage: architect.usageMetadata,
     });
     await appendJobLog(job.id, "info", "Architect layer completed", "architect", {
       model: architect.modelName,
@@ -515,6 +563,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       modelName: creator.modelName,
       apiVersion: creator.apiVersion,
     });
+    await appendAiUsageLogSafe({
+      jobId: job.id,
+      subject: jobSubject,
+      layer: "creator",
+      modelId: creator.modelName,
+      status: "success",
+      usage: creator.usageMetadata,
+    });
     const creatorNormalized = normalizeQuestionsFromCreator(creator.text, job);
     const creatorQuestions = creatorNormalized.questions;
     await appendJobLog(job.id, "info", "Creator layer completed", "creator", {
@@ -544,6 +600,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       provider: auditor.provider,
       modelName: auditor.modelName,
       apiVersion: auditor.apiVersion,
+    });
+    await appendAiUsageLogSafe({
+      jobId: job.id,
+      subject: jobSubject,
+      layer: "auditor",
+      modelId: auditor.modelName,
+      status: "success",
+      usage: auditor.usageMetadata,
     });
     const auditReport = parseAuditReport(auditor.text);
     await appendJobLog(job.id, "info", "Auditor layer completed", "auditor", {
@@ -577,6 +641,14 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       provider: refiner.provider,
       modelName: refiner.modelName,
       apiVersion: refiner.apiVersion,
+    });
+    await appendAiUsageLogSafe({
+      jobId: job.id,
+      subject: jobSubject,
+      layer: "refiner",
+      modelId: refiner.modelName,
+      status: "success",
+      usage: refiner.usageMetadata,
     });
     let finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
     if (finalQuestions.length > job.batch_size) {
@@ -638,6 +710,16 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     }
     const errMessage = error instanceof Error ? error.message : "unknown_error";
     const layerMeta = error instanceof LayerExecutionError ? error.meta : null;
+    if (failedLayer && layerMeta?.modelName) {
+      await appendAiUsageLogSafe({
+        jobId: job.id,
+        subject: jobSubject,
+        layer: failedLayer,
+        modelId: layerMeta.modelName,
+        status: "failed",
+        usage: null,
+      });
+    }
     await appendJobLog(job.id, "error", "Job failed", failedLayer ?? undefined, {
       error: errMessage,
       failedLayer: failedLayer ?? layerMeta?.layer ?? null,

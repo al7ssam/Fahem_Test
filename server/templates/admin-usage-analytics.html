@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Usage Analytics</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        background: #0f1115;
+        color: #f2f4f7;
+        font-family: "Tajawal", "Segoe UI", sans-serif;
+      }
+      .wrap { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+      .subtitle { color: #a2a9b5; margin-top: 0.1rem; }
+      .card {
+        background: #171a20;
+        border: 1px solid #2a2f3a;
+        border-radius: 12px;
+        padding: 0.9rem;
+        margin-top: 0.8rem;
+      }
+      .grid {
+        display: grid;
+        gap: 0.7rem;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+      .stat-title { color: #a2a9b5; font-size: 0.9rem; }
+      .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 0.25rem; }
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto auto;
+        gap: 0.6rem;
+      }
+      input, select, button {
+        border-radius: 10px;
+        border: 1px solid #2f3544;
+        background: #10141c;
+        color: #f2f4f7;
+        padding: 0.6rem 0.7rem;
+        font-size: 0.95rem;
+      }
+      button { cursor: pointer; font-weight: 700; }
+      table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
+      th, td { border-bottom: 1px solid #2a2f3a; padding: 0.55rem; text-align: right; font-size: 0.92rem; }
+      th { color: #9da5b5; font-weight: 700; }
+      .bars { display: grid; gap: 0.5rem; margin-top: 0.5rem; }
+      .bar-row { display: grid; grid-template-columns: 105px 1fr 120px; gap: 0.5rem; align-items: center; }
+      .bar-track { background: #10141c; border: 1px solid #2f3544; border-radius: 999px; height: 12px; overflow: hidden; }
+      .bar-fill { background: linear-gradient(90deg, #35c2ff, #6f7bff); height: 100%; }
+      .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+      .muted { color: #95a0b2; }
+      .msg { margin-top: 0.6rem; min-height: 1.2rem; }
+      @media (max-width: 800px) { .toolbar { grid-template-columns: 1fr; } .bar-row { grid-template-columns: 90px 1fr 100px; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <div>
+          <h1 style="margin-bottom:0.2rem;">Usage Analytics</h1>
+          <div class="subtitle">تتبع استهلاك التوكنز وتكلفة AI Factory</div>
+        </div>
+        <div class="muted">إجمالي الأسئلة الحالية: {{QUESTION_COUNT}}</div>
+      </div>
+
+      <div class="card">
+        <div class="toolbar">
+          <select id="subject-filter"><option value="">كل المواد</option></select>
+          <select id="model-filter"><option value="">كل الموديلات</option></select>
+          <button id="refresh-btn" type="button">تحديث</button>
+          <button id="back-btn" type="button" onclick="window.location.href='/admin'">العودة للوحة الإدارة</button>
+        </div>
+        <div class="msg" id="page-msg"></div>
+      </div>
+
+      <div class="grid">
+        <div class="card"><div class="stat-title">إجمالي تكلفة 30 يوم (USD)</div><div class="stat-value" id="sum-usd">0</div></div>
+        <div class="card"><div class="stat-title">إجمالي تكلفة 30 يوم (SAR)</div><div class="stat-value" id="sum-sar">0</div></div>
+        <div class="card"><div class="stat-title">إجمالي التوكنز</div><div class="stat-value" id="sum-tokens">0</div></div>
+        <div class="card"><div class="stat-title">عدد الأسئلة المولدة</div><div class="stat-value" id="sum-questions">0</div></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;">التكلفة اليومية (آخر 7 أيام)</h3>
+        <div id="daily-bars" class="bars"></div>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;">آخر 20 عملية توليد</h3>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>الوقت</th><th>المادة</th><th>الموديل</th><th>الطبقة</th><th>Input</th><th>Output</th><th>USD</th><th>SAR</th><th>الحالة</th>
+              </tr>
+            </thead>
+            <tbody id="recent-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const adminSecret = () => localStorage.getItem("adminSecret") || "";
+      const fmtInt = (n) => Number(n || 0).toLocaleString("en-US");
+      const fmtMoney = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+      const setMsg = (t, ok = false) => { const el = $("page-msg"); el.textContent = t || ""; el.style.color = ok ? "#35d07f" : "#ff8e8e"; };
+
+      async function api(path) {
+        const r = await fetch(path, { headers: { "x-admin-secret": adminSecret() } });
+        let j = null; try { j = await r.json(); } catch {}
+        if (!r.ok || !j?.ok) throw new Error(j?.error || ("http_" + r.status));
+        return j;
+      }
+
+      function currentFilters() {
+        return {
+          subject: $("subject-filter").value || "",
+          modelId: $("model-filter").value || "",
+        };
+      }
+
+      function qs(filters) {
+        const p = new URLSearchParams();
+        if (filters.subject) p.set("subject", filters.subject);
+        if (filters.modelId) p.set("modelId", filters.modelId);
+        return p.toString() ? "?" + p.toString() : "";
+      }
+
+      async function loadFilters() {
+        const data = await api("/api/admin/usage-analytics/filters");
+        const s = $("subject-filter");
+        const m = $("model-filter");
+        const prevS = s.value;
+        const prevM = m.value;
+        s.innerHTML = `<option value="">كل المواد</option>` + (data.subjects || []).map((x) => `<option value="${x}">${x}</option>`).join("");
+        m.innerHTML = `<option value="">كل الموديلات</option>` + (data.modelIds || []).map((x) => `<option value="${x}">${x}</option>`).join("");
+        if ([...s.options].some((o) => o.value === prevS)) s.value = prevS;
+        if ([...m.options].some((o) => o.value === prevM)) m.value = prevM;
+      }
+
+      function renderDaily(items) {
+        const box = $("daily-bars");
+        if (!items || !items.length) {
+          box.innerHTML = `<div class="muted">لا توجد بيانات خلال آخر 7 أيام.</div>`;
+          return;
+        }
+        const maxVal = Math.max(...items.map((x) => Number(x.costUsd || 0)), 0.000001);
+        box.innerHTML = items.map((x) => {
+          const pct = Math.max(0, Math.min(100, (Number(x.costUsd || 0) / maxVal) * 100));
+          return `<div class="bar-row"><div class="muted">${x.day}</div><div class="bar-track"><div class="bar-fill" style="width:${pct}%;"></div></div><div>${fmtMoney(x.costUsd)} USD</div></div>`;
+        }).join("");
+      }
+
+      function renderRecent(items) {
+        const body = $("recent-tbody");
+        if (!items || !items.length) {
+          body.innerHTML = `<tr><td colspan="9" class="muted">لا توجد عمليات مسجلة.</td></tr>`;
+          return;
+        }
+        body.innerHTML = items.map((r) => {
+          const dt = new Date(r.createdAt).toLocaleString();
+          return `<tr>
+            <td>${dt}</td><td>${r.subject || "-"}</td><td>${r.modelId || "-"}</td><td>${r.layerType}</td>
+            <td>${fmtInt(r.inputTokens)}</td><td>${fmtInt(r.outputTokens)}</td>
+            <td>${fmtMoney(r.costUsd)}</td><td>${fmtMoney(r.costSar)}</td><td>${r.status}</td>
+          </tr>`;
+        }).join("");
+      }
+
+      async function loadData() {
+        const filters = currentFilters();
+        const suffix = qs(filters);
+        const [summary, daily, recent] = await Promise.all([
+          api("/api/admin/usage-analytics/summary" + suffix),
+          api("/api/admin/usage-analytics/daily-cost" + suffix),
+          api("/api/admin/usage-analytics/recent?limit=20" + (suffix ? "&" + suffix.slice(1) : "")),
+        ]);
+        $("sum-usd").textContent = fmtMoney(summary.totalCostUsd);
+        $("sum-sar").textContent = fmtMoney(summary.totalCostSar);
+        $("sum-tokens").textContent = fmtInt(summary.totalTokens);
+        $("sum-questions").textContent = fmtInt(summary.generatedQuestions);
+        renderDaily(daily.items || []);
+        renderRecent(recent.items || []);
+      }
+
+      async function bootstrap() {
+        try {
+          await loadFilters();
+          await loadData();
+          setMsg("تم تحميل بيانات الاستخدام بنجاح.", true);
+        } catch (e) {
+          setMsg("تعذر تحميل البيانات: " + (e?.message || "unknown_error"), false);
+        }
+      }
+
+      $("refresh-btn").addEventListener("click", bootstrap);
+      $("subject-filter").addEventListener("change", loadData);
+      $("model-filter").addEventListener("change", loadData);
+      bootstrap();
+    </script>
+  </body>
+</html>

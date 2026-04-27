@@ -29,6 +29,12 @@ import {
   probeLayerModel,
   saveModelConfig,
 } from "../services/aiFactory/modelManager";
+import {
+  getRecentUsage,
+  getUsageDailyCost,
+  getUsageFilterOptions,
+  getUsageSummary,
+} from "../services/aiFactory/usageAnalytics";
 import { getFactoryInspectionLogs, getFactoryJobErrorTimeline, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
 import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
 import type { FactoryLayer } from "../services/aiFactory/types";
@@ -266,6 +272,10 @@ function adminInspectionTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-ai-inspection.html");
 }
 
+function adminUsageAnalyticsTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-usage-analytics.html");
+}
+
 async function countQuestions(): Promise<number | null> {
   try {
     const pool = getPool();
@@ -290,6 +300,12 @@ function readAdminInspectionHtml(questionCount: number | null): string {
   return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
 }
 
+function readAdminUsageAnalyticsHtml(questionCount: number | null): string {
+  const raw = fs.readFileSync(adminUsageAnalyticsTemplatePath(), "utf8");
+  const display = questionCount === null ? "—" : String(questionCount);
+  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+}
+
 function extractQuestionsArray(body: unknown): unknown[] | null {
   if (Array.isArray(body)) return body;
   if (body && typeof body === "object") {
@@ -308,6 +324,15 @@ function zodIssuesSummary(err: z.ZodError, limit = 5): Array<{ path: string; mes
     path: e.path.join("."),
     message: e.message,
   }));
+}
+
+function parseAnalyticsFilters(req: Request): { subject?: string; modelId?: string } {
+  const subjectRaw = String(req.query.subject ?? "").trim();
+  const modelRaw = String(req.query.modelId ?? "").trim();
+  return {
+    subject: subjectRaw || undefined,
+    modelId: modelRaw || undefined,
+  };
 }
 
 function mergedStudyBody(data: {
@@ -525,6 +550,16 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminInspectionHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة فحص الذكاء الاصطناعي.");
+    }
+  });
+
+  app.get("/admin/usage-analytics", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminUsageAnalyticsHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة تحليلات الاستخدام.");
     }
   });
 
@@ -1188,6 +1223,47 @@ export function registerAdminRoutes(app: Express): void {
         errorsTimeline,
         finalOutput: job.final_output_json ?? null,
       });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/usage-analytics/summary", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const summary = await getUsageSummary(parseAnalyticsFilters(req));
+      res.json({ ok: true, ...summary });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/usage-analytics/daily-cost", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const items = await getUsageDailyCost(parseAnalyticsFilters(req));
+      res.json({ ok: true, items });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/usage-analytics/recent", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
+    try {
+      const items = await getRecentUsage(parseAnalyticsFilters(req), limit);
+      res.json({ ok: true, items });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/usage-analytics/filters", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const options = await getUsageFilterOptions();
+      res.json({ ok: true, ...options });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
     }
