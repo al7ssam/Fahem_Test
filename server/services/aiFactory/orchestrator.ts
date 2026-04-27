@@ -1,7 +1,7 @@
 import { getPool } from "../../db/pool";
 import { getLayerConfigHealth, LayerExecutionError, runLayerModel } from "./modelManager";
 import { calculateGeminiCost, insertAiUsageLog } from "./usageAnalytics";
-import { extractJsonArray, normalizeFactoryQuestion, normalizeFactoryQuestionsLenient } from "./utils";
+import { extractJsonArray, normalizeFactoryQuestion } from "./utils";
 import type {
   FactoryAuditReport,
   FactoryJobPayload,
@@ -49,6 +49,30 @@ class JobCancelledError extends Error {
   constructor(layer: FactoryLayer | null) {
     super("job_cancelled_by_admin");
     this.layer = layer;
+  }
+}
+
+class CreatorGuardError extends Error {
+  readonly code:
+    | "creator_invalid_json"
+    | "creator_not_array"
+    | "creator_invalid_question"
+    | "creator_missing_field"
+    | "creator_wrong_subcategory";
+  readonly questionIndex: number | null;
+  readonly field: string | null;
+  readonly rawSnippet: string;
+
+  constructor(
+    code: CreatorGuardError["code"],
+    message: string,
+    meta?: { questionIndex?: number | null; field?: string | null; rawSnippet?: string },
+  ) {
+    super(message);
+    this.code = code;
+    this.questionIndex = meta?.questionIndex ?? null;
+    this.field = meta?.field ?? null;
+    this.rawSnippet = String(meta?.rawSnippet ?? "");
   }
 }
 
@@ -365,6 +389,10 @@ function buildCreatorPrompt(args: {
     "Do not wrap in markdown fences.",
     "No commentary before or after JSON.",
     "Use standard double quotes for all JSON keys and string values.",
+    "options must be array of strings only.",
+    "DO NOT use ':' inside options.",
+    "DO NOT write key:value pairs inside options.",
+    "each option must be pure text string.",
   ].join("\n");
 }
 
@@ -497,26 +525,75 @@ type NormalizedCreatorBatch = {
   validationErrors: FactoryValidationError[];
 };
 
-function normalizeQuestionsFromCreator(rawText: string, job: JobRow): NormalizedCreatorBatch {
-  const arr = extractJsonArray(rawText);
-  if (!arr) {
-    return {
-      questions: [],
-      validationErrors: [
-        {
-          code: "invalid_json_output",
-          field: "root",
-          index: -1,
-          message: `invalid_json_output:layer=creator:snippet=${compactSnippet(rawText)}`,
-          before: compactSnippet(rawText, 300),
-        },
-      ],
-    };
+function stripCreatorMarkdownWrapper(rawText: string): string {
+  const text = String(rawText || "").trim();
+  if (!text) return "";
+  return text
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+}
+
+function classifyCreatorQuestionError(message: string): {
+  code: "creator_invalid_question" | "creator_missing_field";
+  field: string | null;
+} {
+  if (/_missing_/.test(message)) {
+    const fieldMatch = message.match(/missing_([a-z_]+)/i);
+    const field = fieldMatch?.[1] ? fieldMatch[1].replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()) : null;
+    return { code: "creator_missing_field", field };
   }
-  return normalizeFactoryQuestionsLenient(arr, {
-    fallbackSubcategoryKey: job.subcategory_key,
-    forcedDifficultyMode: job.difficulty_mode,
-  });
+  return { code: "creator_invalid_question", field: null };
+}
+
+function normalizeQuestionsFromCreatorStrict(rawText: string, job: JobRow): NormalizedCreatorBatch {
+  const cleaned = stripCreatorMarkdownWrapper(rawText);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new CreatorGuardError(
+      "creator_invalid_json",
+      `creator_invalid_json:layer=creator:snippet=${compactSnippet(rawText)}`,
+      { rawSnippet: compactSnippet(rawText, 300), field: "root", questionIndex: null },
+    );
+  }
+  if (!Array.isArray(parsed)) {
+    throw new CreatorGuardError("creator_not_array", "creator_not_array:layer=creator", {
+      rawSnippet: compactSnippet(rawText, 300),
+      field: "root",
+      questionIndex: null,
+    });
+  }
+  const questions: FactoryQuestion[] = [];
+  for (let i = 0; i < parsed.length; i += 1) {
+    try {
+      const q = normalizeFactoryQuestion(parsed[i], i);
+      if (q.subcategoryKey !== job.subcategory_key) {
+        throw new CreatorGuardError(
+          "creator_wrong_subcategory",
+          `creator_wrong_subcategory:question_${i + 1}:expected=${job.subcategory_key}:got=${q.subcategoryKey}`,
+          {
+            questionIndex: i,
+            field: "subcategoryKey",
+            rawSnippet: compactSnippet(JSON.stringify(parsed[i]), 300),
+          },
+        );
+      }
+      questions.push(q);
+    } catch (error) {
+      if (error instanceof CreatorGuardError) throw error;
+      const message = error instanceof Error ? error.message : "creator_invalid_question";
+      const classified = classifyCreatorQuestionError(message);
+      throw new CreatorGuardError(classified.code, `${classified.code}:${message}`, {
+        questionIndex: i,
+        field: classified.field,
+        rawSnippet: compactSnippet(JSON.stringify(parsed[i]), 300),
+      });
+    }
+  }
+  return { questions, validationErrors: [] };
 }
 
 function normalizeQuestionsFromRefinerStrict(rawText: string, job: JobRow): FactoryQuestion[] {
@@ -883,32 +960,60 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       globalTypeDistribution: await readGlobalQuestionTypeDistribution(job.subcategory_key),
     });
     await appendJobLog(job.id, "info", "Creator layer started", "creator");
-    const creator = await runLayerModel("creator", creatorPrompt);
-    await assertNotCancelled(job.id, failedLayer);
-    await appendInspectionLog({
-      jobId: job.id,
-      layer: "creator",
-      promptText: creatorPrompt,
-      rawResponseText: creator.rawResponseText,
-      provider: creator.provider,
-      modelName: creator.modelName,
-      apiVersion: creator.apiVersion,
-    });
-    await appendAiUsageLogSafe({
-      jobId: job.id,
-      subject: jobSubject,
-      layer: "creator",
-      modelId: creator.modelName,
-      status: "success",
-      usage: creator.usageMetadata,
-    });
-    const creatorNormalized = normalizeQuestionsFromCreator(creator.text, job);
+    let creatorAttempt = 0;
+    let creatorNormalized: NormalizedCreatorBatch | null = null;
+    let creatorModelName = "";
+    while (creatorAttempt < 2) {
+      creatorAttempt += 1;
+      const creator = await runLayerModel("creator", creatorPrompt);
+      creatorModelName = creator.modelName;
+      await assertNotCancelled(job.id, failedLayer);
+      await appendInspectionLog({
+        jobId: job.id,
+        layer: "creator",
+        promptText: creatorPrompt,
+        rawResponseText: creator.rawResponseText,
+        provider: creator.provider,
+        modelName: creator.modelName,
+        apiVersion: creator.apiVersion,
+      });
+      await appendAiUsageLogSafe({
+        jobId: job.id,
+        subject: jobSubject,
+        layer: "creator",
+        modelId: creator.modelName,
+        status: "success",
+        usage: creator.usageMetadata,
+      });
+      try {
+        creatorNormalized = normalizeQuestionsFromCreatorStrict(creator.text, job);
+        break;
+      } catch (error) {
+        if (!(error instanceof CreatorGuardError)) throw error;
+        const canRetry = error.code === "creator_invalid_json" && creatorAttempt < 2;
+        await appendJobLog(job.id, canRetry ? "warn" : "error", "Creator guard failed", "creator", {
+          errorCode: error.code,
+          error: error.message,
+          questionIndex: error.questionIndex,
+          field: error.field,
+          rawSnippet: error.rawSnippet,
+          creatorAttempt,
+          willRetry: canRetry,
+        });
+        if (canRetry) continue;
+        throw error;
+      }
+    }
+    if (!creatorNormalized) {
+      throw new Error("creator_guard_no_output");
+    }
     const creatorQuestions = creatorNormalized.questions;
     await appendJobLog(job.id, "info", "Creator layer completed", "creator", {
       generated: creatorQuestions.length,
       validationErrorsCount: creatorNormalized.validationErrors.length,
       validationErrors: creatorNormalized.validationErrors,
-      model: creator.modelName,
+      creatorAttempts: creatorAttempt,
+      model: creatorModelName,
     });
 
     failedLayer = "auditor";
@@ -1046,6 +1151,15 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     }
     const errMessage = error instanceof Error ? error.message : "unknown_error";
     const layerMeta = error instanceof LayerExecutionError ? error.meta : null;
+    const creatorMeta =
+      error instanceof CreatorGuardError
+        ? {
+            errorCode: error.code,
+            questionIndex: error.questionIndex,
+            field: error.field,
+            rawSnippet: error.rawSnippet,
+          }
+        : null;
     if (failedLayer && layerMeta?.modelName) {
       await appendAiUsageLogSafe({
         jobId: job.id,
@@ -1066,6 +1180,10 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       modelName: layerMeta?.modelName ?? null,
       apiVersion: layerMeta?.apiVersion ?? null,
       providerMessage: layerMeta?.providerMessage ?? null,
+      creatorErrorCode: creatorMeta?.errorCode ?? null,
+      creatorQuestionIndex: creatorMeta?.questionIndex ?? null,
+      creatorField: creatorMeta?.field ?? null,
+      creatorRawSnippet: creatorMeta?.rawSnippet ?? null,
     });
     if (job.attempt_count + 1 < job.max_attempts) {
       const backoffMinutes = Math.min(30, Math.max(1, 2 ** (job.attempt_count + 1)));
