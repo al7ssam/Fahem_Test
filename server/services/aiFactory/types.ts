@@ -12,6 +12,12 @@ export type FactoryQuestion = {
   subcategoryKey: string;
   difficulty: "easy" | "medium" | "hard";
   questionType: FactoryQuestionType;
+  conceptIdsReferenced?: string[];
+  difficultySignals?: {
+    isAnswerExplicit: boolean;
+    explicitFactCount: number;
+    crossConceptCount: number;
+  };
 };
 
 export type FactoryJobPayload = {
@@ -23,7 +29,28 @@ export type FactoryJobPayload = {
 
 export type FactoryAuditReport = {
   summary: string;
-  issues: string[];
+  issues: Array<{
+    code: string;
+    index: number;
+    field: string;
+    evidence: string;
+    confidence: "high" | "medium" | "low";
+    severity: "blocking" | "non_blocking";
+  }>;
+  patches: Array<{
+    op: "replace";
+    index: number;
+    field:
+      | "questionType"
+      | "difficulty"
+      | "studyBody"
+      | "prompt"
+      | "options"
+      | "correctIndex"
+      | "conceptIdsReferenced"
+      | "difficultySignals";
+    value: unknown;
+  }>;
 };
 
 export type FactoryValidationError = {

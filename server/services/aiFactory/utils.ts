@@ -86,6 +86,30 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
   const subcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
   const difficulty = String(o.difficulty ?? "").trim().toLowerCase();
   const questionType = mapQuestionTypeAlias(String(o.questionType ?? o.question_type ?? ""));
+  const conceptIdsRaw = Array.isArray(o.conceptIdsReferenced)
+    ? o.conceptIdsReferenced
+    : Array.isArray(o.concept_ids_referenced)
+      ? o.concept_ids_referenced
+      : [];
+  const conceptIdsReferenced = conceptIdsRaw
+    .map((x) => String(x ?? "").trim())
+    .filter((x) => x.length > 0);
+  const rawSignals =
+    o.difficultySignals && typeof o.difficultySignals === "object"
+      ? (o.difficultySignals as Record<string, unknown>)
+      : o.difficulty_signals && typeof o.difficulty_signals === "object"
+        ? (o.difficulty_signals as Record<string, unknown>)
+        : null;
+  const difficultySignals =
+    rawSignals &&
+    Number.isFinite(Number(rawSignals.explicitFactCount)) &&
+    Number.isFinite(Number(rawSignals.crossConceptCount))
+      ? {
+          isAnswerExplicit: Boolean(rawSignals.isAnswerExplicit),
+          explicitFactCount: Math.max(0, Math.floor(Number(rawSignals.explicitFactCount))),
+          crossConceptCount: Math.max(0, Math.floor(Number(rawSignals.crossConceptCount))),
+        }
+      : undefined;
 
   if (!prompt) throw new Error(`question_${idx + 1}_missing_prompt`);
   if (!(options.length === 2 || options.length === 4)) {
@@ -109,6 +133,8 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
     subcategoryKey,
     difficulty,
     questionType,
+    conceptIdsReferenced,
+    difficultySignals,
   };
 }
 
@@ -178,6 +204,30 @@ export function normalizeFactoryQuestionsLenient(
     const rawSubcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
     const mappedDifficulty = mapDifficultyAlias(String(o.difficulty ?? ""));
     const mappedQuestionType = mapQuestionTypeAlias(String(o.questionType ?? o.question_type ?? ""));
+    const conceptIdsRaw = Array.isArray(o.conceptIdsReferenced)
+      ? o.conceptIdsReferenced
+      : Array.isArray(o.concept_ids_referenced)
+        ? o.concept_ids_referenced
+        : [];
+    const conceptIdsReferenced = conceptIdsRaw
+      .map((x) => String(x ?? "").trim())
+      .filter((x) => x.length > 0);
+    const rawSignals =
+      o.difficultySignals && typeof o.difficultySignals === "object"
+        ? (o.difficultySignals as Record<string, unknown>)
+        : o.difficulty_signals && typeof o.difficulty_signals === "object"
+          ? (o.difficulty_signals as Record<string, unknown>)
+          : null;
+    const difficultySignals =
+      rawSignals &&
+      Number.isFinite(Number(rawSignals.explicitFactCount)) &&
+      Number.isFinite(Number(rawSignals.crossConceptCount))
+        ? {
+            isAnswerExplicit: Boolean(rawSignals.isAnswerExplicit),
+            explicitFactCount: Math.max(0, Math.floor(Number(rawSignals.explicitFactCount))),
+            crossConceptCount: Math.max(0, Math.floor(Number(rawSignals.crossConceptCount))),
+          }
+        : undefined;
     const forcedDifficulty =
       options.forcedDifficultyMode === "mix" ? null : options.forcedDifficultyMode;
 
@@ -316,6 +366,8 @@ export function normalizeFactoryQuestionsLenient(
       subcategoryKey,
       difficulty,
       questionType,
+      conceptIdsReferenced,
+      difficultySignals,
     });
   }
 

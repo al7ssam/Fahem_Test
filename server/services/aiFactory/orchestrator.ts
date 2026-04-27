@@ -22,6 +22,22 @@ type JobRow = {
   max_attempts: number;
 };
 
+const PEDAGOGICAL_NORMS_ANCHOR = [
+  "NORMS_ANCHOR (DO NOT REDEFINE):",
+  "- questionType is independent from difficulty.",
+  "- questionType allowed: conceptual | procedural | application.",
+  "- difficulty allowed: easy | medium | hard.",
+  "- difficulty is derived ONLY from measurable signals:",
+  "  isAnswerExplicit (boolean), explicitFactCount (integer), crossConceptCount (integer).",
+  "- Difficulty mapping:",
+  "  easy: isAnswerExplicit=true OR explicitFactCount<=1",
+  "  medium: explicitFactCount=2",
+  "  hard: explicitFactCount>=3 OR crossConceptCount>=2",
+  "- studyBody must include: [principle/rule] + [why correct] + [memory tip], in Arabic.",
+  "- Output must be pure JSON only, no markdown.",
+].join("\n");
+const MAX_CORRECTION_CYCLE = 1;
+
 class JobCancelledError extends Error {
   readonly layer: FactoryLayer | null;
   constructor(layer: FactoryLayer | null) {
@@ -239,14 +255,13 @@ function buildArchitectPrompt(input: {
     `Difficulty mode: ${input.difficultyMode}`,
     `Target count: ${input.targetCount}`,
     "Rules:",
+    PEDAGOGICAL_NORMS_ANCHOR,
     "- Prompt must enforce JSON array output only.",
     "- Each question must contain prompt, options, correctIndex, studyBody, subcategoryKey, difficulty, questionType.",
     "- Enforce pedagogical Bloom-like progression per batch: 30% conceptual, 30% procedural, 40% application.",
     "- questionType values are strictly: conceptual | procedural | application.",
-    "- difficulty mapping must follow learning progression:",
-    "  easy => foundational concepts and terminology.",
-    "  medium => procedural/relational reasoning and ordered steps.",
-    "  hard => synthesis/problem solving and connecting multiple ideas.",
+    "- DO NOT map questionType to difficulty.",
+    "- difficulty must be set using measurable signals only (isAnswerExplicit, explicitFactCount, crossConceptCount).",
     "- options length must be 2 or 4 only.",
     "- correctIndex must be 0-based and inside options length.",
     "- studyBody must be a micro-lesson in this exact structure:",
@@ -267,6 +282,7 @@ function buildCreatorPrompt(args: {
   return [
     args.architectPrompt,
     "",
+    PEDAGOGICAL_NORMS_ANCHOR,
     "Now generate a JSON array of questions.",
     `Batch size: ${args.batchSize}`,
     `Subcategory key must be exactly: ${args.subcategoryKey}`,
@@ -277,6 +293,9 @@ function buildCreatorPrompt(args: {
     "- 30% procedural",
     "- 40% application",
     "Every question must include questionType with one of: conceptual, procedural, application.",
+    "Every question must include difficultySignals object with:",
+    "{ isAnswerExplicit: boolean, explicitFactCount: number, crossConceptCount: number }",
+    "DO NOT infer difficulty from questionType.",
     "studyBody must be a micro-lesson with mandatory 3-part structure:",
     "1) Scientific principle/rule",
     "2) Why the answer is correct",
@@ -293,23 +312,20 @@ function buildCreatorPrompt(args: {
 function buildAuditorPrompt(questions: FactoryQuestion[], validationErrors: FactoryValidationError[]): string {
   return [
     "You are The Auditor layer.",
-    "You are responsible for auditing pedagogical integrity, technical integrity, and content quality.",
-    "Audit the following JSON questions for correctness, pedagogical balance, and technical integrity.",
-    "You MUST verify that difficulty uses English values only: easy, medium, hard.",
-    "If Arabic difficulty values are found (سهل، متوسط، صعب), report them as issues that require fixing.",
-    "Verify questionType exists and uses only: conceptual, procedural, application.",
-    "Check educational distribution target in the batch (closest possible): 30% conceptual, 30% procedural, 40% application.",
-    "Check difficulty-to-learning mapping:",
-    "- easy => foundational concepts/terminology",
-    "- medium => procedural logic and step ordering",
-    "- hard => synthesis/problem-solving",
-    "Check studyBody is a micro-lesson with mandatory structure:",
-    "[principle/rule] + [why correct] + [memory tip].",
-    "Check wording supports active recall/flashcard usage (short, direct, memory-oriented).",
-    "Ensure all JSON keys and values conform to required schema constraints.",
+    PEDAGOGICAL_NORMS_ANCHOR,
+    "ROLE CONSTRAINT: Detector-only. No long explanations. No alternative interpretations.",
+    "Detect violations and output machine-executable patches only.",
+    "Check schema validity and value constraints.",
+    "Check questionType/difficulty independence.",
+    "Use confidence and severity for each issue.",
     `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
-    "Return JSON object with fields: summary (string), issues (array of strings), requiresRefine (boolean).",
-    "If there are no issues, issues should be empty and requiresRefine false.",
+    "Return ONLY valid JSON object with fields:",
+    "{",
+    '  "summary": string,',
+    '  "issues": [{ "code": string, "index": number, "field": string, "evidence": string, "confidence": "high|medium|low", "severity": "blocking|non_blocking" }],',
+    '  "patches": [{ "op": "replace", "index": number, "field": "questionType|difficulty|studyBody|prompt|options|correctIndex|conceptIdsReferenced|difficultySignals", "value": any }]',
+    "}",
+    "No markdown. No extra keys.",
     JSON.stringify(questions),
   ].join("\n");
 }
@@ -321,27 +337,17 @@ function buildRefinerPrompt(
 ): string {
   return [
     "You are The Refiner layer.",
-    "Fix the question array based on the audit report and return corrected JSON array only.",
-    "Preserve schema fields exactly.",
-    "You must repair technical and pedagogical issues before final output.",
-    "Constraints: options length 2 or 4, correctIndex in-range, non-empty studyBody, valid difficulty.",
-    "questionType is mandatory and must be one of: conceptual, procedural, application.",
-    "Rebalance questionType distribution in the batch as close as possible to: 30% conceptual, 30% procedural, 40% application.",
-    "Align difficulty with pedagogical mapping:",
-    "- easy foundational concepts",
-    "- medium procedural reasoning",
-    "- hard synthesis/problem-solving",
-    "Difficulty must be English only (easy, medium, hard).",
-    "studyBody must follow exact micro-lesson structure:",
-    "[principle/rule] + [why correct] + [memory tip].",
-    "Use active-recall and flashcard-friendly style when rewriting.",
-    "Fix any invalid values and malformed structures whenever possible.",
+    PEDAGOGICAL_NORMS_ANCHOR,
+    "ROLE CONSTRAINT: Execution-only.",
+    "Apply patches exactly. Do not reinterpret, do not add new patches, do not rebalance distributions.",
+    "If a patch would break schema, skip that patch and keep object valid.",
     "Return ONLY valid JSON array.",
     "Do not wrap in markdown fences.",
     "No commentary before or after JSON.",
     "Use standard double quotes for all JSON keys and string values.",
     `Audit summary: ${audit.summary}`,
     `Audit issues: ${JSON.stringify(audit.issues)}`,
+    `Audit patches: ${JSON.stringify(audit.patches)}`,
     `Validation errors from server: ${JSON.stringify(validationErrors)}`,
     JSON.stringify(questions),
   ].join("\n");
@@ -349,13 +355,62 @@ function buildRefinerPrompt(
 
 function parseAuditReport(text: string): FactoryAuditReport {
   try {
-    const parsed = JSON.parse(text) as { summary?: unknown; issues?: unknown };
+    const parsed = JSON.parse(text) as { summary?: unknown; issues?: unknown; patches?: unknown };
+    const rawIssues = Array.isArray(parsed.issues) ? parsed.issues : [];
+    const rawPatches = Array.isArray(parsed.patches) ? parsed.patches : [];
     return {
       summary: String(parsed.summary ?? "").trim() || "Audit completed.",
-      issues: Array.isArray(parsed.issues) ? parsed.issues.map((x) => String(x)) : [],
+      issues: rawIssues
+        .map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : null))
+        .filter((x): x is Record<string, unknown> => Boolean(x))
+        .map((x) => ({
+          code: String(x.code ?? "unknown_issue"),
+          index: Number.isInteger(Number(x.index)) ? Number(x.index) : -1,
+          field: String(x.field ?? "unknown"),
+          evidence: String(x.evidence ?? ""),
+          confidence:
+            String(x.confidence ?? "medium") === "high"
+              ? "high"
+              : String(x.confidence ?? "medium") === "low"
+                ? "low"
+                : "medium",
+          severity: String(x.severity ?? "blocking") === "non_blocking" ? "non_blocking" : "blocking",
+        })),
+      patches: rawPatches
+        .map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : null))
+        .filter((x): x is Record<string, unknown> => Boolean(x))
+        .filter((x) => String(x.op ?? "") === "replace")
+        .map((x) => ({
+          op: "replace" as const,
+          index: Number.isInteger(Number(x.index)) ? Number(x.index) : -1,
+          field: String(x.field ?? "") as
+            | "questionType"
+            | "difficulty"
+            | "studyBody"
+            | "prompt"
+            | "options"
+            | "correctIndex"
+            | "conceptIdsReferenced"
+            | "difficultySignals",
+          value: x.value,
+        }))
+        .filter((p) => p.index >= 0),
     };
   } catch {
-    return { summary: "Audit returned non-JSON output.", issues: ["non_json_audit_output"] };
+    return {
+      summary: "Audit returned non-JSON output.",
+      issues: [
+        {
+          code: "auditor_contract_invalid",
+          index: -1,
+          field: "root",
+          evidence: "non_json_audit_output",
+          confidence: "high",
+          severity: "blocking",
+        },
+      ],
+      patches: [],
+    };
   }
 }
 
@@ -407,6 +462,77 @@ function normalizeQuestionsFromRefinerStrict(rawText: string, job: JobRow): Fact
     }
     return q;
   });
+}
+
+type DifficultySignals = {
+  isAnswerExplicit: boolean;
+  explicitFactCount: number;
+  crossConceptCount: number;
+};
+
+function deriveDifficultyFromSignals(signals: DifficultySignals): "easy" | "medium" | "hard" {
+  if (signals.explicitFactCount >= 3 || signals.crossConceptCount >= 2) return "hard";
+  if (signals.explicitFactCount === 2) return "medium";
+  if (signals.isAnswerExplicit || signals.explicitFactCount <= 1) return "easy";
+  return "medium";
+}
+
+function readDifficultySignals(question: FactoryQuestion): DifficultySignals | null {
+  const q = question as unknown as Record<string, unknown>;
+  const raw = q.difficultySignals;
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const isAnswerExplicit = Boolean(o.isAnswerExplicit);
+  const explicitFactCount = Number(o.explicitFactCount);
+  const crossConceptCount = Number(o.crossConceptCount);
+  if (!Number.isFinite(explicitFactCount) || !Number.isFinite(crossConceptCount)) return null;
+  return {
+    isAnswerExplicit,
+    explicitFactCount: Math.max(0, Math.floor(explicitFactCount)),
+    crossConceptCount: Math.max(0, Math.floor(crossConceptCount)),
+  };
+}
+
+function applyAuditorPatchesToQuestions(questions: FactoryQuestion[], audit: FactoryAuditReport): FactoryQuestion[] {
+  const out = questions.map((q) => ({ ...q })) as Array<FactoryQuestion & Record<string, unknown>>;
+  for (const patch of audit.patches) {
+    if (patch.op !== "replace") continue;
+    if (patch.index < 0 || patch.index >= out.length) continue;
+    const target = out[patch.index] as Record<string, unknown>;
+    target[String(patch.field)] = patch.value;
+  }
+  return out;
+}
+
+function ensureQuestionTypeCoverage(questions: FactoryQuestion[], minPct = 0.2): void {
+  const total = questions.length;
+  if (total === 0) throw new Error("output_gate_empty_batch");
+  if (total < 5) return;
+  const counts = {
+    conceptual: questions.filter((q) => q.questionType === "conceptual").length,
+    procedural: questions.filter((q) => q.questionType === "procedural").length,
+    application: questions.filter((q) => q.questionType === "application").length,
+  };
+  const minCount = Math.ceil(total * minPct);
+  if (counts.conceptual < minCount || counts.procedural < minCount || counts.application < minCount) {
+    throw new Error(
+      `output_gate_question_type_coverage_failed:min=${minCount}:got=${JSON.stringify(counts)}`,
+    );
+  }
+}
+
+function runOutputGateChecks(questions: FactoryQuestion[]): void {
+  for (let i = 0; i < questions.length; i += 1) {
+    const q = questions[i];
+    const signals = readDifficultySignals(q);
+    if (signals) {
+      const expected = deriveDifficultyFromSignals(signals);
+      if (q.difficulty !== expected) {
+        throw new Error(`output_gate_difficulty_mismatch_at_${i + 1}:expected_${expected}:got_${q.difficulty}`);
+      }
+    }
+  }
+  ensureQuestionTypeCoverage(questions, 0.2);
 }
 
 async function insertQuestionsAllOrNothing(questions: FactoryQuestion[]): Promise<number> {
@@ -496,6 +622,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
 
   let failedLayer: FactoryLayer | null = "architect";
   let jobSubject = "غير محدد";
+  let correctionCycle = 0;
   try {
     await assertNotCancelled(job.id, failedLayer);
     const architectHealth = await getLayerConfigHealth("architect");
@@ -610,9 +737,18 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       usage: auditor.usageMetadata,
     });
     const auditReport = parseAuditReport(auditor.text);
+    const blockingHighIssues = auditReport.issues.filter(
+      (x) => x.severity === "blocking" && x.confidence === "high",
+    ).length;
+    const blockingMediumIssues = auditReport.issues.filter(
+      (x) => x.severity === "blocking" && x.confidence === "medium",
+    ).length;
     await appendJobLog(job.id, "info", "Auditor layer completed", "auditor", {
       summary: auditReport.summary,
       issuesCount: auditReport.issues.length,
+      patchesCount: auditReport.patches.length,
+      blockingHighIssues,
+      blockingMediumIssues,
       issues: auditReport.issues,
       model: auditor.modelName,
     });
@@ -625,11 +761,12 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       lastStatus: "running",
       lastLayer: "refiner",
     });
-    const refinerPrompt = buildRefinerPrompt(
-      creatorQuestions,
-      auditReport,
-      creatorNormalized.validationErrors,
-    );
+    correctionCycle += 1;
+    if (correctionCycle > MAX_CORRECTION_CYCLE) {
+      throw new Error("max_correction_cycle_exceeded");
+    }
+    const patchPreparedQuestions = applyAuditorPatchesToQuestions(creatorQuestions, auditReport);
+    const refinerPrompt = buildRefinerPrompt(patchPreparedQuestions, auditReport, creatorNormalized.validationErrors);
     await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
     const refiner = await runLayerModel("refiner", refinerPrompt);
     await assertNotCancelled(job.id, failedLayer);
@@ -657,12 +794,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     if (finalQuestions.length === 0) {
       throw new Error("refiner_returned_empty_batch");
     }
-    if (job.difficulty_mode === "mix") {
-      finalQuestions = finalQuestions.map((q, idx) => ({
-        ...q,
-        difficulty: chooseDifficulty(job.difficulty_mode, idx),
-      }));
-    }
+    runOutputGateChecks(finalQuestions);
     await saveJobFinalOutput(job.id, finalQuestions);
     await assertNotCancelled(job.id, failedLayer);
     const inserted = await insertQuestionsAllOrNothing(finalQuestions);
