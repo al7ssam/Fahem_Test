@@ -534,7 +534,7 @@ export async function probeLayerModel(layer: FactoryLayer): Promise<
 
 export async function runLayerModel(layer: FactoryLayer, prompt: string): Promise<ModelCallResult> {
   const config = await readLayerConfig(layer);
-  const maxAttempts = 4;
+  const maxAttempts = 2;
   let attempt = 0;
   let waitMs = 1000;
   let lastActualError: Error | null = null;

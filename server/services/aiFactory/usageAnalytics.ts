@@ -464,3 +464,75 @@ export async function getUsageRetryKpis(filters: UsageFilters): Promise<{
     retryCostSar: roundMoney(Number(row?.retry_cost_sar ?? 0)),
   };
 }
+
+export type SimplificationKpiWindow = {
+  from: string;
+  to: string;
+};
+
+export async function getSimplificationKpisComparison(input: {
+  before: SimplificationKpiWindow;
+  after: SimplificationKpiWindow;
+}): Promise<{
+  before: {
+    tokensPerInsertedQuestion: number;
+    retryTokenRatio: number;
+    creatorSchemaFailRate: number;
+    costPerInsertedQuestionUsd: number;
+  };
+  after: {
+    tokensPerInsertedQuestion: number;
+    retryTokenRatio: number;
+    creatorSchemaFailRate: number;
+    costPerInsertedQuestionUsd: number;
+  };
+}> {
+  const pool = getPool();
+  const calcWindow = async (window: SimplificationKpiWindow) => {
+    const usage = await pool.query<{
+      total_tokens: string;
+      retry_tokens: string;
+      total_cost_usd: number;
+    }>(
+      `SELECT
+         COALESCE(SUM(input_tokens + output_tokens), 0)::bigint AS total_tokens,
+         COALESCE(SUM(CASE WHEN retry_index > 0 THEN input_tokens + output_tokens ELSE 0 END), 0)::bigint AS retry_tokens,
+         COALESCE(SUM(cost_usd), 0)::float8 AS total_cost_usd
+       FROM ai_usage_logs
+       WHERE created_at >= $1::timestamptz
+         AND created_at < ($2::date + INTERVAL '1 day')`,
+      [window.from, window.to],
+    );
+    const jobs = await pool.query<{
+      inserted_questions: string;
+      creator_schema_fail_count: string;
+      total_failed_count: string;
+    }>(
+      `SELECT
+         COALESCE(SUM(CASE WHEN status = 'succeeded' THEN COALESCE((result_summary->>'inserted')::int, 0) ELSE 0 END), 0)::bigint AS inserted_questions,
+         COALESCE(SUM(CASE WHEN status = 'failed' AND (last_error ILIKE 'creator_invalid_schema%' OR last_error ILIKE 'schema_gate_%') THEN 1 ELSE 0 END), 0)::bigint AS creator_schema_fail_count,
+         COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0)::bigint AS total_failed_count
+       FROM ai_factory_jobs
+       WHERE created_at >= $1::timestamptz
+         AND created_at < ($2::date + INTERVAL '1 day')`,
+      [window.from, window.to],
+    );
+    const usageRow = usage.rows[0];
+    const jobsRow = jobs.rows[0];
+    const totalTokens = Number(usageRow?.total_tokens ?? 0);
+    const retryTokens = Number(usageRow?.retry_tokens ?? 0);
+    const totalCostUsd = Number(usageRow?.total_cost_usd ?? 0);
+    const inserted = Number(jobsRow?.inserted_questions ?? 0);
+    const creatorSchemaFailCount = Number(jobsRow?.creator_schema_fail_count ?? 0);
+    const totalFailedCount = Number(jobsRow?.total_failed_count ?? 0);
+    return {
+      tokensPerInsertedQuestion: inserted > 0 ? Math.round((totalTokens / inserted) * 100) / 100 : 0,
+      retryTokenRatio: totalTokens > 0 ? Math.round((retryTokens / totalTokens) * 10_000) / 10_000 : 0,
+      creatorSchemaFailRate: totalFailedCount > 0 ? Math.round((creatorSchemaFailCount / totalFailedCount) * 10_000) / 10_000 : 0,
+      costPerInsertedQuestionUsd: inserted > 0 ? roundMoney(totalCostUsd / inserted) : 0,
+    };
+  };
+
+  const [before, after] = await Promise.all([calcWindow(input.before), calcWindow(input.after)]);
+  return { before, after };
+}

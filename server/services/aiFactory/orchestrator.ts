@@ -364,11 +364,11 @@ function buildArchitectPrompt(input: {
 }
 
 function buildCreatorPrompt(args: {
-  architectPrompt: string;
   subcategoryKey: string;
+  subcategoryName: string;
+  mainCategoryName: string;
   batchSize: number;
   difficultyMode: "mix" | "easy" | "medium" | "hard";
-  alreadyGenerated: number;
   globalTypeDistribution: {
     global: { conceptual: number; procedural: number; application: number };
     subcategory: { conceptual: number; procedural: number; application: number };
@@ -377,8 +377,9 @@ function buildCreatorPrompt(args: {
   const globalDist = args.globalTypeDistribution.global;
   const subDist = args.globalTypeDistribution.subcategory;
   return [
-    args.architectPrompt,
-    "",
+    "You are Generate step for AI Factory.",
+    `Main category: ${args.mainCategoryName || "N/A"}`,
+    `Subcategory: ${args.subcategoryName} (${args.subcategoryKey})`,
     "Now generate JSON array only. Reuse architect norms; do not restate them.",
     `Batch size: ${args.batchSize}`,
     `Subcategory key must be exactly: ${args.subcategoryKey}`,
@@ -393,10 +394,11 @@ function buildCreatorPrompt(args: {
     "- learningSignals:",
     '{ "introducesNewConcept": boolean, "clarifiesMisconception": boolean, "requiresUnderstanding": boolean, "notPureRecall": boolean }',
     "learningSignals: at least one of introducesNewConcept/clarifiesMisconception/requiresUnderstanding=true and notPureRecall=true.",
+    "If conceptIdsReferenced.length <= 1, set difficultySignals.crossConceptCount to 0 exactly.",
+    "Never set crossConceptCount greater than conceptIdsReferenced.length - 1.",
     `studyBody: one paragraph, ${SMART_STUDYBODY_MIN_CHARS}-${SMART_STUDYBODY_MAX_CHARS} chars, include reasoning connector + contrast pattern.`,
     "No sections/brackets, no prompt repetition, no vague filler.",
     "options must be string[] only (2 for true/false OR 4 MCQ), no key:value text inside options.",
-    `Already generated in current run: ${args.alreadyGenerated}`,
     "Return ONLY valid JSON array. No markdown. No surrounding text.",
   ].join("\n");
 }
@@ -609,6 +611,24 @@ function isDeterministicNonRetryable(errorMessage: string): boolean {
     errorMessage.includes("auditor_contract_invalid") ||
     errorMessage.includes("creator_invalid_schema") ||
     errorMessage.includes("creator_wrong_subcategory")
+  );
+}
+
+function isTransientFactoryFailure(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("provider_rate_limit") ||
+    errorMessage.includes("provider_service_unavailable") ||
+    errorMessage.includes("provider_network") ||
+    errorMessage.includes("ETIMEDOUT") ||
+    errorMessage.includes("ECONNRESET")
+  );
+}
+
+function isSingleRecoveryRetryCandidate(errorMessage: string): boolean {
+  return (
+    errorMessage.includes("creator_invalid_json") ||
+    errorMessage.includes("provider_truncated_max_tokens") ||
+    errorMessage.includes("contract_truncated_max_tokens")
   );
 }
 
@@ -1070,6 +1090,27 @@ function runPedagogyGateChecks(questions: FactoryQuestion[]): void {
   }
 }
 
+function runGateLiteChecks(questions: FactoryQuestion[]): void {
+  runSchemaGateChecks(questions);
+  for (let i = 0; i < questions.length; i += 1) {
+    const q = questions[i];
+    const len = studyBodyCharLength(q.studyBody);
+    if (len < SMART_STUDYBODY_MIN_CHARS || len > SMART_STUDYBODY_MAX_CHARS) {
+      throw new Error(`gate_lite_studyBody_out_of_range_at_${i + 1}`);
+    }
+    if (!hasLogicalConnector(q.studyBody)) {
+      throw new Error(`gate_lite_missing_reasoning_connector_at_${i + 1}`);
+    }
+    if (!hasContrastPattern(q.studyBody)) {
+      throw new Error(`gate_lite_missing_contrast_pattern_at_${i + 1}`);
+    }
+    const s = q.learningSignals;
+    if (!s || !s.notPureRecall || !(s.introducesNewConcept || s.clarifiesMisconception || s.requiresUnderstanding)) {
+      throw new Error(`gate_lite_learning_signals_invalid_at_${i + 1}`);
+    }
+  }
+}
+
 async function insertQuestionsAllOrNothing(questions: FactoryQuestion[]): Promise<number> {
   const pool = getPool();
   const client = await pool.connect();
@@ -1146,85 +1187,37 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
   await setJobState(job.id, {
     status: "running",
     started: true,
-    currentLayer: "architect",
+    currentLayer: "creator",
     incrementAttempt: true,
     lastError: null,
   });
   await refreshPipelineState(job.subcategory_key, {
     lastJobId: job.id,
     lastStatus: "running",
-    lastLayer: "architect",
+    lastLayer: "creator",
   });
 
-  let failedLayer: FactoryLayer | null = "architect";
+  let failedLayer: FactoryLayer | null = "creator";
   let jobSubject = "غير محدد";
-  let correctionCycle = 0;
   let attemptBudgetUsed = 0;
   let tokenBudgetUsed = 0;
   try {
     await assertNotCancelled(job.id, failedLayer);
-    const architectHealth = await getLayerConfigHealth("architect");
-    if (architectHealth.status === "fail") {
-      throw new Error(`architect_preflight_failed:${architectHealth.reasons.join("|")}`);
+    const creatorHealth = await getLayerConfigHealth("creator");
+    if (creatorHealth.status === "fail") {
+      throw new Error(`creator_preflight_failed:${creatorHealth.reasons.join("|")}`);
     }
     const context = await readSubcategoryContext(job.subcategory_key);
     jobSubject = context.mainCategoryName || context.subcategoryName || job.subcategory_key;
-
-    const architectPrompt = buildArchitectPrompt({
+    const creatorPrompt = buildCreatorPrompt({
       subcategoryKey: job.subcategory_key,
       subcategoryName: context.subcategoryName,
-      subcategoryDescription: context.subcategoryDescription,
       mainCategoryName: context.mainCategoryName,
-      difficultyMode: job.difficulty_mode,
-      targetCount: job.target_count,
-    });
-    const architect = await runLayerModel("architect", architectPrompt);
-    attemptBudgetUsed += 1;
-    tokenBudgetUsed += architect.usageMetadata.totalTokens;
-    await assertNotCancelled(job.id, failedLayer);
-    await appendInspectionLog({
-      jobId: job.id,
-      layer: "architect",
-      promptText: architectPrompt,
-      rawResponseText: architect.rawResponseText,
-      provider: architect.provider,
-      modelName: architect.modelName,
-      apiVersion: architect.apiVersion,
-    });
-    await appendAiUsageLogSafe({
-      jobId: job.id,
-      subject: jobSubject,
-      layer: "architect",
-      modelId: architect.modelName,
-      status: "success",
-      usage: architect.usageMetadata,
-      retryIndex: 0,
-      attemptId: `${job.id}-architect-1`,
-      costSource: "provider_exact",
-    });
-    await appendJobLog(job.id, "info", "Architect layer completed", "architect", {
-      model: architect.modelName,
-      finishReason: architect.finishReason,
-      candidateTruncated: architect.candidateTruncated,
-    });
-
-    failedLayer = "creator";
-    await assertNotCancelled(job.id, failedLayer);
-    await setJobState(job.id, { currentLayer: "creator" });
-    await refreshPipelineState(job.subcategory_key, {
-      lastJobId: job.id,
-      lastStatus: "running",
-      lastLayer: "creator",
-    });
-    const creatorPrompt = buildCreatorPrompt({
-      architectPrompt: summarizeArchitectOutput(architect.text),
-      subcategoryKey: job.subcategory_key,
       batchSize: effectiveBatchSize,
       difficultyMode: job.difficulty_mode,
-      alreadyGenerated: 0,
       globalTypeDistribution: await readGlobalQuestionTypeDistribution(job.subcategory_key),
     });
-    await appendJobLog(job.id, "info", "Creator layer started", "creator");
+    await appendJobLog(job.id, "info", "Generate step started", "creator");
     let creatorAttempt = 0;
     let creatorNormalized: NormalizedCreatorBatch | null = null;
     let creatorModelName = "";
@@ -1286,205 +1279,19 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     }
     const creatorQuestions = creatorNormalized.questions;
     validateCreatorOutputGate(creatorQuestions);
-    await appendJobLog(job.id, "info", "Creator layer completed", "creator", {
+    await appendJobLog(job.id, "info", "Generate step completed", "creator", {
       generated: creatorQuestions.length,
-      validationErrorsCount: creatorNormalized.validationErrors.length,
-      validationErrors: creatorNormalized.validationErrors,
       creatorAttempts: creatorAttempt,
       model: creatorModelName,
       finishReason: creatorFinishReason,
       candidateTruncated: creatorCandidateTruncated,
     });
 
-    failedLayer = "auditor";
-    await assertNotCancelled(job.id, failedLayer);
-    await setJobState(job.id, { currentLayer: "auditor" });
-    await refreshPipelineState(job.subcategory_key, {
-      lastJobId: job.id,
-      lastStatus: "running",
-      lastLayer: "auditor",
-    });
-    await appendJobLog(job.id, "info", "Auditor layer started", "auditor");
-    let auditorAttempt = 0;
-    let auditReport: FactoryAuditReport | null = null;
-    let auditorModelName = "";
-    let auditorFinishReason: string | null = null;
-    let auditorCandidateTruncated = false;
-    let useUltraCompactAuditor = false;
-    while (auditorAttempt < 2) {
-      auditorAttempt += 1;
-      const auditorPrompt = buildAuditorPrompt(
-        creatorQuestions,
-        creatorNormalized.validationErrors,
-        COMPACT_MODE_BY_DEFAULT || auditorAttempt > 1,
-        useUltraCompactAuditor,
-      );
-      if (attemptBudgetUsed >= ATTEMPT_BUDGET_PER_JOB || tokenBudgetUsed >= TOKEN_BUDGET_PER_JOB) {
-        throw new Error("job_budget_exhausted_before_auditor");
-      }
-      const auditor = await runLayerModel("auditor", auditorPrompt);
-      attemptBudgetUsed += 1;
-      tokenBudgetUsed += auditor.usageMetadata.totalTokens;
-      auditorModelName = auditor.modelName;
-      auditorFinishReason = auditor.finishReason;
-      auditorCandidateTruncated = auditor.candidateTruncated;
-      await assertNotCancelled(job.id, failedLayer);
-      await appendInspectionLog({
-        jobId: job.id,
-        layer: "auditor",
-        promptText: auditorPrompt,
-        rawResponseText: auditor.rawResponseText,
-        provider: auditor.provider,
-        modelName: auditor.modelName,
-        apiVersion: auditor.apiVersion,
-      });
-      await appendAiUsageLogSafe({
-        jobId: job.id,
-        subject: jobSubject,
-        layer: "auditor",
-        modelId: auditor.modelName,
-        status: "success",
-        usage: auditor.usageMetadata,
-        retryIndex: auditorAttempt - 1,
-        attemptId: `${job.id}-auditor-${auditorAttempt}`,
-        costSource: "provider_exact",
-      });
-      const parsedAudit = parseAuditReport(auditor.text);
-      const hasContractInvalid = parsedAudit.issues.some((x) => x.code === "auditor_contract_invalid");
-      const likelyTruncated = auditor.candidateTruncated || String(auditor.finishReason || "").toUpperCase() === "MAX_TOKENS";
-      if (hasContractInvalid) {
-        const canRetry = auditorAttempt < 2;
-        useUltraCompactAuditor = likelyTruncated || useUltraCompactAuditor;
-        await appendJobLog(job.id, canRetry ? "warn" : "error", "Auditor contract failed", "auditor", {
-          auditorAttempt,
-          willRetry: canRetry,
-          finishReason: auditor.finishReason,
-          candidateTruncated: auditor.candidateTruncated,
-          finishReasonCode: classifyFinishReason(auditor.finishReason, auditor.candidateTruncated),
-          errorCode: likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_contract_invalid",
-          ultraCompactRetry: useUltraCompactAuditor,
-        });
-        if (canRetry) continue;
-        throw new Error(likelyTruncated ? "auditor_contract_truncated_max_tokens" : "auditor_contract_invalid");
-      }
-      const maxPatchesPerBatch = Math.max(1, MAX_PATCHES_FACTOR * creatorQuestions.length);
-      if (parsedAudit.patches.length > maxPatchesPerBatch) {
-        throw new Error(`auditor_overcorrection:max=${maxPatchesPerBatch}:got=${parsedAudit.patches.length}`);
-      }
-      auditReport = parsedAudit;
-      break;
+    let finalQuestions = creatorQuestions.slice(0, effectiveBatchSize);
+    if (!finalQuestions.length) {
+      throw new Error("generator_returned_empty_batch");
     }
-    if (!auditReport) {
-      throw new Error("auditor_no_valid_report");
-    }
-    const blockingHighIssues = auditReport.issues.filter(
-      (x) => x.severity === "blocking" && x.confidence === "high",
-    ).length;
-    const blockingMediumIssues = auditReport.issues.filter(
-      (x) => x.severity === "blocking" && x.confidence === "medium",
-    ).length;
-    await appendJobLog(job.id, "info", "Auditor layer completed", "auditor", {
-      issuesCount: auditReport.issues.length,
-      patchesCount: auditReport.patches.length,
-      auditorAttempts: auditorAttempt,
-      blockingHighIssues,
-      blockingMediumIssues,
-      issues: auditReport.issues,
-      model: auditorModelName,
-      finishReason: auditorFinishReason,
-      candidateTruncated: auditorCandidateTruncated,
-    });
-
-    failedLayer = "refiner";
-    await assertNotCancelled(job.id, failedLayer);
-    await setJobState(job.id, { currentLayer: "refiner" });
-    await refreshPipelineState(job.subcategory_key, {
-      lastJobId: job.id,
-      lastStatus: "running",
-      lastLayer: "refiner",
-    });
-    correctionCycle += 1;
-    if (correctionCycle > MAX_CORRECTION_CYCLE) {
-      throw new Error("max_correction_cycle_exceeded");
-    }
-    const patchPreparedQuestions = applyAuditorPatchesToQuestions(creatorQuestions, auditReport);
-    await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
-    let refinerAttempt = 0;
-    let refinerModelName = "";
-    let refinerFinishReason: string | null = null;
-    let refinerCandidateTruncated = false;
-    let finalQuestions: FactoryQuestion[] | null = null;
-    const useUltraCompactRefiner = auditReport.issues.length > 14 || auditReport.patches.length > 12;
-    while (refinerAttempt < 2) {
-      refinerAttempt += 1;
-      const refinerPrompt = buildRefinerPrompt(
-        patchPreparedQuestions,
-        auditReport,
-        creatorNormalized.validationErrors,
-        COMPACT_MODE_BY_DEFAULT || refinerAttempt > 1,
-        useUltraCompactRefiner || refinerAttempt > 1,
-      );
-      if (attemptBudgetUsed >= ATTEMPT_BUDGET_PER_JOB || tokenBudgetUsed >= TOKEN_BUDGET_PER_JOB) {
-        throw new Error("job_budget_exhausted_before_refiner");
-      }
-      const refiner = await runLayerModel("refiner", refinerPrompt);
-      attemptBudgetUsed += 1;
-      tokenBudgetUsed += refiner.usageMetadata.totalTokens;
-      refinerModelName = refiner.modelName;
-      refinerFinishReason = refiner.finishReason;
-      refinerCandidateTruncated = refiner.candidateTruncated;
-      await assertNotCancelled(job.id, failedLayer);
-      await appendInspectionLog({
-        jobId: job.id,
-        layer: "refiner",
-        promptText: refinerPrompt,
-        rawResponseText: refiner.rawResponseText,
-        provider: refiner.provider,
-        modelName: refiner.modelName,
-        apiVersion: refiner.apiVersion,
-      });
-      await appendAiUsageLogSafe({
-        jobId: job.id,
-        subject: jobSubject,
-        layer: "refiner",
-        modelId: refiner.modelName,
-        status: "success",
-        usage: refiner.usageMetadata,
-        retryIndex: refinerAttempt - 1,
-        attemptId: `${job.id}-refiner-${refinerAttempt}`,
-        costSource: "provider_exact",
-      });
-      try {
-        finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
-        break;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "refiner_invalid_json";
-        const isRetryableJson =
-          message.includes("invalid_json_output:layer=refiner") || message.includes("refiner_invalid_json_trailing_brackets");
-        const canRetry = isRetryableJson && refinerAttempt < 2;
-        await appendJobLog(job.id, canRetry ? "warn" : "error", "Refiner JSON guard failed", "refiner", {
-          refinerAttempt,
-          willRetry: canRetry,
-          error: message,
-          finishReason: refiner.finishReason,
-          candidateTruncated: refiner.candidateTruncated,
-          finishReasonCode: classifyFinishReason(refiner.finishReason, refiner.candidateTruncated),
-        });
-        if (canRetry) continue;
-        throw error;
-      }
-    }
-    if (!finalQuestions) {
-      throw new Error("refiner_no_valid_output");
-    }
-    if (finalQuestions.length > effectiveBatchSize) {
-      finalQuestions = finalQuestions.slice(0, effectiveBatchSize);
-    }
-    if (finalQuestions.length === 0) {
-      throw new Error("refiner_returned_empty_batch");
-    }
-    runSchemaGateChecks(finalQuestions);
-    runPedagogyGateChecks(finalQuestions);
+    runGateLiteChecks(finalQuestions);
     await saveJobFinalOutput(job.id, finalQuestions);
     await assertNotCancelled(job.id, failedLayer);
     const inserted = await insertQuestionsAllOrNothing(finalQuestions);
@@ -1495,7 +1302,8 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       currentLayer: null,
       resultSummary: {
         inserted,
-        auditedIssues: auditReport.issues.length,
+        mode: "generate_gate_lite",
+        generated: finalQuestions.length,
         attemptBudgetUsed,
         tokenBudgetUsed,
       },
@@ -1508,12 +1316,10 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       generatedDelta: inserted,
       lastError: null,
     });
-    await appendJobLog(job.id, "info", "Refiner layer committed batch successfully", "refiner", {
+    await appendJobLog(job.id, "info", "Gate step committed batch successfully", "creator", {
       inserted,
-      refinerAttempts: refinerAttempt,
-      model: refinerModelName,
-      finishReason: refinerFinishReason,
-      candidateTruncated: refinerCandidateTruncated,
+      gateMode: "lite",
+      finalCount: finalQuestions.length,
     });
     failedLayer = null;
   } catch (error) {
@@ -1576,7 +1382,11 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       creatorRawSnippet: creatorMeta?.rawSnippet ?? null,
       failureCode,
     });
-    if (job.attempt_count + 1 < job.max_attempts && !isDeterministicNonRetryable(errMessage)) {
+    const nextAttempt = job.attempt_count + 1;
+    const canRetryTransient = nextAttempt < job.max_attempts && isTransientFactoryFailure(errMessage);
+    const canRetrySingleRecovery =
+      nextAttempt < Math.min(job.max_attempts, 2) && isSingleRecoveryRetryCandidate(errMessage);
+    if (!isDeterministicNonRetryable(errMessage) && (canRetryTransient || canRetrySingleRecovery)) {
       const backoffMinutes = computeRequeueDelayMinutes(job.attempt_count + 1);
       const nextRunAt = new Date(Date.now() + backoffMinutes * 60_000);
       await setJobState(job.id, {
