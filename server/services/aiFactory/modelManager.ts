@@ -6,7 +6,7 @@ import {
 import type { GenerationConfig } from "@google/generative-ai";
 import { getPool } from "../../db/pool";
 import { sleep } from "./utils";
-import type { FactoryLayer, FactoryReasoningLevel, LayerModelConfig } from "./types";
+import type { FactoryModelLayer, FactoryReasoningLevel, LayerModelConfig } from "./types";
 
 /**
  * Model IDs supported for factory layers (must match ListModels + generateContent for your API key).
@@ -88,7 +88,7 @@ type ModelCallResult = {
 };
 
 export type LayerFailureMeta = {
-  layer: FactoryLayer;
+  layer: FactoryModelLayer;
   providerCode: string | null;
   retryable: boolean;
   attempt: number;
@@ -252,10 +252,10 @@ function getEnvValue(name: string): string {
   return String(process.env[name] ?? "").trim();
 }
 
-async function readLayerConfig(layer: FactoryLayer): Promise<LayerModelConfig> {
+async function readLayerConfig(layer: FactoryModelLayer): Promise<LayerModelConfig> {
   const pool = getPool();
   const r = await pool.query<{
-    layer_name: FactoryLayer;
+    layer_name: FactoryModelLayer;
     provider: string;
     model_name: string;
     api_key_env: string;
@@ -292,7 +292,7 @@ async function readLayerConfig(layer: FactoryLayer): Promise<LayerModelConfig> {
 export async function listModelConfigs(): Promise<LayerModelConfig[]> {
   const pool = getPool();
   const r = await pool.query<{
-    layer_name: FactoryLayer;
+    layer_name: FactoryModelLayer;
     provider: string;
     model_name: string;
     api_key_env: string;
@@ -440,7 +440,7 @@ function currentApiVersionForConfig(config: LayerModelConfig): "v1" | "v1beta" {
 }
 
 export type LayerConfigHealth = {
-  layer: FactoryLayer;
+  layer: FactoryModelLayer;
   status: "ok" | "warn" | "fail";
   reasons: string[];
   provider: string;
@@ -452,7 +452,7 @@ export type LayerConfigHealth = {
   reasoningLevel: FactoryReasoningLevel;
 };
 
-export async function getLayerConfigHealth(layer: FactoryLayer): Promise<LayerConfigHealth> {
+export async function getLayerConfigHealth(layer: FactoryModelLayer): Promise<LayerConfigHealth> {
   const config = await readLayerConfig(layer);
   const reasons: string[] = [];
   const envPresent = Boolean(getEnvValue(config.apiKeyEnv));
@@ -476,10 +476,10 @@ export async function getLayerConfigHealth(layer: FactoryLayer): Promise<LayerCo
   };
 }
 
-export async function probeLayerModel(layer: FactoryLayer): Promise<
+export async function probeLayerModel(layer: FactoryModelLayer): Promise<
   | {
       ok: true;
-      layer: FactoryLayer;
+      layer: FactoryModelLayer;
       status: "ok";
       providerCode: null;
       latencyMs: number;
@@ -489,7 +489,7 @@ export async function probeLayerModel(layer: FactoryLayer): Promise<
     }
   | {
       ok: false;
-      layer: FactoryLayer;
+      layer: FactoryModelLayer;
       status: "fail";
       providerCode: string | null;
       latencyMs: number;
@@ -532,7 +532,7 @@ export async function probeLayerModel(layer: FactoryLayer): Promise<
   }
 }
 
-export async function runLayerModel(layer: FactoryLayer, prompt: string): Promise<ModelCallResult> {
+export async function runLayerModel(layer: FactoryModelLayer, prompt: string): Promise<ModelCallResult> {
   const config = await readLayerConfig(layer);
   const maxAttempts = 2;
   let attempt = 0;

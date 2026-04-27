@@ -37,7 +37,7 @@ import {
 } from "../services/aiFactory/usageAnalytics";
 import { getFactoryInspectionLogs, getFactoryJobErrorTimeline, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
 import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
-import type { FactoryLayer } from "../services/aiFactory/types";
+import type { FactoryModelLayer } from "../services/aiFactory/types";
 
 const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
 const questionOptionsSchema = z
@@ -169,7 +169,7 @@ const factoryRunNowSchema = z.object({
 });
 
 const factoryHealthProbeSchema = z.object({
-  layerName: z.enum(["architect", "creator", "auditor", "refiner"]).optional(),
+  layerName: z.enum(["creator"]).optional(),
 });
 
 const factoryCancelJobSchema = z.object({
@@ -177,7 +177,7 @@ const factoryCancelJobSchema = z.object({
 });
 
 const factoryModelPatchSchema = z.object({
-  layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
+  layerName: z.enum(["creator"]),
   provider: z.string().trim().min(1).max(50),
   modelName: z.enum(AI_FACTORY_AVAILABLE_MODELS),
   apiKeyEnv: z.string().trim().min(1).max(120),
@@ -977,7 +977,7 @@ export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/ai-factory/health/config", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
     try {
-      const layers: FactoryLayer[] = ["architect", "creator", "auditor", "refiner"];
+      const layers: FactoryModelLayer[] = ["creator"];
       const items = await Promise.all(layers.map((layer) => getLayerConfigHealth(layer)));
       res.json({ ok: true, items });
     } catch (error) {
@@ -1001,9 +1001,9 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
     try {
-      const targets: FactoryLayer[] = parsed.data.layerName
-        ? [parsed.data.layerName as FactoryLayer]
-        : ["architect", "creator", "auditor", "refiner"];
+      const targets: FactoryModelLayer[] = parsed.data.layerName
+        ? [parsed.data.layerName as FactoryModelLayer]
+        : ["creator"];
       const items = await Promise.all(targets.map((layer) => probeLayerModel(layer)));
       res.json({ ok: true, items });
     } catch (error) {
@@ -1035,7 +1035,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       for (const m of parsed) {
         await saveModelConfig({
-          layerName: m.layerName as FactoryLayer,
+          layerName: m.layerName as FactoryModelLayer,
           provider: m.provider,
           modelName: m.modelName,
           apiKeyEnv: m.apiKeyEnv,

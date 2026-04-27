@@ -891,34 +891,22 @@
                 <input id="af-target-default" type="text" inputmode="numeric" value="200" />
               </div>
             </div>
-            <label style="margin-top:0.7rem">اختيار النموذج لكل طبقة</label>
+            <label style="margin-top:0.7rem">اختيار نموذج التوليد (Generate)</label>
             <div class="factory-grid">
-              <div><label for="af-model-architect">Architect</label><select id="af-model-architect"></select></div>
               <div><label for="af-model-creator">Creator</label><select id="af-model-creator"></select></div>
-              <div><label for="af-model-auditor">Auditor</label><select id="af-model-auditor"></select></div>
-              <div><label for="af-model-refiner">Refiner</label><select id="af-model-refiner"></select></div>
             </div>
-            <label style="margin-top:0.5rem" title="مستويات التفكير العالية تزيد من دقة النتائج ولكن تستهلك من الحد المجاني للـ API بسرعة أكبر">مستوى التفكير لكل طبقة (يظهر فقط لموديلات Gemini 3 الداعمة)</label>
+            <label style="margin-top:0.5rem" title="مستويات التفكير العالية تزيد من دقة النتائج ولكن تستهلك من الحد المجاني للـ API بسرعة أكبر">مستوى التفكير للتوليد (يظهر فقط لموديلات Gemini 3 الداعمة)</label>
             <div class="factory-grid">
-              <div class="af-reasoning-wrap" id="af-reasoning-wrap-architect"><label for="af-reasoning-architect">تفكير Architect</label><select id="af-reasoning-architect"></select><div class="factory-help" id="af-reasoning-help-architect"></div></div>
               <div class="af-reasoning-wrap" id="af-reasoning-wrap-creator"><label for="af-reasoning-creator">تفكير Creator</label><select id="af-reasoning-creator"></select><div class="factory-help" id="af-reasoning-help-creator"></div></div>
-              <div class="af-reasoning-wrap" id="af-reasoning-wrap-auditor"><label for="af-reasoning-auditor">تفكير Auditor</label><select id="af-reasoning-auditor"></select><div class="factory-help" id="af-reasoning-help-auditor"></div></div>
-              <div class="af-reasoning-wrap" id="af-reasoning-wrap-refiner"><label for="af-reasoning-refiner">تفكير Refiner</label><select id="af-reasoning-refiner"></select><div class="factory-help" id="af-reasoning-help-refiner"></div></div>
             </div>
             <div class="factory-grid" style="margin-top:0.4rem">
               <div style="grid-column: 1 / -1"><label for="af-key-env">API Key Env (مشترك)</label><input id="af-key-env" type="text" value="GEMINI_API_KEY" /></div>
             </div>
             <div class="factory-advanced">
-              <span class="factory-advanced-title">درجة الحرارة والحد الأقصى للتوكنز لكل طبقة</span>
+              <span class="factory-advanced-title">درجة الحرارة والحد الأقصى للتوكنز لطبقة التوليد</span>
               <div class="factory-grid">
-                <div><label for="af-temp-architect">Architect — Temperature</label><input id="af-temp-architect" type="number" step="0.01" min="0" max="2" value="0.4" /></div>
-                <div><label for="af-max-tokens-architect">Architect — Max tokens</label><input id="af-max-tokens-architect" type="number" min="256" max="65536" step="1" value="8192" /></div>
                 <div><label for="af-temp-creator">Creator — Temperature</label><input id="af-temp-creator" type="number" step="0.01" min="0" max="2" value="0.4" /></div>
                 <div><label for="af-max-tokens-creator">Creator — Max tokens</label><input id="af-max-tokens-creator" type="number" min="256" max="65536" step="1" value="8192" /></div>
-                <div><label for="af-temp-auditor">Auditor — Temperature</label><input id="af-temp-auditor" type="number" step="0.01" min="0" max="2" value="0.4" /></div>
-                <div><label for="af-max-tokens-auditor">Auditor — Max tokens</label><input id="af-max-tokens-auditor" type="number" min="256" max="65536" step="1" value="8192" /></div>
-                <div><label for="af-temp-refiner">Refiner — Temperature</label><input id="af-temp-refiner" type="number" step="0.01" min="0" max="2" value="0.4" /></div>
-                <div><label for="af-max-tokens-refiner">Refiner — Max tokens</label><input id="af-max-tokens-refiner" type="number" min="256" max="65536" step="1" value="8192" /></div>
               </div>
             </div>
             <label style="margin-top:0.7rem">تشغيل يدوي</label>
@@ -936,9 +924,9 @@
             <div class="btn-row">
               <button type="button" class="btn btn-secondary" id="af-load-btn">تحميل</button>
               <button type="button" class="btn" id="af-save-btn">حفظ الإعدادات</button>
-              <button type="button" class="btn" id="af-model-save-btn">حفظ النماذج</button>
+              <button type="button" class="btn" id="af-model-save-btn">حفظ نموذج التوليد</button>
               <button type="button" class="btn btn-secondary" id="af-run-btn">توليد يدوي الآن</button>
-              <button type="button" class="btn btn-secondary" id="af-health-btn">فحص صحة طبقات AI</button>
+              <button type="button" class="btn btn-secondary" id="af-health-btn">فحص صحة طبقة التوليد</button>
               <button type="button" class="btn btn-danger" id="af-cancel-all-btn">إلغاء كل الجارية والانتظار</button>
               <button type="button" class="btn btn-danger" id="af-cancel-queued-btn">إلغاء كل قائمة الانتظار</button>
               <button type="button" class="btn btn-secondary" id="af-refresh-jobs-btn">تحديث السجل</button>
@@ -947,6 +935,7 @@
             <div class="stat" style="margin-top:0.7rem">
               <span>Queued: <b id="af-queued">0</b></span>
               <span>Running: <b id="af-running">0</b></span>
+              <span>Stale Running: <b id="af-stale-running">0</b></span>
               <span>نجاح 24س: <b id="af-succeeded">0</b></span>
               <span>فشل 24س: <b id="af-failed">0</b></span>
             </div>
@@ -2742,7 +2731,7 @@
           }
         }
         function bindReasoningGuards() {
-          ["architect", "creator", "auditor", "refiner"].forEach(function (layerName) {
+          ["creator"].forEach(function (layerName) {
             var modelEl = document.getElementById("af-model-" + layerName);
             if (!modelEl) return;
             modelEl.addEventListener("change", function () {
@@ -2751,14 +2740,16 @@
             syncLayerReasoningState(layerName);
           });
         }
-        function setStatus(runtime) {
+        function setStatus(runtime, jobs) {
           runtime = runtime || {};
           document.getElementById("af-queued").textContent = String(runtime.queued || 0);
           document.getElementById("af-running").textContent = String(runtime.running || 0);
+          document.getElementById("af-stale-running").textContent = String(runtime.staleRunning || 0);
           document.getElementById("af-succeeded").textContent = String(runtime.succeeded24h || 0);
           document.getElementById("af-failed").textContent = String(runtime.failed24h || 0);
-          var total = (runtime.queued || 0) + (runtime.running || 0) + (runtime.succeeded24h || 0) + (runtime.failed24h || 0);
-          var done = (runtime.succeeded24h || 0);
+          var list = Array.isArray(jobs) ? jobs : [];
+          var total = list.length;
+          var done = list.filter(function (j) { return String(j.status || "") === "succeeded"; }).length;
           var pct = total > 0 ? Math.max(0, Math.min(100, Math.round((done / total) * 100))) : 0;
           document.getElementById("af-progress-bar").style.width = String(pct) + "%";
         }
@@ -2801,14 +2792,8 @@
             ? availableReasoningLevels
             : ["none", "low", "medium", "high"];
           var fallbackReasoning = String(defaultReasoningLevel || "none");
-          ensureModelOptions("af-model-architect", allowed, fallbackModel);
           ensureModelOptions("af-model-creator", allowed, fallbackModel);
-          ensureModelOptions("af-model-auditor", allowed, fallbackModel);
-          ensureModelOptions("af-model-refiner", allowed, fallbackModel);
-          ensureReasoningOptions("af-reasoning-architect", allowedReasoning, fallbackReasoning);
           ensureReasoningOptions("af-reasoning-creator", allowedReasoning, fallbackReasoning);
-          ensureReasoningOptions("af-reasoning-auditor", allowedReasoning, fallbackReasoning);
-          ensureReasoningOptions("af-reasoning-refiner", allowedReasoning, fallbackReasoning);
           if (!Array.isArray(models)) return;
           models.forEach(function (m) {
             if (!m || !m.layerName) return;
@@ -2821,7 +2806,7 @@
             var maxEl = document.getElementById("af-max-tokens-" + m.layerName);
             if (tempEl) tempEl.value = String(m.temperature ?? 0.4);
             if (maxEl) maxEl.value = String(m.maxOutputTokens ?? 8192);
-            if (m.layerName === "architect") {
+            if (m.layerName === "creator") {
               document.getElementById("af-key-env").value = String(m.apiKeyEnv || defaultApiKeyEnv || "GEMINI_API_KEY");
             }
           });
@@ -2866,7 +2851,7 @@
             if (modelRes.ok && md.ok) {
               applyModels(md.models, md.availableModels, md.defaultModel, md.defaultApiKeyEnv, md.availableReasoningLevels, md.defaultReasoningLevel, md.thinkingLevelSupportedModelIds);
             }
-            if (statusRes.ok && status.ok) setStatus(status.runtime);
+            if (statusRes.ok && status.ok) setStatus(status.runtime, jobs.items || []);
             if (jobsRes.ok && jobs.ok) renderJobs(jobs.items || []);
             if (!silent) msg("تم تحميل بيانات المصنع.", true);
           } catch (e) {
@@ -2912,10 +2897,7 @@
           try {
             var body = {
               models: [
-                modelPayload("architect"),
-                modelPayload("creator"),
-                modelPayload("auditor"),
-                modelPayload("refiner")
+                modelPayload("creator")
               ]
             };
             var r = await fetch("/api/admin/ai-factory/models", { method: "PATCH", headers: hdr(), body: JSON.stringify(body) });
@@ -3054,6 +3036,12 @@
               " | " + j.status +
               " | " + j.subcategoryKey +
               " | layer: " + (j.currentLayer || "-") +
+              (j.resultSummary && typeof j.resultSummary === "object" && j.resultSummary.mode
+                ? " | mode: " + String(j.resultSummary.mode)
+                : "") +
+              (j.resultSummary && typeof j.resultSummary === "object" && Number.isFinite(Number(j.resultSummary.inserted))
+                ? " | inserted: " + String(j.resultSummary.inserted)
+                : "") +
               (j.lastError ? " | error: " + j.lastError : "") +
               (hint ? " | " + hint : "");
             summary.addEventListener("click", function () { loadJobLogs(j.id); });
@@ -3088,7 +3076,7 @@
             var jobsRes = await fetch("/api/admin/ai-factory/jobs?limit=30", { headers: { "X-Admin-Secret": secret() } });
             var status = await statusRes.json();
             var jobs = await jobsRes.json();
-            if (statusRes.ok && status.ok) setStatus(status.runtime);
+            if (statusRes.ok && status.ok) setStatus(status.runtime, jobs.items || []);
             if (jobsRes.ok && jobs.ok) renderJobs(jobs.items || []);
           } catch (e) {}
         }

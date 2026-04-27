@@ -1,4 +1,5 @@
-export type FactoryLayer = "architect" | "creator" | "auditor" | "refiner";
+export type FactoryLayer = "creator" | "gate";
+export type FactoryModelLayer = "creator";
 export type FactoryReasoningLevel = "none" | "low" | "medium" | "high";
 
 export type FactoryDifficulty = "mix" | "easy" | "medium" | "hard";
@@ -69,7 +70,7 @@ export type FactoryValidationError = {
 };
 
 export type LayerModelConfig = {
-  layerName: FactoryLayer;
+  layerName: FactoryModelLayer;
   provider: string;
   modelName: string;
   apiKeyEnv: string;

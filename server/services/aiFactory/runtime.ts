@@ -23,6 +23,9 @@ type ClaimedJob = {
   max_attempts: number;
 };
 
+const JOB_STALE_AFTER_MINUTES = 15;
+const WORKER_INSTANCE_ID = `pid-${process.pid}`;
+
 const SETTING_KEYS = {
   enabled: "ai_factory_enabled",
   batchSize: "ai_factory_batch_size",
@@ -238,22 +241,61 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
     }
     await client.query(
       `UPDATE ai_factory_jobs
-       SET status = 'running', started_at = NOW(), updated_at = NOW()
+       SET status = 'running', started_at = NOW(), heartbeat_at = NOW(), worker_id = $2, updated_at = NOW()
        WHERE id = $1`,
-      [row.id],
+      [row.id, WORKER_INSTANCE_ID],
     );
     await client.query("COMMIT");
     return row;
-  } catch {
+  } catch (error) {
     try {
       await client.query("ROLLBACK");
     } catch {
       // ignore
     }
-    return null;
+    throw error;
   } finally {
     client.release();
   }
+}
+
+export async function touchFactoryJobHeartbeat(jobId: number): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `UPDATE ai_factory_jobs
+     SET heartbeat_at = NOW(), updated_at = NOW()
+     WHERE id = $1
+       AND status = 'running'`,
+    [jobId],
+  );
+}
+
+export async function recoverStaleRunningJobs(staleAfterMinutes = JOB_STALE_AFTER_MINUTES): Promise<number> {
+  const pool = getPool();
+  const r = await pool.query<{ id: number }>(
+    `WITH stale AS (
+       UPDATE ai_factory_jobs
+       SET status = 'queued',
+           current_layer = NULL,
+           last_error = 'stale_running_recovered',
+           next_run_at = NOW(),
+           worker_id = NULL,
+           heartbeat_at = NOW(),
+           updated_at = NOW()
+       WHERE status = 'running'
+         AND COALESCE(heartbeat_at, started_at, updated_at, created_at) < NOW() - ($1::text || ' minutes')::interval
+       RETURNING id
+     ),
+     logs AS (
+       INSERT INTO ai_factory_job_logs (job_id, layer_name, level, message, details)
+       SELECT id, NULL, 'warn', 'stale_running_recovered', '{"recovered":true}'::jsonb
+       FROM stale
+       RETURNING 1
+     )
+     SELECT id FROM stale`,
+    [Math.max(1, Math.floor(staleAfterMinutes))],
+  );
+  return r.rows.length;
 }
 
 export class AIFactoryRuntime {
@@ -351,6 +393,7 @@ export class AIFactoryRuntime {
     workerBusy: boolean;
     queued: number;
     running: number;
+    staleRunning: number;
     succeeded24h: number;
     failed24h: number;
   }> {
@@ -358,20 +401,29 @@ export class AIFactoryRuntime {
     const r = await pool.query<{
       queued: string;
       running: string;
+      stale_running: string;
       succeeded24h: string;
       failed24h: string;
     }>(
       `SELECT
          (SELECT COUNT(*)::text FROM ai_factory_jobs WHERE status = 'queued') AS queued,
          (SELECT COUNT(*)::text FROM ai_factory_jobs WHERE status = 'running') AS running,
+         (
+           SELECT COUNT(*)::text
+           FROM ai_factory_jobs
+           WHERE status = 'running'
+             AND COALESCE(heartbeat_at, started_at, updated_at, created_at) < NOW() - ($1::text || ' minutes')::interval
+         ) AS stale_running,
          (SELECT COUNT(*)::text FROM ai_factory_jobs WHERE status = 'succeeded' AND finished_at >= NOW() - INTERVAL '24 hour') AS succeeded24h,
          (SELECT COUNT(*)::text FROM ai_factory_jobs WHERE status = 'failed' AND finished_at >= NOW() - INTERVAL '24 hour') AS failed24h`,
+      [JOB_STALE_AFTER_MINUTES],
     );
     return {
       started: this.started,
       workerBusy: this.workerBusy,
       queued: Number(r.rows[0]?.queued ?? 0),
       running: Number(r.rows[0]?.running ?? 0),
+      staleRunning: Number(r.rows[0]?.stale_running ?? 0),
       succeeded24h: Number(r.rows[0]?.succeeded24h ?? 0),
       failed24h: Number(r.rows[0]?.failed24h ?? 0),
     };
@@ -419,9 +471,15 @@ export class AIFactoryRuntime {
     if (this.workerBusy || this.shuttingDown) return;
     this.workerBusy = true;
     try {
+      const recovered = await recoverStaleRunningJobs(JOB_STALE_AFTER_MINUTES);
+      if (recovered > 0) {
+        console.warn("[ai-factory] recovered stale running jobs", { recovered });
+      }
       const job = await claimNextJob();
       if (!job) return;
       await runFactoryJob(job);
+    } catch (error) {
+      console.error("[ai-factory] worker tick error", error);
     } finally {
       this.workerBusy = false;
     }
@@ -431,6 +489,13 @@ export class AIFactoryRuntime {
     if (this.started) return;
     this.started = true;
     this.shuttingDown = false;
+    const recovered = await recoverStaleRunningJobs(JOB_STALE_AFTER_MINUTES).catch((e) => {
+      console.error("[ai-factory] stale recovery error", e);
+      return 0;
+    });
+    if (recovered > 0) {
+      console.warn("[ai-factory] startup recovered stale jobs", { recovered });
+    }
     this.workerTimer = setInterval(() => {
       void this.workerTick();
     }, 2500);

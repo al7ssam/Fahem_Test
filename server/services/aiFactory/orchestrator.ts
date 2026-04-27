@@ -54,6 +54,8 @@ const ATTEMPT_BUDGET_PER_JOB = 8;
 const TOKEN_BUDGET_PER_JOB = 200_000;
 const COMPACT_MODE_BY_DEFAULT = true;
 const ARCHITECT_SUMMARY_MAX_CHARS = 520;
+const JOB_TIMEOUT_MS = 5 * 60_000;
+const JOB_HEARTBEAT_EVERY_MS = 10_000;
 
 class JobCancelledError extends Error {
   readonly layer: FactoryLayer | null;
@@ -106,8 +108,14 @@ async function appendJobLog(
        VALUES ($1, $2, $3, $4, $5::jsonb)`,
       [jobId, layer ?? null, level, message, JSON.stringify(details ?? {})],
     );
-  } catch {
-    // best-effort logging only; never break job flow
+  } catch (error) {
+    console.warn("[ai-factory] appendJobLog failed", {
+      jobId,
+      layer: layer ?? null,
+      level,
+      message,
+      error: error instanceof Error ? error.message : "unknown_error",
+    });
   }
 }
 
@@ -136,8 +144,12 @@ async function appendInspectionLog(input: {
         input.apiVersion,
       ],
     );
-  } catch {
-    // best-effort logging only; never break job flow
+  } catch (error) {
+    console.warn("[ai-factory] appendInspectionLog failed", {
+      jobId: input.jobId,
+      layer: input.layer,
+      error: error instanceof Error ? error.message : "unknown_error",
+    });
   }
 }
 
@@ -250,10 +262,76 @@ async function setJobState(
   if (data.incrementAttempt) updates.push(`attempt_count = attempt_count + 1`);
   updates.push(`updated_at = NOW()`);
   params.push(jobId);
-  await pool.query(
+  const r = await pool.query(
     `UPDATE ai_factory_jobs SET ${updates.join(", ")} WHERE id = $${params.length}`,
     params,
   );
+  if ((r.rowCount ?? 0) < 1) {
+    throw new Error(`job_not_found:${jobId}`);
+  }
+}
+
+async function touchJobHeartbeat(jobId: number): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `UPDATE ai_factory_jobs
+     SET heartbeat_at = NOW(), updated_at = NOW()
+     WHERE id = $1
+       AND status = 'running'`,
+    [jobId],
+  );
+}
+
+function startJobHeartbeat(jobId: number): () => void {
+  const timer = setInterval(() => {
+    void touchJobHeartbeat(jobId).catch((error) => {
+      console.warn("[ai-factory] heartbeat update failed", {
+        jobId,
+        error: error instanceof Error ? error.message : "unknown_error",
+      });
+    });
+  }, JOB_HEARTBEAT_EVERY_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutCode: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutCode));
+    }, Math.max(1000, timeoutMs));
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+async function safeRefreshPipelineState(
+  subcategoryKey: string,
+  update: {
+    lastJobId: number;
+    lastStatus: "running" | "succeeded" | "failed" | "cancelled";
+    lastLayer?: FactoryLayer | null;
+    lastError?: string | null;
+    generatedDelta?: number;
+  },
+): Promise<void> {
+  try {
+    await refreshPipelineState(subcategoryKey, update);
+  } catch (error) {
+    console.warn("[ai-factory] refreshPipelineState failed", {
+      subcategoryKey,
+      lastStatus: update.lastStatus,
+      error: error instanceof Error ? error.message : "unknown_error",
+    });
+  }
 }
 
 async function readSubcategoryContext(subcategoryKey: string): Promise<{
@@ -1152,7 +1230,7 @@ async function refreshPipelineState(
   subcategoryKey: string,
   update: {
     lastJobId: number;
-    lastStatus: "running" | "succeeded" | "failed";
+    lastStatus: "running" | "succeeded" | "failed" | "cancelled";
     lastLayer?: FactoryLayer | null;
     lastError?: string | null;
     generatedDelta?: number;
@@ -1186,6 +1264,7 @@ async function refreshPipelineState(
 
 export async function runFactoryJob(job: JobRow): Promise<void> {
   const effectiveBatchSize = Math.min(Math.max(1, job.batch_size), EXECUTION_BATCH_SIZE_CAP);
+  const stopHeartbeat = startJobHeartbeat(job.id);
   await appendJobLog(job.id, "info", `Job started at ${nowIso()}`);
   await setJobState(job.id, {
     status: "running",
@@ -1194,7 +1273,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     incrementAttempt: true,
     lastError: null,
   });
-  await refreshPipelineState(job.subcategory_key, {
+  await safeRefreshPipelineState(job.subcategory_key, {
     lastJobId: job.id,
     lastStatus: "running",
     lastLayer: "creator",
@@ -1205,6 +1284,8 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
   let attemptBudgetUsed = 0;
   let tokenBudgetUsed = 0;
   try {
+    await withTimeout(
+      (async () => {
     await assertNotCancelled(job.id, failedLayer);
     const creatorHealth = await getLayerConfigHealth("creator");
     if (creatorHealth.status === "fail") {
@@ -1294,6 +1375,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     if (!finalQuestions.length) {
       throw new Error("generator_returned_empty_batch");
     }
+    await setJobState(job.id, { currentLayer: "gate" });
     runGateLiteChecks(finalQuestions);
     await saveJobFinalOutput(job.id, finalQuestions);
     await assertNotCancelled(job.id, failedLayer);
@@ -1312,7 +1394,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       },
       lastError: null,
     });
-    await refreshPipelineState(job.subcategory_key, {
+    await safeRefreshPipelineState(job.subcategory_key, {
       lastJobId: job.id,
       lastStatus: "succeeded",
       lastLayer: null,
@@ -1325,6 +1407,10 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       finalCount: finalQuestions.length,
     });
     failedLayer = null;
+      })(),
+      JOB_TIMEOUT_MS,
+      "job_execution_timeout",
+    );
   } catch (error) {
     if (error instanceof JobCancelledError) {
       await appendJobLog(job.id, "warn", "Job cancelled by admin", error.layer ?? undefined, {
@@ -1336,9 +1422,9 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         currentLayer: null,
         lastError: "cancelled_by_admin",
       });
-      await refreshPipelineState(job.subcategory_key, {
+      await safeRefreshPipelineState(job.subcategory_key, {
         lastJobId: job.id,
-        lastStatus: "failed",
+        lastStatus: "cancelled",
         lastLayer: null,
         lastError: "cancelled_by_admin",
       });
@@ -1403,7 +1489,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         nextRunAt: nextRunAt.toISOString(),
         backoffMinutes,
       });
-      await refreshPipelineState(job.subcategory_key, {
+      await safeRefreshPipelineState(job.subcategory_key, {
         lastJobId: job.id,
         lastStatus: "failed",
         lastLayer: failedLayer,
@@ -1416,7 +1502,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         currentLayer: null,
         lastError: errMessage,
       });
-      await refreshPipelineState(job.subcategory_key, {
+      await safeRefreshPipelineState(job.subcategory_key, {
         lastJobId: job.id,
         lastStatus: "failed",
         lastLayer: null,
@@ -1424,6 +1510,8 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       });
     }
     return;
+  } finally {
+    stopHeartbeat();
   }
 }
 
