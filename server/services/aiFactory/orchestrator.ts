@@ -398,14 +398,14 @@ function buildAuditorPrompt(
     "You are The Auditor layer.",
     "Audit only risks not already guaranteed by strict schema validation.",
     "Focus on: pedagogical mismatch, weak active-recall wording, malformed micro-lesson structure, or wrong conceptual/procedural/application intent.",
-    SHARED_PROMPT_CONSTRAINTS.distribution,
+    "Distribution targets and studyBody micro-lesson rules were already enforced in Creator; infer violations only from the compact previews and validation errors below.",
     "difficulty must be English only: easy | medium | hard.",
-    SHARED_PROMPT_CONSTRAINTS.studyBody,
     `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
     "Return strict JSON object with fields:",
     `{"summary":"...", "issues":["..."], "requiresRefine": true|false}`,
     "Do not use markdown fences.",
-    JSON.stringify(questions),
+    "Compact batch (previews + metadata only, not full question text):",
+    compactQuestionsForAuditorPrompt(questions),
   ].join("\n");
 }
 
@@ -503,6 +503,23 @@ function compactSnippet(input: string, max = 180): string {
   const s = String(input || "").replace(/\s+/g, " ").trim();
   if (!s) return "";
   return s.length > max ? `${s.slice(0, max)}...` : s;
+}
+
+/** Lighter batch payload for optimized Auditor only (full objects stay in Creator / DB). */
+function compactQuestionsForAuditorPrompt(questions: FactoryQuestion[]): string {
+  return JSON.stringify(
+    questions.map((q, idx) => ({
+      index: idx,
+      promptPreview: compactSnippet(q.prompt, 160),
+      optionsLength: q.options.length,
+      correctIndex: q.correctIndex,
+      studyBodyPreview: compactSnippet(q.studyBody, 140),
+      studyBodyCharLength: String(q.studyBody || "").replace(/\s+/g, " ").trim().length,
+      subcategoryKey: q.subcategoryKey,
+      difficulty: q.difficulty,
+      questionType: q.questionType,
+    })),
+  );
 }
 
 type NormalizedCreatorBatch = {

@@ -13,9 +13,20 @@ type VariantSummaryRow = {
   cost_usd: string;
 };
 
+const DEFAULT_TOKEN_REDUCTION_TARGET_PCT = 35;
+const DEFAULT_COST_REDUCTION_TARGET_PCT = 30;
+
+/**
+ * Compare baseline vs optimized cohorts over a window.
+ * Usage: tsx server/scripts/aiFactoryAbReport.ts [days=7] [subcategory_key?]
+ */
 async function main(): Promise<void> {
   const days = Math.max(1, Number(process.argv[2] ?? 7) || 7);
+  const subcategoryKey = process.argv[3]?.trim() || null;
   const pool = getPool();
+
+  const subFilter = subcategoryKey ? "AND subcategory_key = $2" : "";
+  const params: unknown[] = subcategoryKey ? [days, subcategoryKey] : [days];
 
   const rows = await pool.query<VariantSummaryRow>(
     `WITH jobs AS (
@@ -27,6 +38,7 @@ async function main(): Promise<void> {
          COALESCE((result_summary->>'refinerSkipped')::boolean, false) AS refiner_skipped
        FROM ai_factory_jobs
        WHERE created_at >= NOW() - ($1::text || ' days')::interval
+         ${subFilter}
      ),
      usage AS (
        SELECT
@@ -53,11 +65,12 @@ async function main(): Promise<void> {
      LEFT JOIN usage ON usage.job_id = jobs.id
      GROUP BY jobs.variant
      ORDER BY jobs.variant`,
-    [days],
+    params,
   );
 
   const report = rows.rows.map((r) => {
     const succeeded = Number(r.succeeded);
+    const jobsTotal = Number(r.jobs_total);
     const input = Number(r.input_tokens);
     const output = Number(r.output_tokens);
     const total = input + output;
@@ -66,11 +79,13 @@ async function main(): Promise<void> {
     const avgCostPerSucceededJob = succeeded > 0 ? Number((cost / succeeded).toFixed(6)) : 0;
     return {
       variant: r.variant,
-      jobsTotal: Number(r.jobs_total),
+      jobsTotal,
       succeeded,
       failed: Number(r.failed),
       cancelled: Number(r.cancelled),
       refinerSkipped: Number(r.refiner_skipped),
+      successRatePercent: jobsTotal > 0 ? Number(((succeeded / jobsTotal) * 100).toFixed(2)) : 0,
+      refinerSkippedRatePercent: jobsTotal > 0 ? Number(((Number(r.refiner_skipped) / jobsTotal) * 100).toFixed(2)) : 0,
       avgInserted: Number(r.avg_inserted),
       inputTokens: input,
       outputTokens: output,
@@ -109,7 +124,46 @@ async function main(): Promise<void> {
         }
       : null;
 
-  console.log(JSON.stringify({ windowDays: days, variants: report, comparison }, null, 2));
+  const kpiTargets = {
+    minTokenReductionPercent: DEFAULT_TOKEN_REDUCTION_TARGET_PCT,
+    minCostReductionPercent: DEFAULT_COST_REDUCTION_TARGET_PCT,
+    /** لا انحدار قوي لنجاح الوظائف مقارنة بـ baseline في نفس النافذة (نقاط مئوية). */
+    maxSuccessRateRegressionVsBaselinePp: 2,
+  };
+
+  const kpiGate =
+    comparison && baseline && optimized
+      ? {
+          targets: kpiTargets,
+          meetsTokenReduction: comparison.tokenReductionPercent >= kpiTargets.minTokenReductionPercent,
+          meetsCostReduction: comparison.costReductionPercent >= kpiTargets.minCostReductionPercent,
+          meetsSuccessStability:
+            optimized.successRatePercent + kpiTargets.maxSuccessRateRegressionVsBaselinePp >=
+            baseline.successRatePercent,
+          readyForRolloutGeneralization:
+            comparison.tokenReductionPercent >= kpiTargets.minTokenReductionPercent &&
+            comparison.costReductionPercent >= kpiTargets.minCostReductionPercent &&
+            optimized.successRatePercent + kpiTargets.maxSuccessRateRegressionVsBaselinePp >=
+              baseline.successRatePercent,
+          notes: [
+            "readyForRolloutGeneralization هو مؤشر آلية فقط؛ راجع معدل Refiner وجودة المحتوى يدويًا قبل التعميم.",
+            "successRatePercent = succeeded / jobs_total لكل variant؛ meetsSuccessStability يسمح بانحدار حتى 2 نقطة مئوية تحت baseline.",
+          ],
+        }
+      : null;
+
+  console.log(
+    JSON.stringify(
+      {
+        measurementWindow: { days, subcategoryKey },
+        variants: report,
+        comparison,
+        kpiGate,
+      },
+      null,
+      2,
+    ),
+  );
   await closePool();
 }
 

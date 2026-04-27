@@ -30,7 +30,22 @@ async function main(): Promise<void> {
     .filter((x) => x.from !== x.to);
 
   if (!changes.length) {
-    console.log(JSON.stringify({ dryRun, changed: 0, changes: [] }, null, 2));
+    console.log(
+      JSON.stringify(
+        {
+          dryRun,
+          changed: 0,
+          changes: [],
+          measurementHint: {
+            baselineScript: "tsx server/scripts/aiFactoryBaselineMetrics.ts 7 [subcategory_key?] [--with-inspection-tokens]",
+            abReportScript: "tsx server/scripts/aiFactoryAbReport.ts 7 [subcategory_key?]",
+            note: "بعد تغيير reasoning_level قارن total/thoughts عبر --with-inspection-tokens ثم ab-report لنفس النافذة والفئة.",
+          },
+        },
+        null,
+        2,
+      ),
+    );
     await closePool();
     return;
   }
@@ -56,7 +71,22 @@ async function main(): Promise<void> {
     );
   }
 
-  console.log(JSON.stringify({ dryRun, changed: changes.length, changes }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        dryRun,
+        changed: changes.length,
+        changes,
+        measurementHint: {
+          baselineScript: "tsx server/scripts/aiFactoryBaselineMetrics.ts 7 [subcategory_key?] [--with-inspection-tokens]",
+          abReportScript: "tsx server/scripts/aiFactoryAbReport.ts 7 [subcategory_key?]",
+          envCaps: "AI_FACTORY_REASONING_POLICY_MODE و AI_FACTORY_REASONING_CAP_<LAYER> في modelManager",
+        },
+      },
+      null,
+      2,
+    ),
+  );
   await closePool();
 }
 

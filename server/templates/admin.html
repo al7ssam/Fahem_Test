@@ -3093,20 +3093,128 @@
           } catch (e) {}
         }
         async function loadJobLogs(id) {
+          var box = document.getElementById("af-job-details");
+          box.innerHTML = "";
           try {
-            var r = await fetch("/api/admin/ai-factory/jobs/" + id + "/logs", { headers: { "X-Admin-Secret": secret() } });
-            var j = await r.json();
-            var box = document.getElementById("af-job-details");
-            box.innerHTML = "";
-            if (!r.ok || !j.ok || !Array.isArray(j.logs)) {
-              box.textContent = "تعذر جلب تفاصيل job.";
+            var hdr = { headers: { "X-Admin-Secret": secret() } };
+            var path = "/api/admin/ai-factory/jobs/" + encodeURIComponent(String(id)) + "/";
+            var lr = await fetch(path + "logs", hdr);
+            var er = await fetch(path + "efficiency", hdr);
+            var lj = await lr.json();
+            var ej = await er.json();
+
+            if (ej.ok && ej.report) {
+              window.__afLastEfficiencyReport = ej.report;
+              var rep = ej.report;
+              var sec = document.createElement("div");
+              sec.style.marginBottom = "0.75rem";
+              sec.style.padding = "0.5rem";
+              sec.style.border = "1px solid rgba(223,187,106,0.25)";
+              sec.style.borderRadius = "6px";
+              var t = rep.totals;
+              var dom = rep.indicators.dominantLayerByTotal || "—";
+              var thShare =
+                rep.indicators.thoughtsShareOfTotal != null
+                  ? Math.round(rep.indicators.thoughtsShareOfTotal * 100) + "%"
+                  : "—";
+              var layerRows = "";
+              ["architect", "creator", "auditor", "refiner"].forEach(function (layer) {
+                var b = rep.byLayer && rep.byLayer[layer];
+                var pct =
+                  (rep.indicators.layerShareOfTotalTokensPercent &&
+                    rep.indicators.layerShareOfTotalTokensPercent[layer]) ||
+                  0;
+                if (!b || b.callCount === 0) {
+                  layerRows +=
+                    "<tr><td>" +
+                    layer +
+                    "</td><td colspan='5' style='opacity:0.72'>— لا يوجد استدعاء مسجل</td></tr>";
+                } else {
+                  layerRows +=
+                    "<tr><td>" +
+                    layer +
+                    "</td><td>" +
+                    b.promptTokenCount +
+                    "</td><td>" +
+                    b.thoughtsTokenCount +
+                    "</td><td>" +
+                    b.candidatesTokenCount +
+                    "</td><td><strong>" +
+                    b.totalTokenCount +
+                    "</strong></td><td>" +
+                    pct +
+                    "%</td></tr>";
+                }
+              });
+              var uchk =
+                rep.usageLogCrossCheck && rep.usageLogCrossCheck.length
+                  ? rep.usageLogCrossCheck
+                      .map(function (u) {
+                        return u.layerType + " in/out=" + u.inputTokens + "/" + u.outputTokens;
+                      })
+                      .join(" | ")
+                  : "لا صفوف";
+              sec.innerHTML =
+                "<div style='display:flex;flex-wrap:wrap;align-items:center;gap:0.5rem;margin-bottom:0.4rem'>" +
+                "<strong>تقرير كفاءة الاستهلاك</strong>" +
+                "<button type='button' class='btn btn-secondary' data-af-eff-json-copy>نسخ JSON</button>" +
+                "</div>" +
+                "<div style='font-size:0.88rem;opacity:0.9;margin-bottom:0.35rem'>أعلى طبقة حسب total: <strong>" +
+                dom +
+                "</strong> — نسبة التفكير من الإجمالي: <strong>" +
+                thShare +
+                "</strong></div>" +
+                "<table style='width:100%;border-collapse:collapse;font-size:0.86rem;margin-bottom:0.35rem'>" +
+                "<thead><tr><th style='text-align:right'>طبقة</th><th>prompt</th><th>thoughts</th><th>candidates</th><th>total</th><th>% من job</th></tr></thead><tbody>" +
+                layerRows +
+                "<tr style='font-weight:bold;border-top:1px solid rgba(223,187,106,0.28)'><td>الإجمالي</td><td>" +
+                t.promptTokenCount +
+                "</td><td>" +
+                t.thoughtsTokenCount +
+                "</td><td>" +
+                t.candidatesTokenCount +
+                "</td><td>" +
+                t.totalTokenCount +
+                "</td><td>100%</td></tr></tbody></table>" +
+                "<div style='font-size:0.8rem;opacity:0.75'>المصدر: <code>usageMetadata</code> من سجلات الفحص. مطابقة الفوترة: " +
+                uchk +
+                "</div>";
+              box.appendChild(sec);
+              var copyBtn = sec.querySelector("[data-af-eff-json-copy]");
+              if (copyBtn) {
+                copyBtn.addEventListener("click", function () {
+                  var txt = JSON.stringify(window.__afLastEfficiencyReport, null, 2);
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(txt).then(function () {
+                      alert("تم نسخ تقرير الكفاءة (JSON).");
+                    });
+                  } else {
+                    prompt("انسخ JSON:", txt);
+                  }
+                });
+              }
+            } else {
+              var wf = document.createElement("div");
+              wf.style.marginBottom = "0.5rem";
+              wf.style.opacity = "0.85";
+              wf.textContent = "تعذر تحميل تقرير الكفاءة لهذا job.";
+              box.appendChild(wf);
+            }
+
+            if (!lr.ok || !lj.ok || !Array.isArray(lj.logs)) {
+              var errEl = document.createElement("div");
+              errEl.textContent = "تعذر جلب سجلات job.";
+              box.appendChild(errEl);
               return;
             }
-            if (!j.logs.length) {
-              box.textContent = "لا توجد logs لهذا job.";
+            if (!lj.logs.length) {
+              var emptyEl = document.createElement("div");
+              emptyEl.style.opacity = "0.85";
+              emptyEl.textContent = "لا توجد logs لهذا job.";
+              box.appendChild(emptyEl);
               return;
             }
-            j.logs.forEach(function (log) {
+            lj.logs.forEach(function (log) {
               var line = document.createElement("div");
               line.style.padding = "0.2rem 0";
               line.style.borderBottom = "1px solid rgba(223, 187, 106, 0.10)";

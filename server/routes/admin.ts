@@ -35,6 +35,7 @@ import {
   getUsageFilterOptions,
   getUsageSummary,
 } from "../services/aiFactory/usageAnalytics";
+import { buildFactoryJobEfficiencyReport } from "../services/aiFactory/efficiencyReport";
 import { getFactoryInspectionLogs, getFactoryJobErrorTimeline, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
 import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
 import type { FactoryLayer } from "../services/aiFactory/types";
@@ -1229,6 +1230,21 @@ export function registerAdminRoutes(app: Express): void {
         errorsTimeline,
         finalOutput: job.final_output_json ?? null,
       });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-factory/jobs/:id/efficiency", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const report = await buildFactoryJobEfficiencyReport(id);
+      res.json({ ok: true, report });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
     }
