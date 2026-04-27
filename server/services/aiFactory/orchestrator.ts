@@ -1,5 +1,5 @@
 import { getPool } from "../../db/pool";
-import { runLayerModel } from "./modelManager";
+import { getLayerConfigHealth, LayerExecutionError, runLayerModel } from "./modelManager";
 import { extractJsonArray, normalizeFactoryQuestion, normalizeFactoryQuestionsLenient } from "./utils";
 import type {
   FactoryAuditReport,
@@ -395,7 +395,12 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     lastLayer: "architect",
   });
 
+  let failedLayer: FactoryLayer | null = "architect";
   try {
+    const architectHealth = await getLayerConfigHealth("architect");
+    if (architectHealth.status === "fail") {
+      throw new Error(`architect_preflight_failed:${architectHealth.reasons.join("|")}`);
+    }
     const context = await readSubcategoryContext(job.subcategory_key);
 
     const architectPrompt = buildArchitectPrompt({
@@ -420,6 +425,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       model: architect.modelName,
     });
 
+    failedLayer = "creator";
     await setJobState(job.id, { currentLayer: "creator" });
     await refreshPipelineState(job.subcategory_key, {
       lastJobId: job.id,
@@ -453,6 +459,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       model: creator.modelName,
     });
 
+    failedLayer = "auditor";
     await setJobState(job.id, { currentLayer: "auditor" });
     await refreshPipelineState(job.subcategory_key, {
       lastJobId: job.id,
@@ -479,6 +486,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       model: auditor.modelName,
     });
 
+    failedLayer = "refiner";
     await setJobState(job.id, { currentLayer: "refiner" });
     await refreshPipelineState(job.subcategory_key, {
       lastJobId: job.id,
@@ -538,10 +546,20 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       inserted,
       model: refiner.modelName,
     });
+    failedLayer = null;
   } catch (error) {
     const errMessage = error instanceof Error ? error.message : "unknown_error";
-    await appendJobLog(job.id, "error", "Job failed", undefined, {
+    const layerMeta = error instanceof LayerExecutionError ? error.meta : null;
+    await appendJobLog(job.id, "error", "Job failed", failedLayer ?? undefined, {
       error: errMessage,
+      failedLayer: failedLayer ?? layerMeta?.layer ?? null,
+      providerCode: layerMeta?.providerCode ?? null,
+      retryable: layerMeta?.retryable ?? null,
+      attempt: layerMeta?.attempt ?? null,
+      maxAttempts: layerMeta?.maxAttempts ?? null,
+      modelName: layerMeta?.modelName ?? null,
+      apiVersion: layerMeta?.apiVersion ?? null,
+      providerMessage: layerMeta?.providerMessage ?? null,
     });
     if (job.attempt_count + 1 < job.max_attempts) {
       const backoffMinutes = Math.min(30, Math.max(1, 2 ** (job.attempt_count + 1)));

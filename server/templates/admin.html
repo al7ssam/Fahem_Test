@@ -937,6 +937,7 @@
               <button type="button" class="btn" id="af-save-btn">حفظ الإعدادات</button>
               <button type="button" class="btn" id="af-model-save-btn">حفظ النماذج</button>
               <button type="button" class="btn btn-secondary" id="af-run-btn">توليد يدوي الآن</button>
+              <button type="button" class="btn btn-secondary" id="af-health-btn">فحص صحة طبقات AI</button>
               <button type="button" class="btn btn-secondary" id="af-refresh-jobs-btn">تحديث السجل</button>
             </div>
             <div class="factory-progress"><span id="af-progress-bar"></span></div>
@@ -948,6 +949,7 @@
             </div>
             <div class="factory-log-box" id="af-jobs-log"></div>
             <div class="factory-log-box" id="af-job-details"></div>
+            <div class="factory-log-box" id="af-health-log"></div>
             <div class="msg" id="af-msg"></div>
           </div>
         </div>
@@ -2680,6 +2682,22 @@
           el.textContent = t || "";
           el.className = "msg " + (ok ? "ok" : "err");
         }
+        function errorHintFromText(text) {
+          var t = String(text || "");
+          if (t.includes("(429)") || t.includes("provider_429") || t.includes("quota") || t.includes("rate_limit")) {
+            return "اقتراح: تم الوصول لحد الاستخدام. انتظر قليلاً أو خفّض الحمل/غيّر المفتاح.";
+          }
+          if (t.includes("(404)") || t.includes("provider_404")) {
+            return "اقتراح: تحقق من اسم الموديل أو نسخة API المختارة.";
+          }
+          if (t.includes("(401)") || t.includes("(403)") || t.includes("provider_401_403")) {
+            return "اقتراح: تحقق من صلاحية GEMINI_API_KEY وأنه غير منتهي.";
+          }
+          if (t.includes("missing_api_key_env")) {
+            return "اقتراح: متغير API Key غير موجود في بيئة السيرفر.";
+          }
+          return "";
+        }
         function val(id) { return document.getElementById(id).value.trim(); }
         function supportsThinkingModel(modelName) {
           var m = String(modelName || "");
@@ -2922,6 +2940,42 @@
             msg("فشل التشغيل اليدوي.", false);
           }
         }
+        async function healthUi() {
+          var box = document.getElementById("af-health-log");
+          box.innerHTML = "";
+          try {
+            var cfgRes = await fetch("/api/admin/ai-factory/health/config", { headers: { "X-Admin-Secret": secret() } });
+            var cfg = await cfgRes.json().catch(function () { return {}; });
+            if (!cfgRes.ok || !cfg.ok || !Array.isArray(cfg.items)) throw new Error("health_config_failed");
+            var probeRes = await fetch("/api/admin/ai-factory/health/probe", { method: "POST", headers: hdr(), body: JSON.stringify({}) });
+            var probe = await probeRes.json().catch(function () { return {}; });
+            var probeItems = probeRes.ok && probe.ok && Array.isArray(probe.items) ? probe.items : [];
+            var probeMap = {};
+            probeItems.forEach(function (p) { probeMap[p.layer] = p; });
+            cfg.items.forEach(function (c) {
+              var p = probeMap[c.layer] || null;
+              var line = document.createElement("div");
+              line.style.padding = "0.3rem 0";
+              line.style.borderBottom = "1px solid rgba(223, 187, 106, 0.1)";
+              var providerCode = p && p.providerCode ? String(p.providerCode) : "-";
+              var probeError = p && p.ok === false ? String(p.error || "probe_failed") : "ok";
+              var hint = errorHintFromText(probeError);
+              line.textContent =
+                "[" + String(c.layer) + "] status=" + String(c.status) +
+                " | model=" + String(c.modelName) +
+                " | api=" + String(c.apiVersion) +
+                " | env=" + (c.envPresent ? "ok" : "missing") +
+                " | code=" + providerCode +
+                " | probe=" + probeError +
+                (hint ? " | " + hint : "");
+              box.appendChild(line);
+            });
+            msg("تم تنفيذ فحص الصحة للطبقات.", true);
+          } catch (e) {
+            box.textContent = "تعذر تنفيذ فحص الصحة.";
+            msg("تعذر تنفيذ فحص الصحة.", false);
+          }
+        }
         function renderJobs(items) {
           var box = document.getElementById("af-jobs-log");
           box.innerHTML = "";
@@ -2936,7 +2990,14 @@
             var summary = document.createElement("div");
             summary.style.cursor = "pointer";
             summary.style.marginBottom = "0.3rem";
-            summary.textContent = "#" + j.id + " | " + j.status + " | " + j.subcategoryKey + " | layer: " + (j.currentLayer || "-");
+            var hint = errorHintFromText(j.lastError || "");
+            summary.textContent =
+              "#" + j.id +
+              " | " + j.status +
+              " | " + j.subcategoryKey +
+              " | layer: " + (j.currentLayer || "-") +
+              (j.lastError ? " | error: " + j.lastError : "") +
+              (hint ? " | " + hint : "");
             summary.addEventListener("click", function () { loadJobLogs(j.id); });
             var inspectBtn = document.createElement("button");
             inspectBtn.type = "button";
@@ -2990,6 +3051,7 @@
         document.getElementById("af-save-btn").addEventListener("click", saveFactorySettingsUi);
         document.getElementById("af-model-save-btn").addEventListener("click", saveModelsUi);
         document.getElementById("af-run-btn").addEventListener("click", runNowUi);
+        document.getElementById("af-health-btn").addEventListener("click", healthUi);
         document.getElementById("af-refresh-jobs-btn").addEventListener("click", refreshJobs);
         setInterval(refreshJobs, 10000);
       })();

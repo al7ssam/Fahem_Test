@@ -79,6 +79,25 @@ type ModelCallResult = {
   provider: string;
 };
 
+export type LayerFailureMeta = {
+  layer: FactoryLayer;
+  providerCode: string | null;
+  retryable: boolean;
+  attempt: number;
+  maxAttempts: number;
+  modelName: string;
+  apiVersion: "v1" | "v1beta" | null;
+  providerMessage: string;
+};
+
+export class LayerExecutionError extends Error {
+  readonly meta: LayerFailureMeta;
+  constructor(message: string, meta: LayerFailureMeta) {
+    super(message);
+    this.meta = meta;
+  }
+}
+
 class RateLimitError extends Error {
   readonly retryAfterMs: number;
   constructor(message: string, retryAfterMs: number) {
@@ -137,6 +156,16 @@ function mapUnknownErrorToProviderError(error: unknown, ctx?: { modelId?: string
   return new Error(`provider_error:${short}${suffix}`);
 }
 
+function extractProviderCodeFromMessage(input: string): string | null {
+  const m = input.match(/\b(4\d{2}|5\d{2}|429|503)\b/);
+  if (m?.[1]) return m[1];
+  if (input.includes("provider_429")) return "429";
+  if (input.includes("provider_503")) return "503";
+  const http = input.match(/provider_http_(\d{3})/);
+  if (http?.[1]) return http[1];
+  return null;
+}
+
 /**
  * Maps SDK / HTTP failures to RateLimitError where backoff helps, else a short Error for last_error.
  * @google/generative-ai is legacy; Google recommends @google/genai for long-term support.
@@ -187,6 +216,7 @@ function isNonRetryableLayerError(error: unknown): boolean {
   return (
     error.message.startsWith("provider_404") ||
     error.message.startsWith("provider_401_403") ||
+    error.message.includes("_disabled") ||
     error.message.startsWith("unsupported_") ||
     error.message.startsWith("missing_")
   );
@@ -351,23 +381,113 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
   }
 }
 
+function currentApiVersionForConfig(config: LayerModelConfig): "v1" | "v1beta" {
+  const normalizedId = normalizeGeminiModelId(config.modelName);
+  return selectApiVersion(normalizedId, config.reasoningLevel);
+}
+
+export type LayerConfigHealth = {
+  layer: FactoryLayer;
+  status: "ok" | "warn" | "fail";
+  reasons: string[];
+  provider: string;
+  modelName: string;
+  apiVersion: "v1" | "v1beta";
+  apiKeyEnv: string;
+  envPresent: boolean;
+  isEnabled: boolean;
+  reasoningLevel: FactoryReasoningLevel;
+};
+
+export async function getLayerConfigHealth(layer: FactoryLayer): Promise<LayerConfigHealth> {
+  const config = await readLayerConfig(layer);
+  const reasons: string[] = [];
+  const envPresent = Boolean(getEnvValue(config.apiKeyEnv));
+  const apiVersion = currentApiVersionForConfig(config);
+  if (!envPresent) reasons.push(`missing_api_key_env_${config.apiKeyEnv}`);
+  if (config.provider !== "gemini") reasons.push(`unsupported_provider_${config.provider}`);
+  if (config.reasoningLevel !== "none" && !supportsThinkingLevel(config.modelName)) {
+    reasons.push("reasoning_level_not_supported_by_model");
+  }
+  return {
+    layer,
+    status: reasons.length ? "fail" : "ok",
+    reasons,
+    provider: config.provider,
+    modelName: config.modelName,
+    apiVersion,
+    apiKeyEnv: config.apiKeyEnv,
+    envPresent,
+    isEnabled: config.isEnabled,
+    reasoningLevel: config.reasoningLevel,
+  };
+}
+
+export async function probeLayerModel(layer: FactoryLayer): Promise<
+  | {
+      ok: true;
+      layer: FactoryLayer;
+      status: "ok";
+      providerCode: null;
+      latencyMs: number;
+      provider: string;
+      modelName: string;
+      apiVersion: "v1" | "v1beta";
+    }
+  | {
+      ok: false;
+      layer: FactoryLayer;
+      status: "fail";
+      providerCode: string | null;
+      latencyMs: number;
+      provider: string | null;
+      modelName: string | null;
+      apiVersion: "v1" | "v1beta" | null;
+      error: string;
+      retryable: boolean;
+    }
+> {
+  const started = Date.now();
+  let cfg: LayerModelConfig | null = null;
+  try {
+    cfg = await readLayerConfig(layer);
+    await runLayerModel(layer, "Return exactly the word OK.");
+    return {
+      ok: true,
+      layer,
+      status: "ok",
+      providerCode: null,
+      latencyMs: Date.now() - started,
+      provider: cfg.provider,
+      modelName: cfg.modelName,
+      apiVersion: currentApiVersionForConfig(cfg),
+    };
+  } catch (error) {
+    const meta = error instanceof LayerExecutionError ? error.meta : null;
+    return {
+      ok: false,
+      layer,
+      status: "fail",
+      providerCode: meta?.providerCode ?? (error instanceof Error ? extractProviderCodeFromMessage(error.message) : null),
+      latencyMs: Date.now() - started,
+      provider: meta?.modelName ? "gemini" : cfg?.provider ?? null,
+      modelName: meta?.modelName ?? cfg?.modelName ?? null,
+      apiVersion: meta?.apiVersion ?? (cfg ? currentApiVersionForConfig(cfg) : null),
+      error: error instanceof Error ? error.message : "probe_failed",
+      retryable: meta?.retryable ?? false,
+    };
+  }
+}
+
 export async function runLayerModel(layer: FactoryLayer, prompt: string): Promise<ModelCallResult> {
   const config = await readLayerConfig(layer);
+  const maxAttempts = 4;
   let attempt = 0;
   let waitMs = 1000;
   let lastActualError: Error | null = null;
+  const apiVersion = currentApiVersionForConfig(config);
 
-  function extractProviderCode(input: string): string | null {
-    const m = input.match(/\b(4\d{2}|5\d{2}|429|503)\b/);
-    if (m?.[1]) return m[1];
-    if (input.includes("provider_429")) return "429";
-    if (input.includes("provider_503")) return "503";
-    const http = input.match(/provider_http_(\d{3})/);
-    if (http?.[1]) return http[1];
-    return null;
-  }
-
-  while (attempt < 4) {
+  while (attempt < maxAttempts) {
     attempt += 1;
     try {
       if (config.provider !== "gemini") {
@@ -380,8 +500,19 @@ export async function runLayerModel(layer: FactoryLayer, prompt: string): Promis
       } else {
         lastActualError = new Error(String(error));
       }
+      const providerCode = extractProviderCodeFromMessage(lastActualError.message);
+      const retryable = !isNonRetryableLayerError(error);
       if (isNonRetryableLayerError(error)) {
-        throw error;
+        throw new LayerExecutionError(`${layer}_failed: ${lastActualError.message}${providerCode ? ` (${providerCode})` : ""}`, {
+          layer,
+          providerCode,
+          retryable,
+          attempt,
+          maxAttempts,
+          modelName: config.modelName,
+          apiVersion,
+          providerMessage: lastActualError.message,
+        });
       }
       if (error instanceof RateLimitError) {
         const backoffMs = Math.max(error.retryAfterMs, waitMs);
@@ -389,13 +520,36 @@ export async function runLayerModel(layer: FactoryLayer, prompt: string): Promis
         waitMs = Math.min(30_000, Math.floor(waitMs * 2));
         continue;
       }
-      if (attempt >= 4) throw error;
+      if (attempt >= maxAttempts) {
+        throw new LayerExecutionError(
+          `${layer}_failed: ${lastActualError.message}${providerCode ? ` (${providerCode})` : ""}`,
+          {
+            layer,
+            providerCode,
+            retryable,
+            attempt,
+            maxAttempts,
+            modelName: config.modelName,
+            apiVersion,
+            providerMessage: lastActualError.message,
+          },
+        );
+      }
       await sleep(waitMs);
       waitMs = Math.min(30_000, Math.floor(waitMs * 2));
     }
   }
   const reason = lastActualError?.message || "unknown_provider_error";
-  const code = extractProviderCode(reason);
+  const code = extractProviderCodeFromMessage(reason);
   const suffix = code ? ` (${code})` : "";
-  throw new Error(`${layer}_failed: ${reason}${suffix}`);
+  throw new LayerExecutionError(`${layer}_failed: ${reason}${suffix}`, {
+    layer,
+    providerCode: code,
+    retryable: true,
+    attempt: maxAttempts,
+    maxAttempts,
+    modelName: config.modelName,
+    apiVersion,
+    providerMessage: reason,
+  });
 }

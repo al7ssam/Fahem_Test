@@ -24,7 +24,9 @@ import {
   AI_FACTORY_AVAILABLE_REASONING_LEVELS,
   AI_FACTORY_DEFAULT_REASONING_LEVEL,
   AI_FACTORY_THINKING_LEVEL_MODEL_IDS,
+  getLayerConfigHealth,
   listModelConfigs,
+  probeLayerModel,
   saveModelConfig,
 } from "../services/aiFactory/modelManager";
 import { getFactoryInspectionLogs, getFactoryJobErrorTimeline, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
@@ -158,6 +160,10 @@ const factoryRunNowSchema = z.object({
   difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
   targetCount: z.number().int().min(1).max(100000).optional(),
   batchSize: z.number().int().min(1).max(200).optional(),
+});
+
+const factoryHealthProbeSchema = z.object({
+  layerName: z.enum(["architect", "creator", "auditor", "refiner"]).optional(),
 });
 
 const factoryModelPatchSchema = z.object({
@@ -923,6 +929,47 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/admin/ai-factory/health/config", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const layers: FactoryLayer[] = ["architect", "creator", "auditor", "refiner"];
+      const items = await Promise.all(layers.map((layer) => getLayerConfigHealth(layer)));
+      res.json({ ok: true, items });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "read_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  });
+
+  app.post("/api/admin/ai-factory/health/probe", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = factoryHealthProbeSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const targets: FactoryLayer[] = parsed.data.layerName
+        ? [parsed.data.layerName as FactoryLayer]
+        : ["architect", "creator", "auditor", "refiner"];
+      const items = await Promise.all(targets.map((layer) => probeLayerModel(layer)));
+      res.json({ ok: true, items });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "probe_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  });
+
   app.patch("/api/admin/ai-factory/models", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
     const body = req.body as { models?: unknown } | undefined;
@@ -954,8 +1001,12 @@ export function registerAdminRoutes(app: Express): void {
         });
       }
       res.json({ ok: true });
-    } catch {
-      res.status(500).json({ ok: false, error: "update_failed" });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "update_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
     }
   });
 
@@ -979,8 +1030,12 @@ export function registerAdminRoutes(app: Express): void {
         batchSize: parsed.data.batchSize ?? settings.batchSize,
       });
       res.json({ ok: true, jobId: result.jobId });
-    } catch {
-      res.status(500).json({ ok: false, error: "run_failed" });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "run_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
     }
   });
 
