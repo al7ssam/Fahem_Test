@@ -24,16 +24,22 @@ type JobRow = {
 
 const PEDAGOGICAL_NORMS_ANCHOR = [
   "NORMS_ANCHOR (DO NOT REDEFINE):",
+  "- The goal is Atomic Learning Units, not quiz-only assessment.",
+  "- Each question must teach a concept, explain it, and correct a likely misconception.",
+  "- Each question must be 100% self-contained.",
   "- questionType is independent from difficulty.",
   "- questionType allowed: conceptual | procedural | application.",
   "- difficulty allowed: easy | medium | hard.",
   "- difficulty is derived ONLY from measurable signals:",
-  "  isAnswerExplicit (boolean), explicitFactCount (integer), crossConceptCount (integer).",
+  "  conceptIdsReferenced.length and crossConceptCount.",
   "- Difficulty mapping:",
-  "  easy: isAnswerExplicit=true OR explicitFactCount<=1",
-  "  medium: explicitFactCount=2",
-  "  hard: explicitFactCount>=3 OR crossConceptCount>=2",
-  "- studyBody must include: [principle/rule] + [why correct] + [memory tip], in Arabic.",
+  "  easy: conceptIdsReferenced.length<=1 and crossConceptCount=0",
+  "  medium: conceptIdsReferenced.length=2 and crossConceptCount<=1",
+  "  hard: conceptIdsReferenced.length>=3 or crossConceptCount>=2",
+  "- question is rejected if answer is rote-only, adds no new learning, or studyBody is insufficient.",
+  "- studyBody must include exactly these sections in Arabic:",
+  "  [principle] + [why_correct] + [why_others_wrong] + [memory_tip].",
+  "- True/False mode (2 options) is allowed but must include a misconception and explanatory resolution.",
   "- Output must be pure JSON only, no markdown.",
 ].join("\n");
 const MAX_CORRECTION_CYCLE = 1;
@@ -232,6 +238,39 @@ async function readSubcategoryContext(subcategoryKey: string): Promise<{
   };
 }
 
+async function readGlobalQuestionTypeDistribution(subcategoryKey: string): Promise<{
+  global: { conceptual: number; procedural: number; application: number };
+  subcategory: { conceptual: number; procedural: number; application: number };
+}> {
+  const pool = getPool();
+  const [globalR, subR] = await Promise.all([
+    pool.query<{ question_type: string; c: string }>(
+      `SELECT question_type, COUNT(*)::text AS c
+       FROM questions
+       WHERE question_type IN ('conceptual','procedural','application')
+       GROUP BY question_type`,
+    ),
+    pool.query<{ question_type: string; c: string }>(
+      `SELECT question_type, COUNT(*)::text AS c
+       FROM questions
+       WHERE subcategory_key = $1
+         AND question_type IN ('conceptual','procedural','application')
+       GROUP BY question_type`,
+      [subcategoryKey],
+    ),
+  ]);
+  const seed = { conceptual: 0, procedural: 0, application: 0 };
+  const toMap = (rows: Array<{ question_type: string; c: string }>) => {
+    const out = { ...seed };
+    for (const row of rows) {
+      const k = String(row.question_type || "") as keyof typeof seed;
+      if (k in out) out[k] = Number(row.c || 0);
+    }
+    return out;
+  };
+  return { global: toMap(globalR.rows), subcategory: toMap(subR.rows) };
+}
+
 function chooseDifficulty(mode: "mix" | "easy" | "medium" | "hard", index: number): "easy" | "medium" | "hard" {
   if (mode === "easy" || mode === "medium" || mode === "hard") return mode;
   const order: Array<"easy" | "medium" | "hard"> = ["easy", "medium", "hard"];
@@ -278,6 +317,10 @@ function buildCreatorPrompt(args: {
   batchSize: number;
   difficultyMode: "mix" | "easy" | "medium" | "hard";
   alreadyGenerated: number;
+  globalTypeDistribution: {
+    global: { conceptual: number; procedural: number; application: number };
+    subcategory: { conceptual: number; procedural: number; application: number };
+  };
 }): string {
   return [
     args.architectPrompt,
@@ -288,18 +331,34 @@ function buildCreatorPrompt(args: {
     `Subcategory key must be exactly: ${args.subcategoryKey}`,
     `Difficulty mode: ${args.difficultyMode}`,
     "If difficulty mode is mix, distribute easy/medium/hard fairly.",
+    `Current global questionType distribution: ${JSON.stringify(args.globalTypeDistribution.global)}`,
+    `Current subcategory questionType distribution: ${JSON.stringify(args.globalTypeDistribution.subcategory)}`,
+    "If any questionType is below healthy floor in recent distribution, compensate in this batch without violating correctness.",
     "Enforce pedagogical question type distribution per batch as close as possible:",
     "- 30% conceptual",
     "- 30% procedural",
     "- 40% application",
     "Every question must include questionType with one of: conceptual, procedural, application.",
-    "Every question must include difficultySignals object with:",
-    "{ isAnswerExplicit: boolean, explicitFactCount: number, crossConceptCount: number }",
+    "Every question must include conceptIdsReferenced (string[]), and crossConceptCount number.",
     "DO NOT infer difficulty from questionType.",
-    "studyBody must be a micro-lesson with mandatory 3-part structure:",
-    "1) Scientific principle/rule",
-    "2) Why the answer is correct",
-    "3) Quick memory tip",
+    "Each question must satisfy at least one learning-value condition (to be verified by OutputGate):",
+    "- concept_introduced OR concept_clarified OR misconception_corrected OR concept_applied_new_context.",
+    "studyBody must include mandatory 4-part structure:",
+    "1) [principle]",
+    "2) [why_correct]",
+    "3) [why_others_wrong]",
+    "4) [memory_tip]",
+    "Self-contained rules:",
+    "- studyBody must include a definition/rule covering target concept.",
+    "- studyBody must include explanation mapped directly to the correct option.",
+    "Distractors rules:",
+    "- Wrong options must represent common mistakes, not random noise.",
+    "- For each distractor: sharedConceptWithCorrect >= 1 and sameSubcategoryKey = true.",
+    "- Each distractor must not be trivially eliminable.",
+    "Application rule:",
+    "- Reject fake application where answer is directly explicit in prompt.",
+    "True/False rule:",
+    "- 2 options are allowed only if statement requires explanation and includes a likely misconception.",
     "Write prompts and studyBody in an active-recall/flashcard-friendly style.",
     `Already generated in current run: ${args.alreadyGenerated}`,
     "Return ONLY valid JSON array.",
@@ -318,6 +377,15 @@ function buildAuditorPrompt(questions: FactoryQuestion[], validationErrors: Fact
     "Check schema validity and value constraints.",
     "Check questionType/difficulty independence.",
     "Use confidence and severity for each issue.",
+    "Mandatory issue codes to detect:",
+    "- rote_question (blocking)",
+    "- fake_application (blocking)",
+    "- no_new_learning (blocking)",
+    "- studyBody_missing_explanation (blocking)",
+    "- weak_distractors (non_blocking)",
+    "- weak_true_false_statement (blocking)",
+    "- true_false_without_justification (blocking)",
+    "- ambiguous_truth_value (blocking)",
     `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
     "Return ONLY valid JSON object with fields:",
     "{",
@@ -341,6 +409,10 @@ function buildRefinerPrompt(
     "ROLE CONSTRAINT: Execution-only.",
     "Apply patches exactly. Do not reinterpret, do not add new patches, do not rebalance distributions.",
     "If a patch would break schema, skip that patch and keep object valid.",
+    "If question is rote, add explanatory context.",
+    "If distractors are weak, replace with realistic same-domain misconceptions.",
+    "If studyBody is missing required parts, complete the 4-part structure.",
+    "For true/false, ensure truth-condition is unambiguous and misconception is explicitly resolved.",
     "Return ONLY valid JSON array.",
     "Do not wrap in markdown fences.",
     "No commentary before or after JSON.",
@@ -483,14 +555,131 @@ function readDifficultySignals(question: FactoryQuestion): DifficultySignals | n
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
   const isAnswerExplicit = Boolean(o.isAnswerExplicit);
-  const explicitFactCount = Number(o.explicitFactCount);
+  const explicitFactCount = Number(o.explicitFactCount ?? 0);
   const crossConceptCount = Number(o.crossConceptCount);
-  if (!Number.isFinite(explicitFactCount) || !Number.isFinite(crossConceptCount)) return null;
+  if (!Number.isFinite(crossConceptCount)) return null;
+  const safeExplicit = !Number.isFinite(explicitFactCount) ? 0 : Math.max(0, Math.floor(explicitFactCount));
   return {
     isAnswerExplicit,
-    explicitFactCount: Math.max(0, Math.floor(explicitFactCount)),
+    explicitFactCount: safeExplicit,
     crossConceptCount: Math.max(0, Math.floor(crossConceptCount)),
   };
+}
+
+function setFrom(arr: string[]): Set<string> {
+  return new Set(arr.map((x) => String(x || "").trim()).filter(Boolean));
+}
+
+function tokenizeArabicAndLatin(input: string): string[] {
+  return String(input || "")
+    .toLowerCase()
+    .split(/[^a-z0-9\u0600-\u06FF_]+/g)
+    .map((x) => x.trim())
+    .filter((x) => x.length > 1);
+}
+
+function extractConceptIdsFromText(text: string, conceptIds: string[]): Set<string> {
+  const lowered = String(text || "").toLowerCase();
+  const out = new Set<string>();
+  for (const id of conceptIds) {
+    const token = String(id || "").trim().toLowerCase();
+    if (!token) continue;
+    if (lowered.includes(token)) out.add(token);
+  }
+  return out;
+}
+
+function hasLogicalConnector(text: string): boolean {
+  return /(because|therefore|thus|نتيجة|لذلك|بسبب|يؤدي إلى|لان|لأن)/i.test(String(text || ""));
+}
+
+function splitStudyBodySections(text: string): {
+  principle: string;
+  whyCorrect: string;
+  whyOthersWrong: string;
+  memoryTip: string;
+} | null {
+  const raw = String(text || "");
+  const principleM = raw.match(/\[principle\]([\s\S]*?)(?=\[why_correct\]|$)/i);
+  const whyCorrectM = raw.match(/\[why_correct\]([\s\S]*?)(?=\[why_others_wrong\]|$)/i);
+  const whyOthersM = raw.match(/\[why_others_wrong\]([\s\S]*?)(?=\[memory_tip\]|$)/i);
+  const memoryM = raw.match(/\[memory_tip\]([\s\S]*?)$/i);
+  if (!principleM || !whyCorrectM || !whyOthersM || !memoryM) return null;
+  return {
+    principle: principleM[1].trim(),
+    whyCorrect: whyCorrectM[1].trim(),
+    whyOthersWrong: whyOthersM[1].trim(),
+    memoryTip: memoryM[1].trim(),
+  };
+}
+
+type GateIssue = { code: string; severity: "blocking" | "warning"; note: string };
+
+function evaluateQuestionGateIssues(question: FactoryQuestion): GateIssue[] {
+  const issues: GateIssue[] = [];
+  const conceptIds = Array.isArray(question.conceptIdsReferenced) ? question.conceptIdsReferenced : [];
+  const promptConcepts = extractConceptIdsFromText(question.prompt, conceptIds);
+  const studyConcepts = extractConceptIdsFromText(question.studyBody, conceptIds);
+  const sections = splitStudyBodySections(question.studyBody);
+  if (!sections) {
+    issues.push({ code: "studyBody_missing_explanation", severity: "blocking", note: "missing required sections" });
+    return issues;
+  }
+
+  const conceptIntroduced = [...studyConcepts].some((x) => !promptConcepts.has(x));
+  const conceptClarified =
+    [...promptConcepts].some((x) => studyConcepts.has(x)) &&
+    /(يعني|هو|تعريف|قاعدة|المقصود)/i.test(sections.principle);
+  const misconceptionCorrected =
+    sections.whyOthersWrong.length > 10 &&
+    /(خاطئ|غير صحيح|خطأ|ليس صحيح|لا يصح)/i.test(sections.whyOthersWrong);
+  const contextShift =
+    JSON.stringify([...promptConcepts].sort()) !== JSON.stringify([...studyConcepts].sort());
+  const conceptAppliedNewContext = studyConcepts.size > 0 && contextShift;
+  const learningValueScore = Number(conceptIntroduced) + Number(conceptClarified) + Number(misconceptionCorrected) + Number(conceptAppliedNewContext);
+  const roteQuestion = question.options.length >= 2 && sections.whyCorrect.length < 20;
+  const strengthOk = hasLogicalConnector(sections.whyCorrect);
+
+  if (learningValueScore < 1 || roteQuestion || !strengthOk) {
+    issues.push({ code: "no_new_learning", severity: "blocking", note: "insufficient learning value" });
+  }
+  if (learningValueScore === 1 && !(misconceptionCorrected || conceptClarified)) {
+    issues.push({ code: "no_new_learning", severity: "blocking", note: "edge-case weak signal" });
+  }
+  const signals = readDifficultySignals(question);
+  if ((signals?.isAnswerExplicit ?? false) && !(misconceptionCorrected || conceptClarified)) {
+    issues.push({ code: "rote_question", severity: "blocking", note: "explicit answer without educational correction" });
+  }
+
+  // distractor checks
+  const correct = question.options[question.correctIndex] || "";
+  const correctConcepts = extractConceptIdsFromText(correct, conceptIds);
+  for (let i = 0; i < question.options.length; i += 1) {
+    if (i === question.correctIndex) continue;
+    const d = question.options[i];
+    const dConcepts = extractConceptIdsFromText(d, conceptIds);
+    const shared = [...dConcepts].filter((x) => correctConcepts.has(x)).length;
+    const notTriviallyEliminable = tokenizeArabicAndLatin(d).length >= 2;
+    if (shared < 1 || !notTriviallyEliminable) {
+      issues.push({ code: "weak_distractors", severity: "warning", note: `weak distractor at option ${i}` });
+    }
+  }
+
+  // true/false checks
+  if (question.options.length === 2) {
+    const normalized = question.options.map((x) => x.trim().toLowerCase());
+    const hasTfPair =
+      (normalized.includes("صح") && normalized.includes("خطأ")) ||
+      (normalized.includes("true") && normalized.includes("false"));
+    if (!hasTfPair) {
+      issues.push({ code: "ambiguous_truth_value", severity: "blocking", note: "2-options question not true/false pair" });
+    }
+    if (!misconceptionCorrected) {
+      issues.push({ code: "true_false_without_justification", severity: "blocking", note: "missing misconception resolution" });
+    }
+  }
+
+  return issues;
 }
 
 function applyAuditorPatchesToQuestions(questions: FactoryQuestion[], audit: FactoryAuditReport): FactoryQuestion[] {
@@ -522,17 +711,31 @@ function ensureQuestionTypeCoverage(questions: FactoryQuestion[], minPct = 0.2):
 }
 
 function runOutputGateChecks(questions: FactoryQuestion[]): void {
+  const warnings: GateIssue[] = [];
   for (let i = 0; i < questions.length; i += 1) {
     const q = questions[i];
+    const issues = evaluateQuestionGateIssues(q);
+    const blocking = issues.filter((x) => x.severity === "blocking");
+    if (blocking.length) {
+      throw new Error(`output_gate_blocking_issue_at_${i + 1}:${blocking.map((x) => x.code).join("|")}`);
+    }
+    warnings.push(...issues.filter((x) => x.severity === "warning"));
     const signals = readDifficultySignals(q);
     if (signals) {
-      const expected = deriveDifficultyFromSignals(signals);
+      const conceptCount = Array.isArray(q.conceptIdsReferenced) ? q.conceptIdsReferenced.length : 0;
+      let expected: "easy" | "medium" | "hard" = "medium";
+      if (conceptCount <= 1 && signals.crossConceptCount === 0) expected = "easy";
+      else if (conceptCount === 2 && signals.crossConceptCount <= 1) expected = "medium";
+      else if (conceptCount >= 3 || signals.crossConceptCount >= 2) expected = "hard";
       if (q.difficulty !== expected) {
         throw new Error(`output_gate_difficulty_mismatch_at_${i + 1}:expected_${expected}:got_${q.difficulty}`);
       }
     }
   }
   ensureQuestionTypeCoverage(questions, 0.2);
+  if (warnings.length > 0) {
+    console.warn("[output_gate] warnings", warnings.slice(0, 10));
+  }
 }
 
 async function insertQuestionsAllOrNothing(questions: FactoryQuestion[]): Promise<number> {
@@ -677,6 +880,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       batchSize: job.batch_size,
       difficultyMode: job.difficulty_mode,
       alreadyGenerated: 0,
+      globalTypeDistribution: await readGlobalQuestionTypeDistribution(job.subcategory_key),
     });
     await appendJobLog(job.id, "info", "Creator layer started", "creator");
     const creator = await runLayerModel("creator", creatorPrompt);
