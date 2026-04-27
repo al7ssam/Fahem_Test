@@ -60,6 +60,16 @@ async function appendInspectionLog(input: {
   );
 }
 
+async function saveJobFinalOutput(jobId: number, questions: FactoryQuestion[]): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `UPDATE ai_factory_jobs
+     SET final_output_json = $1::jsonb, updated_at = NOW()
+     WHERE id = $2`,
+    [JSON.stringify(questions), jobId],
+  );
+}
+
 async function setJobState(
   jobId: number,
   data: {
@@ -451,6 +461,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         difficulty: chooseDifficulty(job.difficulty_mode, idx),
       }));
     }
+    await saveJobFinalOutput(job.id, finalQuestions);
     const inserted = await insertQuestionsAllOrNothing(finalQuestions);
 
     await setJobState(job.id, {
@@ -598,6 +609,39 @@ export async function getFactoryJobLogs(jobId: number): Promise<Array<{
     id: row.id,
     layerName: row.layer_name,
     level: row.level,
+    message: row.message,
+    details: row.details,
+    createdAt: row.created_at,
+  }));
+}
+
+export type FactoryJobErrorTimelineEntry = {
+  id: number;
+  layerName: string | null;
+  message: string;
+  details: unknown;
+  createdAt: string;
+};
+
+export async function getFactoryJobErrorTimeline(jobId: number): Promise<FactoryJobErrorTimelineEntry[]> {
+  const pool = getPool();
+  const r = await pool.query<{
+    id: number;
+    layer_name: string | null;
+    message: string;
+    details: unknown;
+    created_at: string;
+  }>(
+    `SELECT id, layer_name, message, details, created_at
+     FROM ai_factory_job_logs
+     WHERE job_id = $1
+       AND level = 'error'
+     ORDER BY id ASC`,
+    [jobId],
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    layerName: row.layer_name,
     message: row.message,
     details: row.details,
     createdAt: row.created_at,

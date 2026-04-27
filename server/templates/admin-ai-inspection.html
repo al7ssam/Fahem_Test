@@ -99,6 +99,52 @@
       .json-null { color: #cba6f7; }
       .msg { margin-top: 0.45rem; min-height: 1.2rem; }
       .muted { color: var(--muted); }
+      .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
+      .preview-shell {
+        margin-top: 0.7rem;
+        border: 1px solid rgba(223, 187, 106, 0.2);
+        border-radius: 0.8rem;
+        padding: 0.75rem;
+        background: rgba(8, 12, 24, 0.86);
+      }
+      .preview-phone {
+        border: 1px solid rgba(223, 187, 106, 0.2);
+        border-radius: 0.75rem;
+        background: rgba(25, 31, 57, 0.82);
+        padding: 0.7rem;
+      }
+      .preview-meta {
+        display: flex;
+        justify-content: space-between;
+        color: #dbc89f;
+        margin-bottom: 0.45rem;
+        font-size: 0.84rem;
+      }
+      .preview-prompt { font-size: 1rem; font-weight: 700; margin-bottom: 0.55rem; }
+      .preview-options { display: grid; grid-template-columns: 1fr; gap: 0.45rem; margin-bottom: 0.6rem; }
+      .preview-options.two-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .preview-option { border: 1px solid rgba(223, 187, 106, 0.23); border-radius: 0.6rem; padding: 0.48rem; background: rgba(17, 24, 39, 0.85); }
+      .preview-option.correct { border-color: rgba(52, 211, 153, 0.75); background: rgba(6, 78, 59, 0.35); }
+      .preview-study { border: 1px solid rgba(223, 187, 106, 0.18); border-radius: 0.6rem; padding: 0.58rem; background: rgba(10, 14, 27, 0.85); }
+      .preview-empty { color: #c9ba97; text-align: center; font-size: 0.9rem; padding: 1.1rem 0.3rem; }
+      .error-timeline-list {
+        display: grid;
+        gap: 0.5rem;
+        margin-top: 0.45rem;
+      }
+      .error-item {
+        border: 1px solid rgba(248, 113, 113, 0.35);
+        background: rgba(127, 29, 29, 0.2);
+        border-radius: 0.6rem;
+        padding: 0.55rem;
+      }
+      .error-item b { color: #fca5a5; }
+      .error-details {
+        margin-top: 0.35rem;
+        font-size: 0.82rem;
+        white-space: pre-wrap;
+        color: #f9d9d9;
+      }
     </style>
   </head>
   <body>
@@ -131,10 +177,40 @@
       </div>
 
       <div id="flow" class="flow"></div>
+
+      <div class="card">
+        <h3 class="layer-title" style="margin-bottom:0.35rem">تسلسل الأخطاء</h3>
+        <div class="muted" id="errors-meta">لا توجد أخطاء.</div>
+        <div id="errors-timeline" class="error-timeline-list"></div>
+      </div>
+
+      <div class="card">
+        <h3 class="layer-title" style="margin-bottom:0.35rem">المخرج النهائي (Normalized JSON)</h3>
+        <div class="muted" id="final-output-meta">لا يوجد مخرج نهائي بعد.</div>
+        <div class="btn-row">
+          <button id="preview-final-btn" type="button" disabled>عرض الأسئلة</button>
+        </div>
+        <div style="margin-top:0.55rem">
+          <pre id="final-output-json" class="code"></pre>
+        </div>
+
+        <div class="preview-shell" id="final-preview-shell" hidden>
+          <div class="preview-phone" id="final-preview-phone">
+            <div class="preview-empty">لا توجد بيانات للمعاينة.</div>
+          </div>
+          <div class="btn-row">
+            <button type="button" id="final-prev-btn">السابق</button>
+            <button type="button" id="final-next-btn">التالي</button>
+            <button type="button" id="final-close-btn">إغلاق المعاينة</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <script>
       (function () {
+        var finalItems = [];
+        var finalIndex = 0;
         function esc(s) {
           return String(s ?? "")
             .replace(/&/g, "&amp;")
@@ -200,6 +276,78 @@
             flow.appendChild(card);
           });
         }
+        function renderErrorsTimeline(items) {
+          var meta = document.getElementById("errors-meta");
+          var box = document.getElementById("errors-timeline");
+          box.innerHTML = "";
+          if (!items || !items.length) {
+            meta.textContent = "لا توجد أخطاء لهذا الـjob.";
+            return;
+          }
+          meta.textContent = "عدد الأخطاء: " + String(items.length) + " (مرتبة زمنيًا).";
+          items.forEach(function (e, idx) {
+            var row = document.createElement("div");
+            row.className = "error-item";
+            var detailsText = "";
+            if (e.details && typeof e.details === "object" && e.details.error) {
+              detailsText = String(e.details.error);
+            } else if (e.details) {
+              detailsText = JSON.stringify(e.details);
+            }
+            row.innerHTML =
+              "<div><b>#" + String(idx + 1) + "</b> | " + esc(e.createdAt || "-") + " | layer: " + esc(e.layerName || "-") + "</div>" +
+              "<div style='margin-top:0.25rem'>" + esc(e.message || "-") + "</div>" +
+              (detailsText ? "<div class='error-details'>" + esc(detailsText) + "</div>" : "");
+            box.appendChild(row);
+          });
+        }
+        function renderFinalOutput(finalOutput) {
+          var meta = document.getElementById("final-output-meta");
+          var pre = document.getElementById("final-output-json");
+          var btn = document.getElementById("preview-final-btn");
+          finalItems = Array.isArray(finalOutput) ? finalOutput : [];
+          finalIndex = 0;
+          if (!finalItems.length) {
+            meta.textContent = "لا يوجد مخرج نهائي بعد (قد يكون الـ job فشل أو لم يكتمل).";
+            pre.textContent = "";
+            btn.disabled = true;
+            document.getElementById("final-preview-shell").hidden = true;
+            return;
+          }
+          var p = syntaxHighlightJson(JSON.stringify(finalItems));
+          pre.innerHTML = p.html;
+          meta.textContent = "تم العثور على " + String(finalItems.length) + " سؤالًا نهائيًا.";
+          btn.disabled = false;
+          renderFinalPreview();
+        }
+        function renderFinalPreview() {
+          var phone = document.getElementById("final-preview-phone");
+          var prev = document.getElementById("final-prev-btn");
+          var next = document.getElementById("final-next-btn");
+          if (!finalItems.length) {
+            phone.innerHTML = '<div class="preview-empty">لا توجد بيانات للمعاينة.</div>';
+            prev.disabled = true;
+            next.disabled = true;
+            return;
+          }
+          if (finalIndex < 0) finalIndex = 0;
+          if (finalIndex >= finalItems.length) finalIndex = finalItems.length - 1;
+          var item = finalItems[finalIndex] || {};
+          var options = Array.isArray(item.options) ? item.options : [];
+          var correctIndex = Number(item.correctIndex);
+          var optsHtml = options.map(function (opt, i) {
+            var cls = "preview-option" + (i === correctIndex ? " correct" : "");
+            return '<div class="' + cls + '">' + esc(opt) + "</div>";
+          }).join("");
+          var optionsClass = options.length === 2 ? "preview-options two-options" : "preview-options";
+          phone.innerHTML =
+            '<div class="preview-meta"><span>السؤال ' + String(finalIndex + 1) + " / " + String(finalItems.length) + '</span><span>' + esc(item.difficulty || "-") + "</span></div>" +
+            '<div class="preview-prompt">' + esc(item.prompt || "") + "</div>" +
+            '<div class="' + optionsClass + '">' + optsHtml + "</div>" +
+            '<div class="preview-study"><b>بطاقة المذاكرة:</b><div style="margin-top:0.4rem">' + esc(item.studyBody || "") + "</div></div>";
+          prev.disabled = finalIndex <= 0;
+          next.disabled = finalIndex >= finalItems.length - 1;
+        }
         async function loadInspection() {
           var secret = document.getElementById("admin-secret").value.trim();
           var jobId = Number(document.getElementById("job-id").value || "0");
@@ -215,6 +363,8 @@
             if (!res.ok || !json.ok) throw new Error("read_failed");
             renderMeta(json.job || {});
             renderFlow(json.layers || []);
+            renderErrorsTimeline(json.errorsTimeline || []);
+            renderFinalOutput(json.finalOutput);
             msg.textContent = "تم تحميل بيانات الفحص.";
           } catch {
             msg.textContent = "تعذر تحميل بيانات الفحص.";
@@ -223,6 +373,23 @@
         document.getElementById("load-btn").addEventListener("click", loadInspection);
         document.getElementById("back-btn").addEventListener("click", function () {
           window.location.href = "/admin";
+        });
+        document.getElementById("preview-final-btn").addEventListener("click", function () {
+          document.getElementById("final-preview-shell").hidden = false;
+          renderFinalPreview();
+        });
+        document.getElementById("final-close-btn").addEventListener("click", function () {
+          document.getElementById("final-preview-shell").hidden = true;
+        });
+        document.getElementById("final-prev-btn").addEventListener("click", function () {
+          if (finalIndex <= 0) return;
+          finalIndex -= 1;
+          renderFinalPreview();
+        });
+        document.getElementById("final-next-btn").addEventListener("click", function () {
+          if (finalIndex >= finalItems.length - 1) return;
+          finalIndex += 1;
+          renderFinalPreview();
         });
         var params = new URLSearchParams(window.location.search);
         var jobIdParam = params.get("jobId");

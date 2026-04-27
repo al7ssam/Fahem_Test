@@ -8,9 +8,13 @@ import { getPool } from "../db/pool";
 import { getResultMessages } from "../db/resultCopy";
 import { Match } from "../game/Match";
 import {
+  countExpiredAiFactoryLogs,
   countExpiredQuestions,
+  getAiFactoryLogsCleanupSettings,
   getCleanupSettings,
+  performAiFactoryLogsCleanup,
   performCleanup,
+  updateAiFactoryLogsCleanupSettings,
   updateCleanupSettings,
 } from "../services/cleanup";
 import {
@@ -23,7 +27,7 @@ import {
   listModelConfigs,
   saveModelConfig,
 } from "../services/aiFactory/modelManager";
-import { getFactoryInspectionLogs, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
+import { getFactoryInspectionLogs, getFactoryJobErrorTimeline, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
 import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
 import type { FactoryLayer } from "../services/aiFactory/types";
 
@@ -133,6 +137,11 @@ const keysSettingsPatchSchema = z.object({
 });
 
 const cleanupSettingsPatchSchema = z.object({
+  autoDeleteEnabled: z.boolean(),
+  deletionThresholdDays: z.number().int().min(1).max(3650),
+});
+
+const aiFactoryLogsCleanupSettingsPatchSchema = z.object({
   autoDeleteEnabled: z.boolean(),
   deletionThresholdDays: z.number().int().min(1).max(3650),
 });
@@ -793,6 +802,79 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/admin/ai-factory-logs-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getAiFactoryLogsCleanupSettings();
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/ai-factory-logs-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = aiFactoryLogsCleanupSettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const settings = await updateAiFactoryLogsCleanupSettings(parsed.data);
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/ai-factory-logs-cleanup/preview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getAiFactoryLogsCleanupSettings();
+      const counts = await countExpiredAiFactoryLogs(settings.deletionThresholdDays);
+      res.json({
+        ok: true,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        jobLogsExpiredCount: counts.jobLogsDeletedCount,
+        inspectionLogsExpiredCount: counts.inspectionLogsDeletedCount,
+        expiredCount: counts.totalDeletedCount,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "preview_failed" });
+    }
+  });
+
+  app.post("/api/admin/ai-factory-logs-cleanup/run", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const result = await performAiFactoryLogsCleanup({ source: "manual", forceRun: true });
+      res.json({
+        ok: true,
+        deletionThresholdDays: result.thresholdDays,
+        jobLogsDeletedCount: result.jobLogsDeletedCount,
+        inspectionLogsDeletedCount: result.inspectionLogsDeletedCount,
+        deletedCount: result.totalDeletedCount,
+        runDate: result.runDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "cleanup_failed" });
+    }
+  });
+
   app.get("/api/admin/ai-factory/settings", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
     try {
@@ -959,12 +1041,13 @@ export function registerAdminRoutes(app: Express): void {
         attempt_count: number;
         max_attempts: number;
         last_error: string | null;
+        final_output_json: unknown;
         created_at: string;
         started_at: string | null;
         finished_at: string | null;
       }>(
         `SELECT id, subcategory_key, difficulty_mode, status, current_layer,
-                attempt_count, max_attempts, last_error, created_at, started_at, finished_at
+                attempt_count, max_attempts, last_error, final_output_json, created_at, started_at, finished_at
          FROM ai_factory_jobs
          WHERE id = $1
          LIMIT 1`,
@@ -976,6 +1059,7 @@ export function registerAdminRoutes(app: Express): void {
         return;
       }
       const layers = await getFactoryInspectionLogs(id);
+      const errorsTimeline = await getFactoryJobErrorTimeline(id);
       res.json({
         ok: true,
         job: {
@@ -992,6 +1076,8 @@ export function registerAdminRoutes(app: Express): void {
           finishedAt: job.finished_at,
         },
         layers,
+        errorsTimeline,
+        finalOutput: job.final_output_json ?? null,
       });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });

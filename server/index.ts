@@ -4,7 +4,12 @@ import cron from "node-cron";
 import { createApp } from "./app";
 import { config } from "./config";
 import { GameManager } from "./game/GameManager";
-import { maybeRunStartupCleanup, performCleanup } from "./services/cleanup";
+import {
+  maybeRunStartupAiFactoryLogsCleanup,
+  maybeRunStartupCleanup,
+  performAiFactoryLogsCleanup,
+  performCleanup,
+} from "./services/cleanup";
 import { aiFactoryRuntime } from "./services/aiFactory/runtime";
 
 if (!config.databaseUrl) {
@@ -16,6 +21,11 @@ function scheduleCleanupCron(): void {
   cron.schedule("0 3 * * *", async () => {
     try {
       await performCleanup({ source: "cron" });
+    } catch {
+      // detailed log is emitted inside cleanup service
+    }
+    try {
+      await performAiFactoryLogsCleanup({ source: "cron" });
     } catch {
       // detailed log is emitted inside cleanup service
     }
@@ -40,6 +50,11 @@ async function startServer(): Promise<void> {
 
   try {
     await maybeRunStartupCleanup();
+  } catch {
+    // detailed log is emitted inside cleanup service
+  }
+  try {
+    await maybeRunStartupAiFactoryLogsCleanup();
   } catch {
     // detailed log is emitted inside cleanup service
   }

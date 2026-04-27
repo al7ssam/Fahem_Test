@@ -842,6 +842,29 @@
       </div>
 
       <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="ai-factory-logs-cleanup-settings">
+          <span class="accordion-title">تنظيف سجلات مصنع الذكاء</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <label for="aflc-enabled">تفعيل الحذف التلقائي لسجلات المصنع</label>
+            <input id="aflc-enabled" type="checkbox" />
+            <label for="aflc-days">عدد أيام الاحتفاظ بالسجلات</label>
+            <input id="aflc-days" type="text" inputmode="numeric" value="30" />
+            <label for="aflc-last-run">آخر تشغيل ناجح</label>
+            <input id="aflc-last-run" type="text" value="—" disabled />
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="aflc-load-btn">تحميل</button>
+              <button type="button" class="btn" id="aflc-save-btn">حفظ</button>
+              <button type="button" class="btn btn-danger" id="aflc-run-btn">حذف سجلات المصنع القديمة الآن</button>
+            </div>
+            <div class="msg" id="aflc-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="ai-factory">
           <span class="accordion-title">مصنع المحتوى الذكي</span>
           <span class="accordion-icon">⌄</span>
@@ -1079,6 +1102,21 @@
           <button type="button" class="btn btn-danger" id="cleanup-confirm-btn">تأكيد الحذف</button>
         </div>
         <div class="msg" id="cleanup-modal-msg"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="ai-factory-logs-cleanup-modal" hidden>
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3 style="margin: 0">تأكيد حذف سجلات المصنع القديمة</h3>
+          <button type="button" id="ai-factory-logs-cleanup-close">✕</button>
+        </div>
+        <p id="ai-factory-logs-cleanup-preview-text" style="margin: 0.3rem 0 0.7rem"></p>
+        <div class="btn-row">
+          <button type="button" class="btn btn-secondary" id="ai-factory-logs-cleanup-cancel-btn">إلغاء</button>
+          <button type="button" class="btn btn-danger" id="ai-factory-logs-cleanup-confirm-btn">تأكيد الحذف</button>
+        </div>
+        <div class="msg" id="ai-factory-logs-cleanup-modal-msg"></div>
       </div>
     </div>
 
@@ -1972,6 +2010,150 @@
             setCleanupModalMsg("خطأ في الاتصال.", false);
           } finally {
             cleanupConfirmBtn.disabled = false;
+          }
+        });
+      })();
+
+      (function () {
+        var aflcLoad = document.getElementById("aflc-load-btn");
+        var aflcSave = document.getElementById("aflc-save-btn");
+        var aflcRun = document.getElementById("aflc-run-btn");
+        var aflcMsg = document.getElementById("aflc-msg");
+        var aflcEnabled = document.getElementById("aflc-enabled");
+        var aflcDays = document.getElementById("aflc-days");
+        var aflcLastRun = document.getElementById("aflc-last-run");
+        var aflcModal = document.getElementById("ai-factory-logs-cleanup-modal");
+        var aflcPreviewText = document.getElementById("ai-factory-logs-cleanup-preview-text");
+        var aflcModalMsg = document.getElementById("ai-factory-logs-cleanup-modal-msg");
+        var aflcConfirmBtn = document.getElementById("ai-factory-logs-cleanup-confirm-btn");
+        var aflcCancelBtn = document.getElementById("ai-factory-logs-cleanup-cancel-btn");
+        var aflcCloseBtn = document.getElementById("ai-factory-logs-cleanup-close");
+
+        function setAflcMsg(t, ok) { aflcMsg.textContent = t || ""; aflcMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function setAflcModalMsg(t, ok) { aflcModalMsg.textContent = t || ""; aflcModalMsg.className = "msg " + (ok ? "ok" : "err"); }
+        function secret() { return document.getElementById("admin-secret").value.trim(); }
+        function closeAflcModal() {
+          aflcModal.hidden = true;
+          setAflcModalMsg("", true);
+        }
+
+        async function loadAiFactoryLogsCleanupSettings() {
+          var s = secret();
+          if (!s) return setAflcMsg("أدخل مفتاح الإدارة.", false);
+          aflcLoad.disabled = true;
+          try {
+            var r = await fetch("/api/admin/ai-factory-logs-cleanup-settings", { headers: { "X-Admin-Secret": s } });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) {
+              aflcEnabled.checked = j.autoDeleteEnabled === true;
+              aflcDays.value = String(j.deletionThresholdDays ?? 30);
+              aflcLastRun.value = j.lastRunDate ? String(j.lastRunDate) : "—";
+              setAflcMsg("تم التحميل.", true);
+            } else {
+              setAflcMsg("تعذر التحميل.", false);
+            }
+          } catch (e) {
+            setAflcMsg("خطأ في الاتصال.", false);
+          } finally {
+            aflcLoad.disabled = false;
+          }
+        }
+
+        aflcLoad.addEventListener("click", loadAiFactoryLogsCleanupSettings);
+        aflcSave.addEventListener("click", async function () {
+          var s = secret();
+          if (!s) return setAflcMsg("أدخل مفتاح الإدارة.", false);
+          var days = parseInt(aflcDays.value, 10);
+          if (!days || days < 1) return setAflcMsg("عدد الأيام يجب أن يكون 1 أو أكثر.", false);
+          aflcSave.disabled = true;
+          try {
+            var r = await fetch("/api/admin/ai-factory-logs-cleanup-settings", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s },
+              body: JSON.stringify({
+                autoDeleteEnabled: aflcEnabled.checked,
+                deletionThresholdDays: days
+              })
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) {
+              aflcEnabled.checked = j.autoDeleteEnabled === true;
+              aflcDays.value = String(j.deletionThresholdDays ?? days);
+              aflcLastRun.value = j.lastRunDate ? String(j.lastRunDate) : "—";
+              setAflcMsg("تم حفظ الإعدادات.", true);
+            } else {
+              setAflcMsg("تعذر الحفظ.", false);
+            }
+          } catch (e) {
+            setAflcMsg("خطأ في الاتصال.", false);
+          } finally {
+            aflcSave.disabled = false;
+          }
+        });
+
+        aflcRun.addEventListener("click", async function () {
+          var s = secret();
+          if (!s) return setAflcMsg("أدخل مفتاح الإدارة.", false);
+          aflcRun.disabled = true;
+          try {
+            var previewResp = await fetch("/api/admin/ai-factory-logs-cleanup/preview", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s }
+            });
+            var previewJson = await previewResp.json().catch(function () { return {}; });
+            if (!previewResp.ok || !previewJson.ok) {
+              setAflcMsg("تعذر جلب معاينة الحذف.", false);
+              return;
+            }
+            var count = Number(previewJson.expiredCount || 0);
+            var jobLogsCount = Number(previewJson.jobLogsExpiredCount || 0);
+            var inspectionCount = Number(previewJson.inspectionLogsExpiredCount || 0);
+            var days = Number(previewJson.deletionThresholdDays || 30);
+            aflcPreviewText.textContent =
+              "سيتم حذف " + count + " سجلًا أقدم من " + days + " يومًا (Logs: " + jobLogsCount + ", Inspection: " + inspectionCount + "). هل تريد المتابعة؟";
+            aflcModal.hidden = false;
+          } catch (e) {
+            setAflcMsg("خطأ في الاتصال.", false);
+          } finally {
+            aflcRun.disabled = false;
+          }
+        });
+
+        aflcModal.addEventListener("click", function (e) {
+          if (e.target === aflcModal) closeAflcModal();
+        });
+        aflcCancelBtn.addEventListener("click", closeAflcModal);
+        aflcCloseBtn.addEventListener("click", closeAflcModal);
+        aflcConfirmBtn.addEventListener("click", async function () {
+          var s = secret();
+          if (!s) return setAflcModalMsg("أدخل مفتاح الإدارة.", false);
+          aflcConfirmBtn.disabled = true;
+          try {
+            var r = await fetch("/api/admin/ai-factory-logs-cleanup/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Admin-Secret": s }
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (r.ok && j.ok) {
+              setAflcMsg(
+                "تم حذف " +
+                  String(j.deletedCount || 0) +
+                  " سجل قديم (Logs: " +
+                  String(j.jobLogsDeletedCount || 0) +
+                  ", Inspection: " +
+                  String(j.inspectionLogsDeletedCount || 0) +
+                  ").",
+                true
+              );
+              aflcLastRun.value = j.runDate ? String(j.runDate) : "—";
+              closeAflcModal();
+            } else {
+              setAflcModalMsg("تعذر تنفيذ الحذف.", false);
+            }
+          } catch (e) {
+            setAflcModalMsg("خطأ في الاتصال.", false);
+          } finally {
+            aflcConfirmBtn.disabled = false;
           }
         });
       })();
