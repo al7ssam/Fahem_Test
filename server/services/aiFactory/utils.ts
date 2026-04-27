@@ -85,6 +85,7 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
   const studyBody = String(o.studyBody ?? o.study_body ?? "").trim();
   const subcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
   const difficulty = String(o.difficulty ?? "").trim().toLowerCase();
+  const questionType = mapQuestionTypeAlias(String(o.questionType ?? o.question_type ?? ""));
 
   if (!prompt) throw new Error(`question_${idx + 1}_missing_prompt`);
   if (!(options.length === 2 || options.length === 4)) {
@@ -99,6 +100,7 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
   if (difficulty !== "easy" && difficulty !== "medium" && difficulty !== "hard") {
     throw new Error(`question_${idx + 1}_invalid_difficulty`);
   }
+  if (!questionType) throw new Error(`question_${idx + 1}_invalid_question_type`);
   return {
     prompt,
     options,
@@ -106,6 +108,7 @@ export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQue
     studyBody,
     subcategoryKey,
     difficulty,
+    questionType,
   };
 }
 
@@ -116,6 +119,19 @@ function mapDifficultyAlias(raw: string): FactoryQuestion["difficulty"] | null {
   if (v === "سهل") return "easy";
   if (v === "متوسط") return "medium";
   if (v === "صعب") return "hard";
+  return null;
+}
+
+function mapQuestionTypeAlias(raw: string): FactoryQuestion["questionType"] | null {
+  const v = String(raw || "").trim().toLowerCase();
+  if (!v) return null;
+  if (v === "conceptual" || v === "procedural" || v === "application") return v;
+  if (v === "concept" || v === "concepts" || v === "conceptual_question") return "conceptual";
+  if (v === "procedure" || v === "process" || v === "procedural_question") return "procedural";
+  if (v === "applied" || v === "practical" || v === "application_question") return "application";
+  if (v === "مفاهيمي" || v === "مفاهيمي") return "conceptual";
+  if (v === "إجرائي" || v === "اجرائي") return "procedural";
+  if (v === "تطبيقي") return "application";
   return null;
 }
 
@@ -161,6 +177,7 @@ export function normalizeFactoryQuestionsLenient(
     const studyBody = String(o.studyBody ?? o.study_body ?? "").trim();
     const rawSubcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
     const mappedDifficulty = mapDifficultyAlias(String(o.difficulty ?? ""));
+    const mappedQuestionType = mapQuestionTypeAlias(String(o.questionType ?? o.question_type ?? ""));
     const forcedDifficulty =
       options.forcedDifficultyMode === "mix" ? null : options.forcedDifficultyMode;
 
@@ -265,6 +282,32 @@ export function normalizeFactoryQuestionsLenient(
       });
     }
 
+    let questionType: FactoryQuestion["questionType"];
+    if (mappedQuestionType) {
+      questionType = mappedQuestionType;
+      const rawQuestionType = String(o.questionType ?? o.question_type ?? "").trim().toLowerCase();
+      if (rawQuestionType && rawQuestionType !== mappedQuestionType) {
+        pushValidationError(validationErrors, {
+          code: "question_type_alias_normalized",
+          field: "questionType",
+          index: idx,
+          message: `question_${idx + 1}_question_type_alias_normalized`,
+          before: o.questionType ?? o.question_type ?? null,
+          after: mappedQuestionType,
+        });
+      }
+    } else {
+      questionType = "application";
+      pushValidationError(validationErrors, {
+        code: "invalid_question_type",
+        field: "questionType",
+        index: idx,
+        message: `question_${idx + 1}_invalid_question_type`,
+        before: o.questionType ?? o.question_type ?? null,
+        after: questionType,
+      });
+    }
+
     questions.push({
       prompt,
       options: optionsList,
@@ -272,6 +315,7 @@ export function normalizeFactoryQuestionsLenient(
       studyBody,
       subcategoryKey,
       difficulty,
+      questionType,
     });
   }
 

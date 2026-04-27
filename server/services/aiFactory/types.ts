@@ -2,6 +2,7 @@ export type FactoryLayer = "architect" | "creator" | "auditor" | "refiner";
 export type FactoryReasoningLevel = "none" | "low" | "medium" | "high";
 
 export type FactoryDifficulty = "mix" | "easy" | "medium" | "hard";
+export type FactoryQuestionType = "conceptual" | "procedural" | "application";
 
 export type FactoryQuestion = {
   prompt: string;
@@ -10,6 +11,7 @@ export type FactoryQuestion = {
   studyBody: string;
   subcategoryKey: string;
   difficulty: "easy" | "medium" | "hard";
+  questionType: FactoryQuestionType;
 };
 
 export type FactoryJobPayload = {
