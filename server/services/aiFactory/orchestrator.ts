@@ -21,6 +21,14 @@ type JobRow = {
   max_attempts: number;
 };
 
+class JobCancelledError extends Error {
+  readonly layer: FactoryLayer | null;
+  constructor(layer: FactoryLayer | null) {
+    super("job_cancelled_by_admin");
+    this.layer = layer;
+  }
+}
+
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -64,6 +72,21 @@ async function appendInspectionLog(input: {
       input.apiVersion,
     ],
   );
+}
+
+async function isJobCancelled(jobId: number): Promise<boolean> {
+  const pool = getPool();
+  const r = await pool.query<{ status: string }>(
+    `SELECT status FROM ai_factory_jobs WHERE id = $1 LIMIT 1`,
+    [jobId],
+  );
+  return String(r.rows[0]?.status || "") === "cancelled";
+}
+
+async function assertNotCancelled(jobId: number, layer: FactoryLayer | null): Promise<void> {
+  if (await isJobCancelled(jobId)) {
+    throw new JobCancelledError(layer);
+  }
 }
 
 async function saveJobFinalOutput(jobId: number, questions: FactoryQuestion[]): Promise<void> {
@@ -397,6 +420,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
 
   let failedLayer: FactoryLayer | null = "architect";
   try {
+    await assertNotCancelled(job.id, failedLayer);
     const architectHealth = await getLayerConfigHealth("architect");
     if (architectHealth.status === "fail") {
       throw new Error(`architect_preflight_failed:${architectHealth.reasons.join("|")}`);
@@ -412,6 +436,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       targetCount: job.target_count,
     });
     const architect = await runLayerModel("architect", architectPrompt);
+    await assertNotCancelled(job.id, failedLayer);
     await appendInspectionLog({
       jobId: job.id,
       layer: "architect",
@@ -426,6 +451,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
 
     failedLayer = "creator";
+    await assertNotCancelled(job.id, failedLayer);
     await setJobState(job.id, { currentLayer: "creator" });
     await refreshPipelineState(job.subcategory_key, {
       lastJobId: job.id,
@@ -441,6 +467,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
     await appendJobLog(job.id, "info", "Creator layer started", "creator");
     const creator = await runLayerModel("creator", creatorPrompt);
+    await assertNotCancelled(job.id, failedLayer);
     await appendInspectionLog({
       jobId: job.id,
       layer: "creator",
@@ -460,6 +487,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
 
     failedLayer = "auditor";
+    await assertNotCancelled(job.id, failedLayer);
     await setJobState(job.id, { currentLayer: "auditor" });
     await refreshPipelineState(job.subcategory_key, {
       lastJobId: job.id,
@@ -469,6 +497,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     const auditorPrompt = buildAuditorPrompt(creatorQuestions, creatorNormalized.validationErrors);
     await appendJobLog(job.id, "info", "Auditor layer started", "auditor");
     const auditor = await runLayerModel("auditor", auditorPrompt);
+    await assertNotCancelled(job.id, failedLayer);
     await appendInspectionLog({
       jobId: job.id,
       layer: "auditor",
@@ -487,6 +516,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
 
     failedLayer = "refiner";
+    await assertNotCancelled(job.id, failedLayer);
     await setJobState(job.id, { currentLayer: "refiner" });
     await refreshPipelineState(job.subcategory_key, {
       lastJobId: job.id,
@@ -500,6 +530,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     );
     await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
     const refiner = await runLayerModel("refiner", refinerPrompt);
+    await assertNotCancelled(job.id, failedLayer);
     await appendInspectionLog({
       jobId: job.id,
       layer: "refiner",
@@ -523,6 +554,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       }));
     }
     await saveJobFinalOutput(job.id, finalQuestions);
+    await assertNotCancelled(job.id, failedLayer);
     const inserted = await insertQuestionsAllOrNothing(finalQuestions);
 
     await setJobState(job.id, {
@@ -548,6 +580,24 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
     failedLayer = null;
   } catch (error) {
+    if (error instanceof JobCancelledError) {
+      await appendJobLog(job.id, "warn", "Job cancelled by admin", error.layer ?? undefined, {
+        cancelled: true,
+      });
+      await setJobState(job.id, {
+        status: "cancelled",
+        finished: true,
+        currentLayer: null,
+        lastError: "cancelled_by_admin",
+      });
+      await refreshPipelineState(job.subcategory_key, {
+        lastJobId: job.id,
+        lastStatus: "failed",
+        lastLayer: null,
+        lastError: "cancelled_by_admin",
+      });
+      return;
+    }
     const errMessage = error instanceof Error ? error.message : "unknown_error";
     const layerMeta = error instanceof LayerExecutionError ? error.meta : null;
     await appendJobLog(job.id, "error", "Job failed", failedLayer ?? undefined, {

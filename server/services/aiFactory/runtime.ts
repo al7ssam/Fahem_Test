@@ -129,6 +129,88 @@ async function enqueueJob(input: {
   return Number(r.rows[0]?.id ?? 0);
 }
 
+export type FactoryCancelResult = {
+  cancelledQueued: number;
+  markedRunning: number;
+  jobId?: number;
+};
+
+type Queryable = {
+  query: <T = unknown>(text: string, params?: unknown[]) => Promise<{ rows: T[] }>;
+};
+
+async function appendCancelLogs(
+  client: Queryable,
+  jobIds: number[],
+  message: string,
+): Promise<void> {
+  if (!jobIds.length) return;
+  await client.query(
+    `INSERT INTO ai_factory_job_logs (job_id, layer_name, level, message, details)
+     SELECT id, NULL, 'warn', $2, $3::jsonb
+     FROM UNNEST($1::bigint[]) AS id`,
+    [jobIds, message, JSON.stringify({ cancelled: true })],
+  );
+}
+
+async function cancelQueuedJobs(
+  client: Queryable,
+): Promise<number[]> {
+  const r = await client.query<{ id: number }>(
+    `WITH x AS (
+       UPDATE ai_factory_jobs
+       SET status = 'cancelled', current_layer = NULL, finished_at = NOW(), updated_at = NOW(),
+           last_error = COALESCE(last_error, 'cancelled_by_admin')
+       WHERE status = 'queued'
+       RETURNING id
+     )
+     SELECT id FROM x`,
+  );
+  return r.rows.map((x) => Number(x.id)).filter((x) => Number.isInteger(x) && x > 0);
+}
+
+async function markRunningJobsCancelled(
+  client: Queryable,
+): Promise<number[]> {
+  const r = await client.query<{ id: number }>(
+    `WITH x AS (
+       UPDATE ai_factory_jobs
+       SET status = 'cancelled', updated_at = NOW(), last_error = 'cancel_requested_by_admin'
+       WHERE status = 'running'
+       RETURNING id
+     )
+     SELECT id FROM x`,
+  );
+  return r.rows.map((x) => Number(x.id)).filter((x) => Number.isInteger(x) && x > 0);
+}
+
+async function cancelSingleJob(jobId: number, client: Queryable): Promise<FactoryCancelResult> {
+  const qr = await client.query<{ id: number; previous_status: string }>(
+    `WITH x AS (
+       UPDATE ai_factory_jobs
+       SET status = 'cancelled',
+           current_layer = CASE WHEN status = 'queued' THEN NULL ELSE current_layer END,
+           finished_at = CASE WHEN status = 'queued' THEN NOW() ELSE finished_at END,
+           updated_at = NOW(),
+           last_error = CASE WHEN status = 'queued' THEN COALESCE(last_error, 'cancelled_by_admin') ELSE 'cancel_requested_by_admin' END
+       WHERE id = $1
+         AND status IN ('queued', 'running')
+       RETURNING id, status AS previous_status
+     )
+     SELECT id, previous_status FROM x`,
+    [jobId],
+  );
+  const changed = qr.rows.length;
+  if (changed > 0) {
+    await appendCancelLogs(client, [jobId], "Job cancelled by admin");
+  }
+  return {
+    cancelledQueued: changed > 0 && String(qr.rows[0]?.previous_status) === "queued" ? 1 : 0,
+    markedRunning: changed > 0 && String(qr.rows[0]?.previous_status) === "running" ? 1 : 0,
+    jobId,
+  };
+}
+
 async function claimNextJob(): Promise<ClaimedJob | null> {
   const pool = getPool();
   const client = await pool.connect();
@@ -189,6 +271,70 @@ export class AIFactoryRuntime {
       payload: { manual: true },
     });
     return { jobId };
+  }
+
+  async cancelAllJobs(): Promise<FactoryCancelResult> {
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const queuedIds = await cancelQueuedJobs(client);
+      const runningIds = await markRunningJobsCancelled(client);
+      await appendCancelLogs(client, queuedIds, "Job cancelled by admin (queued bulk)");
+      await appendCancelLogs(client, runningIds, "Job cancel requested by admin (running bulk)");
+      await client.query("COMMIT");
+      return { cancelledQueued: queuedIds.length, markedRunning: runningIds.length };
+    } catch {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
+      throw new Error("cancel_all_failed");
+    } finally {
+      client.release();
+    }
+  }
+
+  async cancelQueuedOnly(): Promise<FactoryCancelResult> {
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const queuedIds = await cancelQueuedJobs(client);
+      await appendCancelLogs(client, queuedIds, "Job cancelled by admin (queued bulk)");
+      await client.query("COMMIT");
+      return { cancelledQueued: queuedIds.length, markedRunning: 0 };
+    } catch {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
+      throw new Error("cancel_queued_failed");
+    } finally {
+      client.release();
+    }
+  }
+
+  async cancelJob(jobId: number): Promise<FactoryCancelResult> {
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await cancelSingleJob(jobId, client);
+      await client.query("COMMIT");
+      return result;
+    } catch {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // ignore
+      }
+      throw new Error("cancel_job_failed");
+    } finally {
+      client.release();
+    }
   }
 
   async getStatus(): Promise<{

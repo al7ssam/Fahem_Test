@@ -938,6 +938,8 @@
               <button type="button" class="btn" id="af-model-save-btn">حفظ النماذج</button>
               <button type="button" class="btn btn-secondary" id="af-run-btn">توليد يدوي الآن</button>
               <button type="button" class="btn btn-secondary" id="af-health-btn">فحص صحة طبقات AI</button>
+              <button type="button" class="btn btn-danger" id="af-cancel-all-btn">إلغاء كل الجارية والانتظار</button>
+              <button type="button" class="btn btn-danger" id="af-cancel-queued-btn">إلغاء كل قائمة الانتظار</button>
               <button type="button" class="btn btn-secondary" id="af-refresh-jobs-btn">تحديث السجل</button>
             </div>
             <div class="factory-progress"><span id="af-progress-bar"></span></div>
@@ -2940,6 +2942,61 @@
             msg("فشل التشغيل اليدوي.", false);
           }
         }
+        async function cancelAllUi() {
+          if (!confirm("سيتم إلغاء كل الوظائف الجارية والمنتظرة. هل أنت متأكد؟")) return;
+          try {
+            var r = await fetch("/api/admin/ai-factory/jobs/cancel-all", {
+              method: "POST",
+              headers: hdr(),
+              body: JSON.stringify({})
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (!r.ok || !j.ok) throw new Error(j.reason || "cancel_all_failed");
+            msg(
+              "تم إلغاء " + String(j.cancelledQueued || 0) + " من الانتظار وطلب إيقاف " + String(j.markedRunning || 0) + " جارية.",
+              true
+            );
+            await refreshJobs();
+          } catch (e) {
+            msg("تعذر تنفيذ إلغاء الكل.", false);
+          }
+        }
+        async function cancelQueuedUi() {
+          if (!confirm("سيتم إلغاء كل الوظائف في قائمة الانتظار فقط. متابعة؟")) return;
+          try {
+            var r = await fetch("/api/admin/ai-factory/jobs/cancel-queued", {
+              method: "POST",
+              headers: hdr(),
+              body: JSON.stringify({})
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (!r.ok || !j.ok) throw new Error(j.reason || "cancel_queued_failed");
+            msg("تم إلغاء " + String(j.cancelledQueued || 0) + " وظيفة من قائمة الانتظار.", true);
+            await refreshJobs();
+          } catch (e) {
+            msg("تعذر إلغاء قائمة الانتظار.", false);
+          }
+        }
+        async function cancelOneJobUi(jobId) {
+          if (!confirm("إلغاء الوظيفة رقم " + String(jobId) + "؟")) return;
+          try {
+            var r = await fetch("/api/admin/ai-factory/jobs/" + encodeURIComponent(String(jobId)) + "/cancel", {
+              method: "POST",
+              headers: hdr(),
+              body: JSON.stringify({})
+            });
+            var j = await r.json().catch(function () { return {}; });
+            if (!r.ok || !j.ok) throw new Error(j.reason || "cancel_job_failed");
+            msg(
+              "تم تنفيذ الإلغاء للوظيفة #" + String(jobId) +
+                " (queued=" + String(j.cancelledQueued || 0) + ", running=" + String(j.markedRunning || 0) + ").",
+              true
+            );
+            await refreshJobs();
+          } catch (e) {
+            msg("تعذر إلغاء الوظيفة #" + String(jobId) + ".", false);
+          }
+        }
         async function healthUi() {
           var box = document.getElementById("af-health-log");
           box.innerHTML = "";
@@ -3008,8 +3065,19 @@
             inspectBtn.addEventListener("click", function () {
               window.open("/admin/ai-inspection?jobId=" + encodeURIComponent(String(j.id)), "_blank");
             });
+            var cancelBtn = document.createElement("button");
+            cancelBtn.type = "button";
+            cancelBtn.className = "btn btn-danger";
+            cancelBtn.style.padding = "0.25rem 0.5rem";
+            cancelBtn.style.fontSize = "0.78rem";
+            cancelBtn.style.marginInlineStart = "0.35rem";
+            cancelBtn.textContent = "إلغاء";
+            cancelBtn.addEventListener("click", function () {
+              cancelOneJobUi(j.id).catch(function () {});
+            });
             row.appendChild(summary);
             row.appendChild(inspectBtn);
+            row.appendChild(cancelBtn);
             box.appendChild(row);
           });
         }
@@ -3052,6 +3120,8 @@
         document.getElementById("af-model-save-btn").addEventListener("click", saveModelsUi);
         document.getElementById("af-run-btn").addEventListener("click", runNowUi);
         document.getElementById("af-health-btn").addEventListener("click", healthUi);
+        document.getElementById("af-cancel-all-btn").addEventListener("click", function () { cancelAllUi().catch(function () {}); });
+        document.getElementById("af-cancel-queued-btn").addEventListener("click", function () { cancelQueuedUi().catch(function () {}); });
         document.getElementById("af-refresh-jobs-btn").addEventListener("click", refreshJobs);
         setInterval(refreshJobs, 10000);
       })();

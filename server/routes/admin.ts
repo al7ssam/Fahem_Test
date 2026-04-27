@@ -166,6 +166,10 @@ const factoryHealthProbeSchema = z.object({
   layerName: z.enum(["architect", "creator", "auditor", "refiner"]).optional(),
 });
 
+const factoryCancelJobSchema = z.object({
+  jobId: z.number().int().min(1).optional(),
+});
+
 const factoryModelPatchSchema = z.object({
   layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
   provider: z.string().trim().min(1).max(50),
@@ -1034,6 +1038,56 @@ export function registerAdminRoutes(app: Express): void {
       res.status(500).json({
         ok: false,
         error: "run_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  });
+
+  app.post("/api/admin/ai-factory/jobs/cancel-all", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const result = await aiFactoryRuntime.cancelAllJobs();
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "cancel_all_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  });
+
+  app.post("/api/admin/ai-factory/jobs/cancel-queued", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const result = await aiFactoryRuntime.cancelQueuedOnly();
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "cancel_queued_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  });
+
+  app.post("/api/admin/ai-factory/jobs/:id/cancel", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const routeId = Number(req.params.id);
+    const body = factoryCancelJobSchema.safeParse(req.body ?? {});
+    const bodyId = body.success ? Number(body.data.jobId ?? 0) : 0;
+    const id = Number.isInteger(routeId) && routeId > 0 ? routeId : bodyId;
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const result = await aiFactoryRuntime.cancelJob(id);
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "cancel_job_failed",
         reason: error instanceof Error ? error.message : "unknown_error",
       });
     }
