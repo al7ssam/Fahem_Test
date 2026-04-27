@@ -23,7 +23,7 @@ import {
   listModelConfigs,
   saveModelConfig,
 } from "../services/aiFactory/modelManager";
-import { getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
+import { getFactoryInspectionLogs, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
 import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
 import type { FactoryLayer } from "../services/aiFactory/types";
 
@@ -243,6 +243,10 @@ function adminTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin.html");
 }
 
+function adminInspectionTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-ai-inspection.html");
+}
+
 async function countQuestions(): Promise<number | null> {
   try {
     const pool = getPool();
@@ -257,6 +261,12 @@ async function countQuestions(): Promise<number | null> {
 
 function readAdminHtml(questionCount: number | null): string {
   const raw = fs.readFileSync(adminTemplatePath(), "utf8");
+  const display = questionCount === null ? "—" : String(questionCount);
+  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+}
+
+function readAdminInspectionHtml(questionCount: number | null): string {
+  const raw = fs.readFileSync(adminInspectionTemplatePath(), "utf8");
   const display = questionCount === null ? "—" : String(questionCount);
   return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
 }
@@ -486,6 +496,16 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة الإدارة.");
+    }
+  });
+
+  app.get("/admin/ai-inspection", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminInspectionHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة فحص الذكاء الاصطناعي.");
     }
   });
 
@@ -916,6 +936,63 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const logs = await getFactoryJobLogs(id);
       res.json({ ok: true, logs });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-factory/jobs/:id/inspection", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const pool = getPool();
+      const jr = await pool.query<{
+        id: number;
+        subcategory_key: string;
+        difficulty_mode: "mix" | "easy" | "medium" | "hard";
+        status: string;
+        current_layer: string | null;
+        attempt_count: number;
+        max_attempts: number;
+        last_error: string | null;
+        created_at: string;
+        started_at: string | null;
+        finished_at: string | null;
+      }>(
+        `SELECT id, subcategory_key, difficulty_mode, status, current_layer,
+                attempt_count, max_attempts, last_error, created_at, started_at, finished_at
+         FROM ai_factory_jobs
+         WHERE id = $1
+         LIMIT 1`,
+        [id],
+      );
+      const job = jr.rows[0];
+      if (!job) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      const layers = await getFactoryInspectionLogs(id);
+      res.json({
+        ok: true,
+        job: {
+          id: job.id,
+          subcategoryKey: job.subcategory_key,
+          difficultyMode: job.difficulty_mode,
+          status: job.status,
+          currentLayer: job.current_layer,
+          attemptCount: job.attempt_count,
+          maxAttempts: job.max_attempts,
+          lastError: job.last_error,
+          createdAt: job.created_at,
+          startedAt: job.started_at,
+          finishedAt: job.finished_at,
+        },
+        layers,
+      });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
     }

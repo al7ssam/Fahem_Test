@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Inspection Dashboard</title>
+    <style>
+      :root {
+        --bg: #070b16;
+        --card: #11182b;
+        --line: rgba(223, 187, 106, 0.24);
+        --text: #f4e4bf;
+        --muted: #c5b48f;
+        --accent: #dfbb6a;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at top, #1a2341 0%, var(--bg) 58%);
+        color: var(--text);
+        font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+      }
+      .wrap {
+        max-width: 1150px;
+        margin: 0 auto;
+        padding: 1rem;
+      }
+      .card {
+        background: linear-gradient(to bottom, #10172a, #0e1425);
+        border: 1px solid var(--line);
+        border-radius: 0.9rem;
+        padding: 0.85rem;
+        margin-bottom: 0.8rem;
+      }
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr 12rem auto auto;
+        gap: 0.6rem;
+        align-items: end;
+      }
+      @media (max-width: 880px) {
+        .toolbar { grid-template-columns: 1fr; }
+      }
+      label { display: block; margin-bottom: 0.25rem; color: var(--muted); }
+      input, button {
+        width: 100%;
+        background: #0b1222;
+        border: 1px solid rgba(223, 187, 106, 0.28);
+        color: var(--text);
+        border-radius: 0.65rem;
+        padding: 0.55rem 0.7rem;
+      }
+      button { cursor: pointer; font-weight: 700; }
+      button:hover { border-color: rgba(223, 187, 106, 0.55); }
+      .meta {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 0.6rem;
+      }
+      @media (max-width: 880px) {
+        .meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      .kv { padding: 0.5rem; border: 1px solid rgba(223, 187, 106, 0.18); border-radius: 0.65rem; }
+      .kv b { color: var(--accent); }
+      .flow {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+      }
+      .layer-title {
+        margin: 0 0 0.45rem;
+        color: var(--accent);
+        font-weight: 800;
+      }
+      .section-title {
+        margin: 0.5rem 0 0.25rem;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+      pre.code {
+        direction: ltr;
+        text-align: left;
+        background: #060b16;
+        border: 1px solid rgba(223, 187, 106, 0.18);
+        border-radius: 0.6rem;
+        padding: 0.65rem;
+        overflow: auto;
+        max-height: 22rem;
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        line-height: 1.35;
+        font-size: 0.82rem;
+      }
+      .json-key { color: #f7c96f; }
+      .json-string { color: #a6e3a1; }
+      .json-number { color: #89dceb; }
+      .json-bool { color: #f38ba8; }
+      .json-null { color: #cba6f7; }
+      .msg { margin-top: 0.45rem; min-height: 1.2rem; }
+      .muted { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h2 style="margin:0 0 0.45rem">AI Inspection Dashboard</h2>
+        <div class="muted">إجمالي الأسئلة: {{QUESTION_COUNT}}</div>
+      </div>
+
+      <div class="card toolbar">
+        <div>
+          <label for="admin-secret">Admin Secret</label>
+          <input id="admin-secret" type="password" placeholder="أدخل مفتاح الأدمن" />
+        </div>
+        <div>
+          <label for="job-id">Job ID</label>
+          <input id="job-id" type="number" min="1" placeholder="مثال: 12" />
+        </div>
+        <div>
+          <button id="load-btn" type="button">تحميل الفحص</button>
+        </div>
+        <div>
+          <button id="back-btn" type="button">العودة للأدمن</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div id="job-meta" class="meta"></div>
+        <div id="msg" class="msg"></div>
+      </div>
+
+      <div id="flow" class="flow"></div>
+    </div>
+
+    <script>
+      (function () {
+        function esc(s) {
+          return String(s ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        }
+        function syntaxHighlightJson(text) {
+          try {
+            var obj = JSON.parse(String(text || ""));
+            var pretty = JSON.stringify(obj, null, 2);
+            var html = esc(pretty)
+              .replace(/\"([^\"\\]*(?:\\.[^\"\\]*)*)\"(?=\\s*:)/g, '<span class="json-key">"$1"</span>')
+              .replace(/\"([^\"\\]*(?:\\.[^\"\\]*)*)\"/g, '<span class="json-string">"$1"</span>')
+              .replace(/\b-?\d+(?:\.\d+)?\b/g, '<span class="json-number">$&</span>')
+              .replace(/\b(true|false)\b/g, '<span class="json-bool">$1</span>')
+              .replace(/\bnull\b/g, '<span class="json-null">null</span>');
+            return { html: html, isJson: true };
+          } catch {
+            return { html: esc(String(text || "")), isJson: false };
+          }
+        }
+        function renderMeta(job) {
+          var box = document.getElementById("job-meta");
+          box.innerHTML = "";
+          var fields = [
+            ["Job", "#" + job.id],
+            ["الحالة", job.status],
+            ["الطبقة الحالية", job.currentLayer || "-"],
+            ["subcategory", job.subcategoryKey],
+            ["محاولات", String(job.attemptCount) + " / " + String(job.maxAttempts)],
+            ["created", job.createdAt || "-"],
+            ["started", job.startedAt || "-"],
+            ["finished", job.finishedAt || "-"],
+            ["lastError", job.lastError || "-"],
+            ["difficulty", job.difficultyMode || "-"],
+          ];
+          fields.forEach(function (f) {
+            var el = document.createElement("div");
+            el.className = "kv";
+            el.innerHTML = "<b>" + esc(f[0]) + ":</b> " + esc(f[1]);
+            box.appendChild(el);
+          });
+        }
+        function renderFlow(items) {
+          var flow = document.getElementById("flow");
+          flow.innerHTML = "";
+          if (!items || !items.length) {
+            flow.innerHTML = '<div class="card muted">لا توجد بيانات inspection لهذا الـ job بعد.</div>';
+            return;
+          }
+          items.forEach(function (row, idx) {
+            var card = document.createElement("div");
+            card.className = "card";
+            var p = syntaxHighlightJson(row.promptText || "");
+            var r = syntaxHighlightJson(row.rawResponseText || "");
+            card.innerHTML =
+              '<h3 class="layer-title">[' + esc(String(idx + 1)) + "] " + esc(row.layerName || "-") + "</h3>" +
+              '<div class="muted">model: ' + esc(row.modelName || "-") + " | provider: " + esc(row.provider || "-") + " | api: " + esc(row.apiVersion || "-") + " | at: " + esc(row.createdAt || "-") + "</div>" +
+              '<div class="section-title">Prompt</div>' +
+              '<pre class="code">' + p.html + "</pre>" +
+              '<div class="section-title">Raw Response' + (r.isJson ? " (JSON)" : "") + "</div>" +
+              '<pre class="code">' + r.html + "</pre>";
+            flow.appendChild(card);
+          });
+        }
+        async function loadInspection() {
+          var secret = document.getElementById("admin-secret").value.trim();
+          var jobId = Number(document.getElementById("job-id").value || "0");
+          var msg = document.getElementById("msg");
+          msg.textContent = "";
+          if (!secret) { msg.textContent = "أدخل Admin Secret أولاً."; return; }
+          if (!Number.isInteger(jobId) || jobId < 1) { msg.textContent = "أدخل Job ID صحيح."; return; }
+          try {
+            var res = await fetch("/api/admin/ai-factory/jobs/" + jobId + "/inspection", {
+              headers: { "X-Admin-Secret": secret }
+            });
+            var json = await res.json();
+            if (!res.ok || !json.ok) throw new Error("read_failed");
+            renderMeta(json.job || {});
+            renderFlow(json.layers || []);
+            msg.textContent = "تم تحميل بيانات الفحص.";
+          } catch {
+            msg.textContent = "تعذر تحميل بيانات الفحص.";
+          }
+        }
+        document.getElementById("load-btn").addEventListener("click", loadInspection);
+        document.getElementById("back-btn").addEventListener("click", function () {
+          window.location.href = "/admin";
+        });
+        var params = new URLSearchParams(window.location.search);
+        var jobIdParam = params.get("jobId");
+        if (jobIdParam) {
+          document.getElementById("job-id").value = jobIdParam;
+        }
+      })();
+    </script>
+  </body>
+</html>

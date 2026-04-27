@@ -34,6 +34,32 @@ async function appendJobLog(
   );
 }
 
+async function appendInspectionLog(input: {
+  jobId: number;
+  layer: FactoryLayer;
+  promptText: string;
+  rawResponseText: string;
+  provider: string;
+  modelName: string;
+  apiVersion: string;
+}): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO ai_factory_inspection_logs
+      (job_id, layer_name, prompt_text, raw_response_text, provider, model_name, api_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      input.jobId,
+      input.layer,
+      input.promptText,
+      input.rawResponseText,
+      input.provider,
+      input.modelName,
+      input.apiVersion,
+    ],
+  );
+}
+
 async function setJobState(
   jobId: number,
   data: {
@@ -325,6 +351,15 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       targetCount: job.target_count,
     });
     const architect = await runLayerModel("architect", architectPrompt);
+    await appendInspectionLog({
+      jobId: job.id,
+      layer: "architect",
+      promptText: architectPrompt,
+      rawResponseText: architect.rawResponseText,
+      provider: architect.provider,
+      modelName: architect.modelName,
+      apiVersion: architect.apiVersion,
+    });
     await appendJobLog(job.id, "info", "Architect layer completed", "architect", {
       model: architect.modelName,
     });
@@ -344,6 +379,15 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
     await appendJobLog(job.id, "info", "Creator layer started", "creator");
     const creator = await runLayerModel("creator", creatorPrompt);
+    await appendInspectionLog({
+      jobId: job.id,
+      layer: "creator",
+      promptText: creatorPrompt,
+      rawResponseText: creator.rawResponseText,
+      provider: creator.provider,
+      modelName: creator.modelName,
+      apiVersion: creator.apiVersion,
+    });
     const creatorQuestions = normalizeQuestionsFromModel(creator.text, job, "creator");
     await appendJobLog(job.id, "info", "Creator layer completed", "creator", {
       generated: creatorQuestions.length,
@@ -359,6 +403,15 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     const auditorPrompt = buildAuditorPrompt(creatorQuestions);
     await appendJobLog(job.id, "info", "Auditor layer started", "auditor");
     const auditor = await runLayerModel("auditor", auditorPrompt);
+    await appendInspectionLog({
+      jobId: job.id,
+      layer: "auditor",
+      promptText: auditorPrompt,
+      rawResponseText: auditor.rawResponseText,
+      provider: auditor.provider,
+      modelName: auditor.modelName,
+      apiVersion: auditor.apiVersion,
+    });
     const auditReport = parseAuditReport(auditor.text);
     await appendJobLog(job.id, "info", "Auditor layer completed", "auditor", {
       summary: auditReport.summary,
@@ -376,6 +429,15 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     const refinerPrompt = buildRefinerPrompt(creatorQuestions, auditReport);
     await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
     const refiner = await runLayerModel("refiner", refinerPrompt);
+    await appendInspectionLog({
+      jobId: job.id,
+      layer: "refiner",
+      promptText: refinerPrompt,
+      rawResponseText: refiner.rawResponseText,
+      provider: refiner.provider,
+      modelName: refiner.modelName,
+      apiVersion: refiner.apiVersion,
+    });
     let finalQuestions = normalizeQuestionsFromModel(refiner.text, job, "refiner");
     if (finalQuestions.length > job.batch_size) {
       finalQuestions = finalQuestions.slice(0, job.batch_size);
@@ -538,6 +600,47 @@ export async function getFactoryJobLogs(jobId: number): Promise<Array<{
     level: row.level,
     message: row.message,
     details: row.details,
+    createdAt: row.created_at,
+  }));
+}
+
+export type FactoryInspectionEntry = {
+  id: number;
+  layerName: FactoryLayer;
+  promptText: string;
+  rawResponseText: string;
+  provider: string;
+  modelName: string;
+  apiVersion: string;
+  createdAt: string;
+};
+
+export async function getFactoryInspectionLogs(jobId: number): Promise<FactoryInspectionEntry[]> {
+  const pool = getPool();
+  const r = await pool.query<{
+    id: number;
+    layer_name: FactoryLayer;
+    prompt_text: string;
+    raw_response_text: string;
+    provider: string;
+    model_name: string;
+    api_version: string;
+    created_at: string;
+  }>(
+    `SELECT id, layer_name, prompt_text, raw_response_text, provider, model_name, api_version, created_at
+     FROM ai_factory_inspection_logs
+     WHERE job_id = $1
+     ORDER BY id ASC`,
+    [jobId],
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    layerName: row.layer_name,
+    promptText: row.prompt_text,
+    rawResponseText: row.raw_response_text,
+    provider: row.provider,
+    modelName: row.model_name,
+    apiVersion: row.api_version,
     createdAt: row.created_at,
   }));
 }

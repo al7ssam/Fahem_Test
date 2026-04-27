@@ -73,6 +73,8 @@ export const AI_FACTORY_THINKING_LEVEL_MODEL_IDS: readonly string[] = [
 
 type ModelCallResult = {
   text: string;
+  rawResponseText: string;
+  apiVersion: "v1" | "v1beta";
   modelName: string;
   provider: string;
 };
@@ -332,12 +334,15 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
 
   try {
     const result = await model.generateContent(prompt);
+    const rawResponseText = JSON.stringify(result.response ?? {}, null, 2);
     const text = String(result.response.text() ?? "").trim();
     if (!text) {
       throw new Error("provider_empty_response");
     }
     return {
       text,
+      rawResponseText,
+      apiVersion,
       modelName: config.modelName,
       provider: config.provider,
     };

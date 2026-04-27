@@ -2751,9 +2751,22 @@
             var row = document.createElement("div");
             row.style.padding = "0.35rem 0";
             row.style.borderBottom = "1px solid rgba(223, 187, 106, 0.12)";
-            row.style.cursor = "pointer";
-            row.textContent = "#" + j.id + " | " + j.status + " | " + j.subcategoryKey + " | layer: " + (j.currentLayer || "-");
-            row.addEventListener("click", function () { loadJobLogs(j.id); });
+            var summary = document.createElement("div");
+            summary.style.cursor = "pointer";
+            summary.style.marginBottom = "0.3rem";
+            summary.textContent = "#" + j.id + " | " + j.status + " | " + j.subcategoryKey + " | layer: " + (j.currentLayer || "-");
+            summary.addEventListener("click", function () { loadJobLogs(j.id); });
+            var inspectBtn = document.createElement("button");
+            inspectBtn.type = "button";
+            inspectBtn.className = "btn btn-secondary";
+            inspectBtn.style.padding = "0.25rem 0.5rem";
+            inspectBtn.style.fontSize = "0.78rem";
+            inspectBtn.textContent = "عرض التفاصيل";
+            inspectBtn.addEventListener("click", function () {
+              window.open("/admin/ai-inspection?jobId=" + encodeURIComponent(String(j.id)), "_blank");
+            });
+            row.appendChild(summary);
+            row.appendChild(inspectBtn);
             box.appendChild(row);
           });
         }
