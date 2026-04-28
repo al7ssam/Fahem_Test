@@ -145,23 +145,117 @@
         white-space: pre-wrap;
         color: #f9d9d9;
       }
-      .eff-toolbar {
+      .eff-section {
+        background: linear-gradient(160deg, rgba(20, 28, 48, 0.98), rgba(10, 14, 26, 0.98));
+        border: 1px solid rgba(223, 187, 106, 0.38);
+        border-radius: 1rem;
+        padding: 0;
+        margin-bottom: 1rem;
+        box-shadow: 0 0 0 1px rgba(223, 187, 106, 0.08);
+      }
+      .eff-section-inner {
+        padding: 1rem 1.05rem 1.1rem;
+      }
+      .eff-section-head {
         display: flex;
         flex-wrap: wrap;
-        align-items: center;
-        gap: 0.5rem;
-        margin-bottom: 0.45rem;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.65rem;
+        margin-bottom: 0.85rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid rgba(223, 187, 106, 0.22);
+      }
+      .eff-section-title {
+        margin: 0;
+        font-size: 1.25rem;
+        font-weight: 800;
+        color: var(--accent);
+        letter-spacing: 0.02em;
+      }
+      .eff-section-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+      }
+      button.eff-action-btn {
+        width: auto;
+        padding: 0.42rem 0.8rem;
+        font-size: 0.8rem;
+      }
+      .eff-section-body {
+        min-height: 2rem;
+      }
+      .eff-meta-bar {
+        font-size: 0.8rem;
+        color: var(--muted);
+        line-height: 1.55;
+        margin-bottom: 0.85rem;
+        padding: 0.55rem 0.65rem;
+        background: rgba(6, 10, 20, 0.55);
+        border-radius: 0.65rem;
+        border: 1px solid rgba(223, 187, 106, 0.14);
+      }
+      .eff-meta-bar code {
+        font-size: 0.74rem;
+        word-break: break-all;
+      }
+      .eff-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.55rem;
+        margin-bottom: 0.9rem;
+      }
+      @media (max-width: 900px) {
+        .eff-kpi-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .eff-kpi-card {
+        padding: 0.55rem 0.6rem;
+        border-radius: 0.65rem;
+        border: 1px solid rgba(223, 187, 106, 0.2);
+        background: rgba(8, 12, 24, 0.72);
+        text-align: center;
+      }
+      .eff-kpi-card b {
+        display: block;
+        font-size: 1.05rem;
+        color: var(--accent);
+        margin-bottom: 0.2rem;
+      }
+      .eff-kpi-card span {
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+      .eff-alert {
+        margin-bottom: 0.75rem;
+        padding: 0.55rem 0.65rem;
+        border-radius: 0.6rem;
+        border: 1px solid rgba(251, 191, 36, 0.45);
+        background: rgba(120, 90, 20, 0.18);
+        color: #fde68a;
+        font-size: 0.84rem;
+      }
+      .eff-block-title {
+        margin: 0.85rem 0 0.4rem;
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: var(--accent);
+      }
+      .eff-block-title:first-of-type {
+        margin-top: 0.25rem;
       }
       .eff-summary {
         font-size: 0.88rem;
         opacity: 0.92;
-        margin-bottom: 0.4rem;
+        margin-bottom: 0.45rem;
       }
       .eff-table {
         width: 100%;
         border-collapse: collapse;
         font-size: 0.84rem;
-        margin-bottom: 0.4rem;
+        margin-bottom: 0.5rem;
         direction: ltr;
         text-align: center;
       }
@@ -175,19 +269,53 @@
         text-align: right;
         direction: rtl;
       }
-      .eff-table tbody tr:last-child td {
+      .eff-table.eff-subtable th:first-child,
+      .eff-table.eff-subtable td:first-child {
+        text-align: left;
+        direction: ltr;
+      }
+      .eff-table tbody tr.eff-totals-row td {
         font-weight: 800;
         border-top: 1px solid rgba(223, 187, 106, 0.32);
+      }
+      .eff-calls-scroll {
+        max-height: 20rem;
+        overflow: auto;
+        border-radius: 0.6rem;
+        border: 1px solid rgba(223, 187, 106, 0.16);
+      }
+      .eff-calls-scroll .eff-table {
+        margin-bottom: 0;
+      }
+      .eff-notes {
+        margin: 0.35rem 0 0;
+        padding-right: 1.1rem;
+        font-size: 0.82rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .eff-details {
+        margin-top: 0.75rem;
+        border: 1px solid rgba(223, 187, 106, 0.18);
+        border-radius: 0.65rem;
+        padding: 0.5rem 0.65rem;
+        background: rgba(6, 10, 20, 0.45);
+      }
+      .eff-details summary {
+        cursor: pointer;
+        font-weight: 700;
+        color: var(--accent);
+      }
+      .eff-json-pre {
+        max-height: 16rem;
+        margin-top: 0.5rem;
+        margin-bottom: 0;
       }
       .eff-foot {
         font-size: 0.78rem;
         opacity: 0.78;
         line-height: 1.45;
-      }
-      button.eff-copy-btn {
-        width: auto;
-        padding: 0.4rem 0.75rem;
-        font-size: 0.82rem;
+        margin-top: 0.35rem;
       }
     </style>
   </head>
@@ -220,12 +348,20 @@
         <div id="msg" class="msg"></div>
       </div>
 
-      <div id="efficiency-card" class="card" hidden>
-        <h3 class="layer-title" style="margin-bottom: 0.35rem">تقرير كفاءة الاستهلاك</h3>
-        <div id="efficiency-card-inner" class="muted">—</div>
-      </div>
-
       <div id="flow" class="flow"></div>
+
+      <section id="efficiency-section" class="eff-section" hidden aria-labelledby="efficiency-heading">
+        <div class="eff-section-inner">
+          <header class="eff-section-head">
+            <h2 id="efficiency-heading" class="eff-section-title">تقرير كفاءة الاستهلاك</h2>
+            <div class="eff-section-actions">
+              <button type="button" class="eff-action-btn" data-inspection-eff-json-copy>نسخ JSON</button>
+              <button type="button" class="eff-action-btn" data-eff-scroll-to-flow>الانتقال لتفاصيل الطبقات</button>
+            </div>
+          </header>
+          <div id="efficiency-section-inner" class="eff-section-body muted"></div>
+        </div>
+      </section>
 
       <div class="card">
         <h3 class="layer-title" style="margin-bottom:0.35rem">تسلسل الأخطاء</h3>
@@ -350,8 +486,13 @@
             box.appendChild(row);
           });
         }
+        function effFmtCost(n) {
+          var x = Number(n);
+          if (!Number.isFinite(x)) return "0";
+          return x.toFixed(6);
+        }
         function renderEfficiencyReport(effRes, effJson) {
-          var inner = document.getElementById("efficiency-card-inner");
+          var inner = document.getElementById("efficiency-section-inner");
           if (!effRes.ok || !effJson.ok || !effJson.report) {
             window.__afInspectionEfficiencyReport = null;
             inner.innerHTML =
@@ -360,17 +501,25 @@
           }
           var rep = effJson.report;
           window.__afInspectionEfficiencyReport = rep;
-          var t = rep.totals;
-          var dom = rep.indicators.dominantLayerByTotal || "—";
+          var t = rep.totals || {};
+          var dom = (rep.indicators && rep.indicators.dominantLayerByTotal) || "—";
           var thShare =
-            rep.indicators.thoughtsShareOfTotal != null
+            rep.indicators && rep.indicators.thoughtsShareOfTotal != null
               ? Math.round(rep.indicators.thoughtsShareOfTotal * 100) + "%"
               : "—";
+          var callsArr = Array.isArray(rep.calls) ? rep.calls : [];
+          var miss = Array.isArray(rep.missingLayers) ? rep.missingLayers : [];
+          var missHtml = miss.length
+            ? '<div class="eff-alert" role="alert">طبقات بلا سجلات فحص لهذا الـ job: ' +
+              miss.map(function (x) { return esc(String(x)); }).join("، ") +
+              "</div>"
+            : "";
           var layerRows = "";
           ["architect", "creator", "auditor", "refiner"].forEach(function (layer) {
             var b = rep.byLayer && rep.byLayer[layer];
             var pct =
-              (rep.indicators.layerShareOfTotalTokensPercent &&
+              (rep.indicators &&
+                rep.indicators.layerShareOfTotalTokensPercent &&
                 rep.indicators.layerShareOfTotalTokensPercent[layer]) ||
               0;
             if (!b || b.callCount === 0) {
@@ -395,50 +544,118 @@
                 "%</td></tr>";
             }
           });
-          var uchk =
-            rep.usageLogCrossCheck && rep.usageLogCrossCheck.length
-              ? rep.usageLogCrossCheck
-                  .map(function (u) {
-                    return esc(String(u.layerType || "")) + " in/out=" + esc(String(u.inputTokens)) + "/" + esc(String(u.outputTokens));
-                  })
-                  .join(" | ")
-              : "لا صفوف";
+          var crossRows = "";
+          if (rep.usageLogCrossCheck && rep.usageLogCrossCheck.length) {
+            rep.usageLogCrossCheck.forEach(function (u) {
+              crossRows +=
+                "<tr><td>" +
+                esc(String(u.layerType || "")) +
+                "</td><td>" +
+                esc(String(u.inputTokens)) +
+                "</td><td>" +
+                esc(String(u.outputTokens)) +
+                "</td><td>" +
+                esc(effFmtCost(u.costUsd)) +
+                "</td></tr>";
+            });
+          } else {
+            crossRows =
+              '<tr><td colspan="4" class="muted" style="text-align:center">لا صفوف في ai_usage_logs لهذا الـ job.</td></tr>';
+          }
+          var callRows = "";
+          if (callsArr.length) {
+            callsArr.forEach(function (c) {
+              var ok = c.parseOk ? "نعم" : "لا";
+              var errCell = c.parseOk ? "—" : esc(String(c.parseError || "parse_error"));
+              callRows +=
+                "<tr><td>" +
+                esc(String(c.inspectionLogId)) +
+                "</td><td>" +
+                esc(String(c.layer || "")) +
+                "</td><td>" +
+                esc(String(c.modelName || "")) +
+                "</td><td>" +
+                esc(String(c.createdAt || "")) +
+                "</td><td>" +
+                esc(String(c.promptTokenCount)) +
+                "</td><td>" +
+                esc(String(c.thoughtsTokenCount)) +
+                "</td><td>" +
+                esc(String(c.candidatesTokenCount)) +
+                "</td><td><strong>" +
+                esc(String(c.totalTokenCount)) +
+                "</strong></td><td>" +
+                esc(ok) +
+                "</td><td>" +
+                errCell +
+                "</td></tr>";
+            });
+          } else {
+            callRows =
+              '<tr><td colspan="10" class="muted" style="text-align:center">لا توجد صفوف نداءات (لا سجلات inspection).</td></tr>';
+          }
+          var notesLi = (Array.isArray(rep.notes) ? rep.notes : []).map(function (n) {
+            return "<li>" + esc(String(n)) + "</li>";
+          }).join("");
+          if (!notesLi) notesLi = "<li class=\"muted\">—</li>";
+          var jsonRaw = esc(JSON.stringify(rep, null, 2));
           inner.innerHTML =
-            '<div class="eff-toolbar">' +
-            '<button type="button" class="eff-copy-btn" data-inspection-eff-json-copy>نسخ JSON</button>' +
+            '<div class="eff-meta-bar">' +
+            "<div><strong>jobId:</strong> " +
+            esc(String(rep.jobId)) +
+            " &nbsp;|&nbsp; <strong>generatedAt:</strong> " +
+            esc(String(rep.generatedAt || "")) +
             "</div>" +
-            '<div class="eff-summary">أعلى طبقة حسب total: <strong>' +
-            esc(dom) +
-            "</strong> — نسبة التفكير من الإجمالي: <strong>" +
+            '<div style="margin-top:0.35rem"><strong>dataSource:</strong> <code>' +
+            esc(String(rep.dataSource || "")) +
+            "</code></div></div>" +
+            '<div class="eff-kpi-grid">' +
+            '<div class="eff-kpi-card"><b>' +
+            esc(String(t.totalTokenCount != null ? t.totalTokenCount : 0)) +
+            '</b><span>إجمالي totalTokenCount</span></div>' +
+            '<div class="eff-kpi-card"><b>' +
             esc(thShare) +
-            "</strong></div>" +
+            '</b><span>نسبة thoughts من الإجمالي</span></div>' +
+            '<div class="eff-kpi-card"><b>' +
+            esc(String(dom)) +
+            '</b><span>أعلى طبقة حسب total</span></div>' +
+            '<div class="eff-kpi-card"><b>' +
+            esc(String(callsArr.length)) +
+            '</b><span>عدد نداءات الفحص</span></div></div>' +
+            missHtml +
+            '<div class="eff-summary">ملخص سريع: أعلى طبقة <strong>' +
+            esc(String(dom)) +
+            "</strong> — التفكير <strong>" +
+            esc(thShare) +
+            "</strong> من إجمالي التوكن.</div>" +
+            '<h3 class="eff-block-title">تجميع حسب الطبقة (usageMetadata)</h3>' +
             '<table class="eff-table"><thead><tr><th>طبقة</th><th>prompt</th><th>thoughts</th><th>candidates</th><th>total</th><th>% من job</th></tr></thead><tbody>' +
             layerRows +
-            "<tr><td>الإجمالي</td><td>" +
-            esc(String(t.promptTokenCount)) +
+            '<tr class="eff-totals-row"><td>الإجمالي</td><td>' +
+            esc(String(t.promptTokenCount != null ? t.promptTokenCount : 0)) +
             "</td><td>" +
-            esc(String(t.thoughtsTokenCount)) +
+            esc(String(t.thoughtsTokenCount != null ? t.thoughtsTokenCount : 0)) +
             "</td><td>" +
-            esc(String(t.candidatesTokenCount)) +
+            esc(String(t.candidatesTokenCount != null ? t.candidatesTokenCount : 0)) +
             "</td><td>" +
-            esc(String(t.totalTokenCount)) +
+            esc(String(t.totalTokenCount != null ? t.totalTokenCount : 0)) +
             '</td><td>100%</td></tr></tbody></table>' +
-            '<div class="eff-foot">المصدر: <code>usageMetadata</code> من سجلات الفحص. مطابقة الفوترة: ' +
-            uchk +
-            "</div>";
-          var copyBtn = inner.querySelector("[data-inspection-eff-json-copy]");
-          if (copyBtn) {
-            copyBtn.addEventListener("click", function () {
-              var txt = JSON.stringify(window.__afInspectionEfficiencyReport, null, 2);
-              if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(txt).then(function () {
-                  alert("تم نسخ تقرير الكفاءة (JSON).");
-                });
-              } else {
-                prompt("انسخ JSON:", txt);
-              }
-            });
-          }
+            '<h3 class="eff-block-title">مطابقة ai_usage_logs (فوترة)</h3>' +
+            '<table class="eff-table eff-subtable"><thead><tr><th>layer_type</th><th>input_tokens</th><th>output_tokens</th><th>cost_usd</th></tr></thead><tbody>' +
+            crossRows +
+            "</tbody></table>" +
+            '<h3 class="eff-block-title">نداءات الفحص (كل صف inspection)</h3>' +
+            '<div class="eff-calls-scroll"><table class="eff-table eff-subtable"><thead><tr><th>id</th><th>layer</th><th>model</th><th>createdAt</th><th>prompt</th><th>thoughts</th><th>candidates</th><th>total</th><th>parseOk</th><th>parseError</th></tr></thead><tbody>' +
+            callRows +
+            "</tbody></table></div>" +
+            '<h3 class="eff-block-title">ملاحظات التقرير</h3>' +
+            '<ul class="eff-notes">' +
+            notesLi +
+            "</ul>" +
+            '<details class="eff-details"><summary>عرض JSON كامل</summary><pre class="code eff-json-pre">' +
+            jsonRaw +
+            "</pre></details>" +
+            '<div class="eff-foot">الأرقام التفصيلية من <code>usageMetadata</code> في استجابة المزود المحفوظة في <code>ai_factory_inspection_logs</code>.</div>';
         }
         function renderFinalOutput(finalOutput) {
           var meta = document.getElementById("final-output-meta");
@@ -491,20 +708,20 @@
           var secret = document.getElementById("admin-secret").value.trim();
           var jobId = Number(document.getElementById("job-id").value || "0");
           var msg = document.getElementById("msg");
-          var effCard = document.getElementById("efficiency-card");
-          var effInner = document.getElementById("efficiency-card-inner");
+          var effSection = document.getElementById("efficiency-section");
+          var effInner = document.getElementById("efficiency-section-inner");
           msg.textContent = "";
           if (!secret) {
-            effCard.hidden = true;
+            effSection.hidden = true;
             msg.textContent = "أدخل Admin Secret أولاً.";
             return;
           }
           if (!Number.isInteger(jobId) || jobId < 1) {
-            effCard.hidden = true;
+            effSection.hidden = true;
             msg.textContent = "أدخل Job ID صحيح.";
             return;
           }
-          effCard.hidden = false;
+          effSection.hidden = false;
           effInner.innerHTML = '<p class="muted" style="margin:0">جاري تحميل تقرير الكفاءة…</p>';
           var hdr = { headers: { "X-Admin-Secret": secret } };
           var base = "/api/admin/ai-factory/jobs/" + jobId + "/";
@@ -563,6 +780,27 @@
         if (jobIdParam) {
           document.getElementById("job-id").value = jobIdParam;
         }
+        document.getElementById("efficiency-section").addEventListener("click", function (ev) {
+          var t = ev.target;
+          if (t && t.closest && t.closest("[data-inspection-eff-json-copy]")) {
+            if (!window.__afInspectionEfficiencyReport) {
+              alert("لا يوجد تقرير محمّل.");
+              return;
+            }
+            var txt = JSON.stringify(window.__afInspectionEfficiencyReport, null, 2);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(txt).then(function () {
+                alert("تم نسخ تقرير الكفاءة (JSON).");
+              });
+            } else {
+              prompt("انسخ JSON:", txt);
+            }
+            return;
+          }
+          if (t && t.closest && t.closest("[data-eff-scroll-to-flow]")) {
+            document.getElementById("flow").scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+        });
       })();
     </script>
   </body>
