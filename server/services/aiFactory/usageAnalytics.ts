@@ -13,29 +13,27 @@ type GeminiPricingRule = {
   pricing: GeminiPricing;
 };
 
+/** Official pay-as-you-go reference: https://ai.google.dev/gemini-api/docs/pricing (verify periodically). */
+export const GEMINI_PRICING_DOC_URL = "https://ai.google.dev/gemini-api/docs/pricing";
+
 const GEMINI_FALLBACK_PRICING: GeminiPricing = {
   inputPerMillion: 0.075,
-  outputPerMillion: 0.30,
+  outputPerMillion: 0.3,
   source: "fallback:gemini-1.5-flash",
 };
 
+/** USD per 1M tokens; ≤200k prompt tier where Google lists split tiers. Order: most specific pattern first. */
 const GEMINI_PRICING_RULES: GeminiPricingRule[] = [
-  {
-    pattern: /gemini-3(?:\.0)?-pro/i,
-    pricing: { inputPerMillion: 1.25, outputPerMillion: 5.0, source: "gemini-3-pro" },
-  },
-  {
-    pattern: /gemini-3(?:\.0)?-flash/i,
-    pricing: { inputPerMillion: 0.5, outputPerMillion: 3.0, source: "gemini-3-flash" },
-  },
-  {
-    pattern: /gemini-1\.5-pro/i,
-    pricing: { inputPerMillion: 3.5, outputPerMillion: 10.5, source: "gemini-1.5-pro" },
-  },
-  {
-    pattern: /gemini-1\.5-flash/i,
-    pricing: { inputPerMillion: 0.075, outputPerMillion: 0.3, source: "gemini-1.5-flash" },
-  },
+  { pattern: /gemini-3\.1-flash-lite|gemini-3-flash-lite/i, pricing: { inputPerMillion: 0.25, outputPerMillion: 1.5, source: "gemini-3.1-flash-lite" } },
+  { pattern: /gemini-2\.5-flash-lite/i, pricing: { inputPerMillion: 0.1, outputPerMillion: 0.4, source: "gemini-2.5-flash-lite" } },
+  { pattern: /gemini-2\.5-flash(?!-lite)/i, pricing: { inputPerMillion: 0.3, outputPerMillion: 2.5, source: "gemini-2.5-flash" } },
+  { pattern: /gemini-2\.5-pro/i, pricing: { inputPerMillion: 1.25, outputPerMillion: 10.0, source: "gemini-2.5-pro" } },
+  { pattern: /gemini-2\.0-flash-lite/i, pricing: { inputPerMillion: 0.075, outputPerMillion: 0.3, source: "gemini-2.0-flash-lite" } },
+  { pattern: /gemini-2\.0-flash(?!-lite)/i, pricing: { inputPerMillion: 0.15, outputPerMillion: 0.6, source: "gemini-2.0-flash" } },
+  { pattern: /gemini-3(?:\.\d+)?-flash/i, pricing: { inputPerMillion: 0.5, outputPerMillion: 3.0, source: "gemini-3-flash" } },
+  { pattern: /gemini-3(?:\.\d+)?-pro/i, pricing: { inputPerMillion: 2.0, outputPerMillion: 12.0, source: "gemini-3-pro" } },
+  { pattern: /gemini-1\.5-pro/i, pricing: { inputPerMillion: 3.5, outputPerMillion: 10.5, source: "gemini-1.5-pro" } },
+  { pattern: /gemini-1\.5-flash/i, pricing: { inputPerMillion: 0.075, outputPerMillion: 0.3, source: "gemini-1.5-flash" } },
 ];
 
 export type UsageTokens = {

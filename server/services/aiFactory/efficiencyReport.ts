@@ -1,7 +1,8 @@
 import { getPool } from "../../db/pool";
+import { calculateGeminiCost, GEMINI_PRICING_DOC_URL } from "./usageAnalytics";
 import { getFactoryInspectionLogs } from "./orchestrator";
 
-const REPORT_VERSION = 1 as const;
+const REPORT_VERSION = 2 as const;
 const ALL_LAYERS = ["architect", "creator", "auditor", "refiner"] as const;
 export type EfficiencyLayerName = (typeof ALL_LAYERS)[number];
 
@@ -16,6 +17,11 @@ export type EfficiencyCallEntry = {
   totalTokenCount: number;
   parseOk: boolean;
   parseError?: string;
+  /** توكنات تُحسب كـ «مخرجات» للفوترة: thoughts + candidates (توافق وصف Google لـ output بما فيه التفكير). */
+  outputTokensForBilling: number;
+  estimatedCostUsd: number;
+  estimatedCostSar: number;
+  estimatedPricingSource: string;
 };
 
 export type EfficiencyLayerAggregate = {
@@ -24,6 +30,8 @@ export type EfficiencyLayerAggregate = {
   candidatesTokenCount: number;
   totalTokenCount: number;
   callCount: number;
+  estimatedCostUsd: number;
+  estimatedCostSar: number;
 };
 
 export type EfficiencyUsageLogRow = {
@@ -31,6 +39,15 @@ export type EfficiencyUsageLogRow = {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+};
+
+export type FactoryJobCostEstimate = {
+  pricingDocUrl: string;
+  assumptionSummary_ar: string;
+  perCallFormula_en: string;
+  sumFromUsageLogsUsd: number;
+  sumEstimatedUsd: number;
+  sumEstimatedSar: number;
 };
 
 export type FactoryJobEfficiencyReport = {
@@ -46,6 +63,8 @@ export type FactoryJobEfficiencyReport = {
     thoughtsTokenCount: number;
     candidatesTokenCount: number;
     totalTokenCount: number;
+    estimatedCostUsd: number;
+    estimatedCostSar: number;
   };
   indicators: {
     thoughtsShareOfTotal: number | null;
@@ -54,6 +73,7 @@ export type FactoryJobEfficiencyReport = {
   };
   missingLayers: string[];
   usageLogCrossCheck: EfficiencyUsageLogRow[];
+  costEstimate: FactoryJobCostEstimate;
 };
 
 function safeInt(v: unknown): number {
@@ -102,6 +122,8 @@ function emptyAggregate(): EfficiencyLayerAggregate {
     candidatesTokenCount: 0,
     totalTokenCount: 0,
     callCount: 0,
+    estimatedCostUsd: 0,
+    estimatedCostSar: 0,
   };
 }
 
@@ -133,6 +155,7 @@ async function loadUsageLogCrossCheck(jobId: number): Promise<EfficiencyUsageLog
 
 /**
  * Efficiency report for one factory job from inspection logs (usageMetadata) + usage_logs cross-check.
+ * Cost estimate: input = promptTokenCount, output = thoughtsTokenCount + candidatesTokenCount (Google output tier incl. thinking).
  */
 export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<FactoryJobEfficiencyReport> {
   const entries = await getFactoryInspectionLogs(jobId);
@@ -151,11 +174,15 @@ export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<Fa
     }
     const agg = byLayer[layerKey];
     if (parsed) {
+      const outputTokensForBilling = parsed.thoughtsTokenCount + parsed.candidatesTokenCount;
+      const cost = calculateGeminiCost(parsed.promptTokenCount, outputTokensForBilling, row.modelName);
       agg.promptTokenCount += parsed.promptTokenCount;
       agg.thoughtsTokenCount += parsed.thoughtsTokenCount;
       agg.candidatesTokenCount += parsed.candidatesTokenCount;
       agg.totalTokenCount += parsed.totalTokenCount;
       agg.callCount += 1;
+      agg.estimatedCostUsd += cost.costUsd;
+      agg.estimatedCostSar += cost.costSar;
       calls.push({
         inspectionLogId: row.id,
         layer: row.layerName,
@@ -166,6 +193,10 @@ export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<Fa
         candidatesTokenCount: parsed.candidatesTokenCount,
         totalTokenCount: parsed.totalTokenCount,
         parseOk: true,
+        outputTokensForBilling,
+        estimatedCostUsd: cost.costUsd,
+        estimatedCostSar: cost.costSar,
+        estimatedPricingSource: cost.pricingSource,
       });
     } else {
       agg.callCount += 1;
@@ -180,6 +211,10 @@ export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<Fa
         totalTokenCount: 0,
         parseOk: false,
         parseError: "usage_metadata_missing_or_invalid_json",
+        outputTokensForBilling: 0,
+        estimatedCostUsd: 0,
+        estimatedCostSar: 0,
+        estimatedPricingSource: "n/a",
       });
     }
   }
@@ -189,6 +224,8 @@ export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<Fa
     thoughtsTokenCount: 0,
     candidatesTokenCount: 0,
     totalTokenCount: 0,
+    estimatedCostUsd: 0,
+    estimatedCostSar: 0,
   };
   for (const key of Object.keys(byLayer)) {
     const a = byLayer[key];
@@ -196,6 +233,8 @@ export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<Fa
     totals.thoughtsTokenCount += a.thoughtsTokenCount;
     totals.candidatesTokenCount += a.candidatesTokenCount;
     totals.totalTokenCount += a.totalTokenCount;
+    totals.estimatedCostUsd += a.estimatedCostUsd;
+    totals.estimatedCostSar += a.estimatedCostSar;
   }
 
   const grandTotal = totals.totalTokenCount;
@@ -224,10 +263,24 @@ export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<Fa
   const missingLayers = ALL_LAYERS.filter((l) => byLayer[l].callCount === 0);
   const usageLogCrossCheck = await loadUsageLogCrossCheck(jobId);
 
+  const sumFromUsageLogsUsd = usageLogCrossCheck.reduce((s, r) => s + (Number.isFinite(r.costUsd) ? r.costUsd : 0), 0);
+
+  const costEstimate: FactoryJobCostEstimate = {
+    pricingDocUrl: GEMINI_PRICING_DOC_URL,
+    assumptionSummary_ar:
+      "التقدير يستخدم أسعار Gemini الرسمية (جدول usageAnalytics) مع مدخلات = prompt و مخرجات = thoughts + candidates. سجلات ai_usage_logs قد تظهر تكلفة أقل لأن التطبيق يخزّن output_tokens = candidates فقط عند تسجيل الاستخدام.",
+    perCallFormula_en:
+      "estimated cost per call = calculateGeminiCost(promptTokenCount, thoughtsTokenCount + candidatesTokenCount, modelName); aligns with Google output pricing where output includes thinking tokens.",
+    sumFromUsageLogsUsd,
+    sumEstimatedUsd: totals.estimatedCostUsd,
+    sumEstimatedSar: totals.estimatedCostSar,
+  };
+
   const notes = [
     "التفصيل من usageMetadata داخل استجابة المزود المحفوظة في ai_factory_inspection_logs.",
     "تعدد النداءات لنفس الطبقة: يُجمع بالجمع.",
-    "usageLogCrossCheck: ai_usage_logs (input_tokens ≈ prompt، output_tokens ≈ candidates).",
+    "usageLogCrossCheck: ai_usage_logs (input_tokens ≈ prompt، output_tokens ≈ candidates فقط عند التسجيل).",
+    `تقدير التكلفة: راجع costEstimate و ${GEMINI_PRICING_DOC_URL}`,
   ];
 
   return {
@@ -246,5 +299,6 @@ export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<Fa
     },
     missingLayers,
     usageLogCrossCheck,
+    costEstimate,
   };
 }

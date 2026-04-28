@@ -100,33 +100,98 @@
       .msg { margin-top: 0.45rem; min-height: 1.2rem; }
       .muted { color: var(--muted); }
       .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
+      .final-preview-msg {
+        margin-top: 0.4rem;
+        min-height: 1.15rem;
+        font-size: 0.86rem;
+        padding: 0.35rem 0.45rem;
+        border-radius: 0.55rem;
+      }
+      .final-preview-msg.ok {
+        color: #85e9bf;
+        background: rgba(16, 185, 129, 0.11);
+      }
+      .final-preview-msg.err {
+        color: #ffadad;
+        background: rgba(248, 113, 113, 0.11);
+      }
+      /* مطابقة معاينة استيراد JSON في admin.html */
       .preview-shell {
-        margin-top: 0.7rem;
+        margin-top: 0.8rem;
         border: 1px solid rgba(223, 187, 106, 0.2);
-        border-radius: 0.8rem;
-        padding: 0.75rem;
-        background: rgba(8, 12, 24, 0.86);
+        border-radius: 1rem;
+        padding: 0.9rem;
+        background: rgba(6, 10, 21, 0.8);
       }
       .preview-phone {
-        border: 1px solid rgba(223, 187, 106, 0.2);
-        border-radius: 0.75rem;
-        background: rgba(25, 31, 57, 0.82);
-        padding: 0.7rem;
+        max-width: 26rem;
+        margin: 0 auto;
+        border: 1px solid rgba(223, 187, 106, 0.24);
+        border-radius: 1.3rem;
+        padding: 0.85rem;
+        background: linear-gradient(to bottom, rgba(13, 19, 37, 0.96), rgba(8, 13, 27, 0.96));
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
       }
       .preview-meta {
         display: flex;
         justify-content: space-between;
-        color: #dbc89f;
-        margin-bottom: 0.45rem;
+        align-items: flex-start;
+        gap: 0.5rem;
+        color: #ccb98d;
         font-size: 0.84rem;
+        margin-bottom: 0.7rem;
       }
-      .preview-prompt { font-size: 1rem; font-weight: 700; margin-bottom: 0.55rem; }
-      .preview-options { display: grid; grid-template-columns: 1fr; gap: 0.45rem; margin-bottom: 0.6rem; }
-      .preview-options.two-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .preview-option { border: 1px solid rgba(223, 187, 106, 0.23); border-radius: 0.6rem; padding: 0.48rem; background: rgba(17, 24, 39, 0.85); }
-      .preview-option.correct { border-color: rgba(52, 211, 153, 0.75); background: rgba(6, 78, 59, 0.35); }
-      .preview-study { border: 1px solid rgba(223, 187, 106, 0.18); border-radius: 0.6rem; padding: 0.58rem; background: rgba(10, 14, 27, 0.85); }
-      .preview-empty { color: #c9ba97; text-align: center; font-size: 0.9rem; padding: 1.1rem 0.3rem; }
+      .preview-subline {
+        font-size: 0.78rem;
+        color: #b0a080;
+        margin: -0.45rem 0 0.55rem;
+        line-height: 1.35;
+        word-break: break-word;
+      }
+      .preview-prompt {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #f5eedf;
+        margin-bottom: 0.7rem;
+      }
+      .preview-options {
+        display: grid;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+      }
+      .preview-options.two-options {
+        grid-template-columns: 1fr 1fr;
+      }
+      .preview-option {
+        border: 1px solid rgba(223, 187, 106, 0.22);
+        background: rgba(12, 17, 34, 0.95);
+        color: #f0e6d2;
+        border-radius: 0.7rem;
+        padding: 0.62rem 0.75rem;
+        text-align: right;
+        font-size: 0.95rem;
+      }
+      .preview-option.correct {
+        border-color: rgba(16, 185, 129, 0.72);
+        background: rgba(16, 185, 129, 0.2);
+        color: #baf7df;
+      }
+      .preview-study {
+        margin-top: 0.75rem;
+        border: 1px solid rgba(223, 187, 106, 0.24);
+        border-radius: 0.75rem;
+        background: rgba(25, 31, 57, 0.82);
+        padding: 0.7rem;
+      }
+      .preview-study b {
+        color: #f1dbac;
+      }
+      .preview-empty {
+        color: #c9ba97;
+        text-align: center;
+        font-size: 0.9rem;
+        padding: 1.2rem 0.4rem;
+      }
       .error-timeline-list {
         display: grid;
         gap: 0.5rem;
@@ -317,6 +382,84 @@
         line-height: 1.45;
         margin-top: 0.35rem;
       }
+      .page-nav-card {
+        padding: 0.65rem 0.85rem;
+      }
+      .page-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        align-items: center;
+        margin: 0.45rem 0 0.55rem;
+      }
+      .page-nav-label {
+        font-size: 0.82rem;
+        margin: 0;
+      }
+      a.page-nav-chip {
+        display: inline-block;
+        padding: 0.32rem 0.65rem;
+        border-radius: 999px;
+        border: 1px solid rgba(223, 187, 106, 0.35);
+        background: rgba(12, 18, 34, 0.75);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+      a.page-nav-chip:hover {
+        border-color: rgba(223, 187, 106, 0.65);
+        color: var(--accent);
+      }
+      .page-nav-actions {
+        margin-top: 0.5rem;
+        padding-top: 0.55rem;
+        border-top: 1px solid rgba(223, 187, 106, 0.15);
+      }
+      #copy-full-page-json-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .eff-guide-box {
+        margin-bottom: 0.9rem;
+        padding: 0.65rem 0.75rem;
+        border-radius: 0.65rem;
+        border: 1px solid rgba(129, 200, 255, 0.22);
+        background: rgba(15, 40, 70, 0.35);
+        font-size: 0.82rem;
+        line-height: 1.55;
+      }
+      .eff-guide-box strong {
+        color: #93c5fd;
+      }
+      .eff-guide-box ul {
+        margin: 0.35rem 0 0.25rem;
+        padding-right: 1.1rem;
+      }
+      .eff-guide-en {
+        margin: 0.45rem 0 0;
+        font-size: 0.76rem;
+        opacity: 0.88;
+        direction: ltr;
+        text-align: left;
+      }
+      .eff-section .eff-table.eff-table-striped tbody tr:not(.eff-totals-row):nth-child(even) {
+        background: rgba(255, 255, 255, 0.028);
+      }
+      .eff-calls-scroll thead th {
+        position: sticky;
+        top: 0;
+        background: #0c1428;
+        box-shadow: 0 1px 0 rgba(223, 187, 106, 0.28);
+        z-index: 2;
+      }
+      .eff-details-calls summary.eff-calls-summary {
+        margin-bottom: 0.35rem;
+      }
+      .eff-section abbr {
+        text-decoration: underline dotted;
+        cursor: help;
+      }
     </style>
   </head>
   <body>
@@ -343,19 +486,41 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card page-nav-card" id="page-nav-card" hidden>
+        <p class="page-nav-label muted">التنقل السريع بين الأقسام</p>
+        <nav class="page-nav" aria-label="أقسام التقرير">
+          <a class="page-nav-chip" href="#job-meta-card">1 · الوظيفة</a>
+          <a class="page-nav-chip" href="#flow">2 · طبقات الفحص</a>
+          <a class="page-nav-chip" href="#efficiency-section">3 · الكفاءة والاستهلاك</a>
+          <a class="page-nav-chip" href="#errors-card">4 · الأخطاء</a>
+          <a class="page-nav-chip" href="#final-output-card">5 · المخرج النهائي</a>
+        </nav>
+        <div class="page-nav-actions">
+          <button
+            type="button"
+            id="copy-full-page-json-btn"
+            class="eff-action-btn"
+            disabled
+            title="نسخة JSON واحدة تشمل بيانات الوظيفة، كل الطبقات (برومبت + رد)، الأخطاء، المخرج النهائي، وتقرير الكفاءة — مناسبة للتحليل بواسطة نموذج ذكاء."
+          >
+            نسخ تقرير الصفحة كاملًا (JSON)
+          </button>
+        </div>
+      </div>
+
+      <div class="card" id="job-meta-card">
         <div id="job-meta" class="meta"></div>
         <div id="msg" class="msg"></div>
       </div>
 
-      <div id="flow" class="flow"></div>
+      <div id="flow" class="flow" tabindex="-1"></div>
 
       <section id="efficiency-section" class="eff-section" hidden aria-labelledby="efficiency-heading">
         <div class="eff-section-inner">
           <header class="eff-section-head">
             <h2 id="efficiency-heading" class="eff-section-title">تقرير كفاءة الاستهلاك</h2>
             <div class="eff-section-actions">
-              <button type="button" class="eff-action-btn" data-inspection-eff-json-copy>نسخ JSON</button>
+              <button type="button" class="eff-action-btn" data-inspection-eff-json-copy>نسخ JSON (الكفاءة فقط)</button>
               <button type="button" class="eff-action-btn" data-eff-scroll-to-flow>الانتقال لتفاصيل الطبقات</button>
             </div>
           </header>
@@ -363,27 +528,34 @@
         </div>
       </section>
 
-      <div class="card">
+      <div class="card" id="errors-card">
         <h3 class="layer-title" style="margin-bottom:0.35rem">تسلسل الأخطاء</h3>
         <div class="muted" id="errors-meta">لا توجد أخطاء.</div>
         <div id="errors-timeline" class="error-timeline-list"></div>
       </div>
 
-      <div class="card">
+      <div class="card" id="final-output-card">
         <h3 class="layer-title" style="margin-bottom:0.35rem">المخرج النهائي (Normalized JSON)</h3>
         <div class="muted" id="final-output-meta">لا يوجد مخرج نهائي بعد.</div>
+        <p class="muted" style="margin: 0.35rem 0 0; font-size: 0.82rem; line-height: 1.45">
+          يُقبل أيضًا <code>correct_index</code> بدل <code>correctIndex</code> و <code>study_body</code> بدل <code>studyBody</code> و
+          <code>subcategory_key</code> بدل <code>subcategoryKey</code> — كما في استيراد JSON بالأدمن.
+        </p>
         <div class="btn-row">
-          <button id="preview-final-btn" type="button" disabled>عرض الأسئلة</button>
+          <button id="preview-final-btn" type="button" disabled>معاينة الأسئلة</button>
         </div>
-        <div style="margin-top:0.55rem">
+        <div id="final-preview-msg" class="final-preview-msg" style="display: none" aria-live="polite"></div>
+        <div style="margin-top: 0.55rem">
           <pre id="final-output-json" class="code"></pre>
         </div>
 
         <div class="preview-shell" id="final-preview-shell" hidden>
           <div class="preview-phone" id="final-preview-phone">
-            <div class="preview-empty">لا توجد بيانات للمعاينة.</div>
+            <div class="preview-empty">
+              اضغط «معاينة الأسئلة» بعد تحميل الفحص لعرض الأسئلة بنفس شكل معاينة التحديات (استيراد JSON في الأدمن).
+            </div>
           </div>
-          <div class="btn-row">
+          <div class="btn-row" style="margin-top: 0.7rem">
             <button type="button" id="final-prev-btn">السابق</button>
             <button type="button" id="final-next-btn">التالي</button>
             <button type="button" id="final-close-btn">إغلاق المعاينة</button>
@@ -394,13 +566,101 @@
 
     <script>
       (function () {
-        var finalItems = [];
+        var finalRawItems = [];
+        var finalPreviewItems = [];
         var finalIndex = 0;
+        var difficultySet = { easy: true, medium: true, hard: true };
         function esc(s) {
           return String(s ?? "")
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;");
+        }
+        function setFinalPreviewMsg(text, ok) {
+          var el = document.getElementById("final-preview-msg");
+          if (!el) return;
+          if (!text) {
+            el.style.display = "none";
+            el.textContent = "";
+            el.className = "final-preview-msg";
+            return;
+          }
+          el.style.display = "block";
+          el.textContent = text;
+          el.className = "final-preview-msg" + (ok === true ? " ok" : ok === false ? " err" : "");
+        }
+        function resetFinalPreviewPlaceholder() {
+          var phone = document.getElementById("final-preview-phone");
+          if (!phone) return;
+          phone.innerHTML =
+            '<div class="preview-empty">اضغط «معاينة الأسئلة» بعد تحميل الفحص لعرض الأسئلة بنفس شكل معاينة التحديات (استيراد JSON في الأدمن).</div>';
+        }
+        function questionTypeLabelAr(en) {
+          var v = String(en || "").trim().toLowerCase();
+          if (v === "conceptual") return "مفاهيمي";
+          if (v === "procedural") return "إجرائي";
+          if (v === "application") return "تطبيقي";
+          return v ? v : "—";
+        }
+        function toInspectionPreviewItem(item, idx) {
+          if (!item || typeof item !== "object") return { error: "العنصر " + (idx + 1) + ": يجب أن يكون كائناً JSON." };
+          var o = item;
+          var prompt = String(o.prompt || "").trim();
+          var options = o.options;
+          var correctIndexRaw = o.correctIndex !== undefined ? o.correctIndex : o.correct_index;
+          var studyBody = String((o.studyBody !== undefined ? o.studyBody : o.study_body) || "").trim();
+          var subcategoryKey = String((o.subcategoryKey !== undefined ? o.subcategoryKey : o.subcategory_key) || "").trim();
+          var difficulty = String(o.difficulty || "").trim().toLowerCase();
+          if (!prompt) return { error: "العنصر " + (idx + 1) + ": مفتاح prompt مفقود أو فارغ." };
+          if (!Array.isArray(options) || (options.length !== 2 && options.length !== 4)) {
+            return { error: "العنصر " + (idx + 1) + ": options يجب أن تكون مصفوفة من عنصرين أو 4 عناصر." };
+          }
+          var normalizedOptions = options.map(function (x) {
+            return String(x || "").trim();
+          });
+          if (normalizedOptions.some(function (x) {
+            return !x;
+          }))
+            return { error: "العنصر " + (idx + 1) + ": جميع عناصر options مطلوبة." };
+          var correctIndex = Number(correctIndexRaw);
+          if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= normalizedOptions.length) {
+            return { error: "العنصر " + (idx + 1) + ": correctIndex يجب أن يكون ضمن مدى الخيارات الفعلي." };
+          }
+          if (!studyBody) return { error: "العنصر " + (idx + 1) + ": مفتاح studyBody مفقود أو فارغ." };
+          if (!subcategoryKey) return { error: "العنصر " + (idx + 1) + ": مفتاح subcategoryKey مفقود أو فارغ." };
+          if (!difficultySet[difficulty]) return { error: "العنصر " + (idx + 1) + ": difficulty يجب أن تكون easy أو medium أو hard." };
+          var rawQt = o.questionType !== undefined ? o.questionType : o.question_type;
+          var questionTypeEn =
+            rawQt != null && String(rawQt).trim() ? String(rawQt).trim().toLowerCase() : "conceptual";
+          return {
+            prompt: prompt,
+            options: normalizedOptions,
+            correctIndex: correctIndex,
+            studyBody: studyBody,
+            subcategoryKey: subcategoryKey,
+            difficulty: difficulty,
+            questionTypeEn: questionTypeEn,
+          };
+        }
+        function buildFinalPreviewFromRaw() {
+          setFinalPreviewMsg("", null);
+          if (!finalRawItems.length) {
+            setFinalPreviewMsg("لا يوجد مخرج نهائي للمعاينة.", false);
+            return false;
+          }
+          var next = [];
+          for (var i = 0; i < finalRawItems.length; i++) {
+            var normalized = toInspectionPreviewItem(finalRawItems[i], i);
+            if (normalized.error) {
+              setFinalPreviewMsg(normalized.error, false);
+              return false;
+            }
+            next.push(normalized);
+          }
+          finalPreviewItems = next;
+          finalIndex = 0;
+          setFinalPreviewMsg("تم تجهيز " + String(next.length) + " سؤالًا للمعاينة.", true);
+          return true;
         }
         function syntaxHighlightJson(text) {
           try {
@@ -491,6 +751,89 @@
           if (!Number.isFinite(x)) return "0";
           return x.toFixed(6);
         }
+        var FIELD_GUIDE = {
+          pipeline_ar:
+            "تسلسل AI Factory النموذجي: architect → creator → auditor → (اختياري) refiner. كل طبقة تُسجَّل في inspection مع prompt ورد خام.",
+          pipeline_en: "Typical layer order: architect, creator, auditor, optional refiner.",
+          tokenColumns_ar: {
+            prompt: "مدخلات الطلب والسياق المرسل للمزود (usageMetadata.promptTokenCount).",
+            thoughts: "تفكير داخلي عند تفعيله (usageMetadata.thoughtsTokenCount).",
+            candidates: "نص المخرج الظاهر (usageMetadata.candidatesTokenCount).",
+            total: "ما يعلنه المزود كمجموع للنداء (usageMetadata.totalTokenCount).",
+          },
+          tokenColumns_en: {
+            prompt: "Billed input side of the request.",
+            thoughts: "Internal reasoning tokens when the model reports them.",
+            candidates: "Visible model output tokens.",
+            total: "Provider-reported total for the call.",
+          },
+          billingCrossCheck_ar:
+            "جدول ai_usage_logs يطابق الفوترة في لوحة الاستخدام؛ input_tokens ≈ prompt و output_tokens ≈ candidates تقريبًا.",
+          exportNote_ar:
+            "حقل rawResponseJson يُملأ فقط إذا كان الرد المحفوظ JSON صالحًا؛ وإلا يبقى النص في rawResponseText فقط.",
+        };
+        function tryParseJsonText(text) {
+          try {
+            var t = String(text || "").trim();
+            if (!t) return null;
+            return JSON.parse(t);
+          } catch {
+            return null;
+          }
+        }
+        function buildInspectionLayersForExport(layers) {
+          return (layers || []).map(function (row) {
+            var entry = {
+              id: row.id,
+              layerName: row.layerName,
+              promptText: row.promptText,
+              rawResponseText: row.rawResponseText,
+              provider: row.provider,
+              modelName: row.modelName,
+              apiVersion: row.apiVersion,
+              createdAt: row.createdAt,
+            };
+            var parsed = tryParseJsonText(row.rawResponseText);
+            entry.rawResponseJson = parsed;
+            return entry;
+          });
+        }
+        function buildFullPageBundle(inspJson, effRes, effJson) {
+          var effOk = !!(effRes && effRes.ok && effJson && effJson.ok && effJson.report);
+          return {
+            exportSchemaVersion: 1,
+            exportedAt: new Date().toISOString(),
+            purpose_ar:
+              "لقطة كاملة لوظيفة واحدة في AI Factory: بيانات الوظيفة، كل طبقات الفحص (برومبت + رد خام + rawResponseJson عند توفر JSON)، تسلسل الأخطاء، المخرج النهائي، وتقرير كفاءة التوكنات.",
+            purpose_en: "Full snapshot for human or LLM analysis of one AI Factory job.",
+            job: inspJson.job || null,
+            inspectionLayers: buildInspectionLayersForExport(inspJson.layers),
+            errorsTimeline: inspJson.errorsTimeline || [],
+            finalOutput: inspJson.finalOutput != null ? inspJson.finalOutput : null,
+            efficiencyReport: effOk ? effJson.report : null,
+            efficiencyFetchOk: !!(effRes && effRes.ok),
+            efficiencyJsonOk: !!(effJson && effJson.ok),
+            efficiencyError:
+              effRes && !effRes.ok
+                ? "efficiency_http_failed"
+                : effJson && !effJson.ok
+                  ? String(effJson.error || "efficiency_not_ok")
+                  : !effOk
+                    ? "efficiency_report_missing"
+                    : null,
+            fieldGuide: FIELD_GUIDE,
+            uiHints: {
+              page: "admin/ai-inspection",
+              anchors: ["#job-meta-card", "#flow", "#efficiency-section", "#errors-card", "#final-output-card"],
+            },
+          };
+        }
+        function setPageExportUi(enabled) {
+          var nav = document.getElementById("page-nav-card");
+          var btn = document.getElementById("copy-full-page-json-btn");
+          if (nav) nav.hidden = !enabled;
+          if (btn) btn.disabled = !enabled;
+        }
         function renderEfficiencyReport(effRes, effJson) {
           var inner = document.getElementById("efficiency-section-inner");
           if (!effRes.ok || !effJson.ok || !effJson.report) {
@@ -508,6 +851,11 @@
               ? Math.round(rep.indicators.thoughtsShareOfTotal * 100) + "%"
               : "—";
           var callsArr = Array.isArray(rep.calls) ? rep.calls : [];
+          var ce = rep.costEstimate || {};
+          var estUsd = t.estimatedCostUsd != null ? t.estimatedCostUsd : 0;
+          var estSar = t.estimatedCostSar != null ? t.estimatedCostSar : 0;
+          var logsUsd = ce.sumFromUsageLogsUsd != null ? ce.sumFromUsageLogsUsd : 0;
+          var pricingUrl = String(ce.pricingDocUrl || "https://ai.google.dev/gemini-api/docs/pricing");
           var miss = Array.isArray(rep.missingLayers) ? rep.missingLayers : [];
           var missHtml = miss.length
             ? '<div class="eff-alert" role="alert">طبقات بلا سجلات فحص لهذا الـ job: ' +
@@ -526,8 +874,10 @@
               layerRows +=
                 "<tr><td>" +
                 esc(layer) +
-                "</td><td colspan=\"5\" style=\"opacity:0.72\">— لا يوجد استدعاء مسجل</td></tr>";
+                "</td><td colspan=\"7\" style=\"opacity:0.72\">— لا يوجد استدعاء مسجل</td></tr>";
             } else {
+              var uCost = b.estimatedCostUsd != null ? b.estimatedCostUsd : 0;
+              var sCost = b.estimatedCostSar != null ? b.estimatedCostSar : 0;
               layerRows +=
                 "<tr><td>" +
                 esc(layer) +
@@ -541,7 +891,11 @@
                 esc(String(b.totalTokenCount)) +
                 "</strong></td><td>" +
                 esc(String(pct)) +
-                "%</td></tr>";
+                "%</td><td>" +
+                esc(effFmtCost(uCost)) +
+                "</td><td>" +
+                esc(effFmtCost(sCost)) +
+                "</td></tr>";
             }
           });
           var crossRows = "";
@@ -567,6 +921,8 @@
             callsArr.forEach(function (c) {
               var ok = c.parseOk ? "نعم" : "لا";
               var errCell = c.parseOk ? "—" : esc(String(c.parseError || "parse_error"));
+              var cUsd = c.estimatedCostUsd != null ? c.estimatedCostUsd : 0;
+              var cSar = c.estimatedCostSar != null ? c.estimatedCostSar : 0;
               callRows +=
                 "<tr><td>" +
                 esc(String(c.inspectionLogId)) +
@@ -585,6 +941,10 @@
                 "</td><td><strong>" +
                 esc(String(c.totalTokenCount)) +
                 "</strong></td><td>" +
+                esc(effFmtCost(cUsd)) +
+                "</td><td>" +
+                esc(effFmtCost(cSar)) +
+                "</td><td>" +
                 esc(ok) +
                 "</td><td>" +
                 errCell +
@@ -592,13 +952,31 @@
             });
           } else {
             callRows =
-              '<tr><td colspan="10" class="muted" style="text-align:center">لا توجد صفوف نداءات (لا سجلات inspection).</td></tr>';
+              '<tr><td colspan="12" class="muted" style="text-align:center">لا توجد صفوف نداءات (لا سجلات inspection).</td></tr>';
           }
           var notesLi = (Array.isArray(rep.notes) ? rep.notes : []).map(function (n) {
             return "<li>" + esc(String(n)) + "</li>";
           }).join("");
           if (!notesLi) notesLi = "<li class=\"muted\">—</li>";
           var jsonRaw = esc(JSON.stringify(rep, null, 2));
+          var effGuide =
+            '<div class="eff-guide-box" role="note">' +
+            "<strong>دليل سريع للمقاييس</strong>" +
+            "<ul>" +
+            "<li><strong>prompt</strong>: كل ما يُحسب كمدخلات للطلب (التعليمات + السياق).</li>" +
+            "<li><strong>thoughts</strong>: تفكير داخلي للنموذج إن وُجد — يُحسب في الفاتورة أحيانًا دون أن يظهر كاملًا في الواجهة.</li>" +
+            "<li><strong>candidates</strong>: النص الظاهر للمستخدم (مخرجات الطبقة).</li>" +
+            "<li><strong>total</strong>: ما يعيده المزود كمجموع للنداء (غالبًا مجموع المكونات).</li>" +
+            "<li><strong>% من job</strong>: حصة طبقة من إجمالي التوكن لهذه الوظيفة.</li>" +
+            "</ul>" +
+            '<p class="eff-guide-en">For analysts: prompt ≈ billed input; thoughts = internal reasoning tokens when enabled; candidates = visible output text; total = provider-reported sum.</p>' +
+            "</div>";
+          var thAgg =
+            '<thead><tr><th>طبقة</th><th><abbr title="توكنات مدخلات الطلب والسياق">prompt</abbr></th><th><abbr title="تفكير داخلي إن وُجد">thoughts</abbr></th><th><abbr title="مخرجات النص الظاهرة">candidates</abbr></th><th><abbr title="مجموع المزود">total</abbr></th><th><abbr title="حصة هذه الطبقة من إجمالي الوظيفة">% من job</abbr></th><th><abbr title="تقدير من جدول الأسعار الرسمي">USD</abbr></th><th><abbr title="تقدير بالريال">SAR</abbr></th></tr></thead><tbody>';
+          var thCross =
+            '<thead><tr><th>layer_type</th><th><abbr title="من جدول ai_usage_logs — قريب من prompt">input_tokens</abbr></th><th><abbr title="قريب من candidates">output_tokens</abbr></th><th><abbr title="تكلفة مقدرة بالدولار">cost_usd</abbr></th></tr></thead><tbody>';
+          var thCalls =
+            '<thead><tr><th>id</th><th>layer</th><th>model</th><th>createdAt</th><th><abbr title="usageMetadata">prompt</abbr></th><th><abbr title="usageMetadata">thoughts</abbr></th><th><abbr title="usageMetadata">candidates</abbr></th><th><abbr title="usageMetadata">total</abbr></th><th>USD</th><th>SAR</th><th>parseOk</th><th>parseError</th></tr></thead><tbody>';
           inner.innerHTML =
             '<div class="eff-meta-bar">' +
             "<div><strong>jobId:</strong> " +
@@ -612,16 +990,32 @@
             '<div class="eff-kpi-grid">' +
             '<div class="eff-kpi-card"><b>' +
             esc(String(t.totalTokenCount != null ? t.totalTokenCount : 0)) +
-            '</b><span>إجمالي totalTokenCount</span></div>' +
+            '</b><span>إجمالي التوكن (total)</span></div>' +
             '<div class="eff-kpi-card"><b>' +
             esc(thShare) +
-            '</b><span>نسبة thoughts من الإجمالي</span></div>' +
+            '</b><span>نسبة التفكير من الإجمالي</span></div>' +
             '<div class="eff-kpi-card"><b>' +
             esc(String(dom)) +
-            '</b><span>أعلى طبقة حسب total</span></div>' +
+            '</b><span>أعلى طبقة استهلاكًا</span></div>' +
             '<div class="eff-kpi-card"><b>' +
             esc(String(callsArr.length)) +
             '</b><span>عدد نداءات الفحص</span></div></div>' +
+            '<div class="eff-meta-bar" style="margin-top:0.55rem">' +
+            "<div><strong>تقدير التكلفة (inspection + thoughts كمخرجات):</strong> " +
+            esc(effFmtCost(estUsd)) +
+            " USD — " +
+            esc(effFmtCost(estSar)) +
+            " SAR</div>" +
+            "<div style=\"margin-top:0.3rem\"><strong>مجموع تكلفة ai_usage_logs:</strong> " +
+            esc(effFmtCost(logsUsd)) +
+            " USD</div>" +
+            '<div style="margin-top:0.35rem"><a href="' +
+            esc(pricingUrl) +
+            "\" target=\"_blank\" rel=\"noopener noreferrer\">مرجع التسعير الرسمي (Google)</a></div>" +
+            '<div class="muted" style="margin-top:0.35rem;font-size:0.78rem;line-height:1.45">' +
+            esc(String(ce.assumptionSummary_ar || "")) +
+            "</div></div>" +
+            effGuide +
             missHtml +
             '<div class="eff-summary">ملخص سريع: أعلى طبقة <strong>' +
             esc(String(dom)) +
@@ -629,7 +1023,8 @@
             esc(thShare) +
             "</strong> من إجمالي التوكن.</div>" +
             '<h3 class="eff-block-title">تجميع حسب الطبقة (usageMetadata)</h3>' +
-            '<table class="eff-table"><thead><tr><th>طبقة</th><th>prompt</th><th>thoughts</th><th>candidates</th><th>total</th><th>% من job</th></tr></thead><tbody>' +
+            '<table class="eff-table eff-table-striped">' +
+            thAgg +
             layerRows +
             '<tr class="eff-totals-row"><td>الإجمالي</td><td>' +
             esc(String(t.promptTokenCount != null ? t.promptTokenCount : 0)) +
@@ -639,70 +1034,105 @@
             esc(String(t.candidatesTokenCount != null ? t.candidatesTokenCount : 0)) +
             "</td><td>" +
             esc(String(t.totalTokenCount != null ? t.totalTokenCount : 0)) +
-            '</td><td>100%</td></tr></tbody></table>' +
+            '</td><td>100%</td><td>' +
+            esc(effFmtCost(estUsd)) +
+            "</td><td>" +
+            esc(effFmtCost(estSar)) +
+            "</td></tr></tbody></table>" +
             '<h3 class="eff-block-title">مطابقة ai_usage_logs (فوترة)</h3>' +
-            '<table class="eff-table eff-subtable"><thead><tr><th>layer_type</th><th>input_tokens</th><th>output_tokens</th><th>cost_usd</th></tr></thead><tbody>' +
+            '<table class="eff-table eff-subtable eff-table-striped">' +
+            thCross +
             crossRows +
             "</tbody></table>" +
-            '<h3 class="eff-block-title">نداءات الفحص (كل صف inspection)</h3>' +
-            '<div class="eff-calls-scroll"><table class="eff-table eff-subtable"><thead><tr><th>id</th><th>layer</th><th>model</th><th>createdAt</th><th>prompt</th><th>thoughts</th><th>candidates</th><th>total</th><th>parseOk</th><th>parseError</th></tr></thead><tbody>' +
+            '<h3 class="eff-block-title">نداءات الفحص</h3>' +
+            '<details class="eff-details eff-details-calls">' +
+            '<summary class="eff-calls-summary">عرض جدول نداءات الفحص الكامل (' +
+            esc(String(callsArr.length)) +
+            " صف) — للتفاصيل الدقيقة لكل استدعاء</summary>" +
+            '<div class="eff-calls-scroll"><table class="eff-table eff-subtable eff-table-striped">' +
+            thCalls +
             callRows +
-            "</tbody></table></div>" +
+            "</tbody></table></div></details>" +
             '<h3 class="eff-block-title">ملاحظات التقرير</h3>' +
             '<ul class="eff-notes">' +
             notesLi +
             "</ul>" +
-            '<details class="eff-details"><summary>عرض JSON كامل</summary><pre class="code eff-json-pre">' +
+            '<details class="eff-details"><summary>عرض JSON تقرير الكفاءة فقط</summary><pre class="code eff-json-pre">' +
             jsonRaw +
             "</pre></details>" +
-            '<div class="eff-foot">الأرقام التفصيلية من <code>usageMetadata</code> في استجابة المزود المحفوظة في <code>ai_factory_inspection_logs</code>.</div>';
+            '<div class="eff-foot">الأرقام التفصيلية من <code>usageMetadata</code> في استجابة المزود المحفوظة في <code>ai_factory_inspection_logs</code>. جدول الفوترة من <code>ai_usage_logs</code>.</div>';
         }
         function renderFinalOutput(finalOutput) {
           var meta = document.getElementById("final-output-meta");
           var pre = document.getElementById("final-output-json");
           var btn = document.getElementById("preview-final-btn");
-          finalItems = Array.isArray(finalOutput) ? finalOutput : [];
+          var shell = document.getElementById("final-preview-shell");
+          finalRawItems = Array.isArray(finalOutput) ? finalOutput : [];
+          finalPreviewItems = [];
           finalIndex = 0;
-          if (!finalItems.length) {
+          setFinalPreviewMsg("", null);
+          shell.hidden = true;
+          resetFinalPreviewPlaceholder();
+          if (!finalRawItems.length) {
             meta.textContent = "لا يوجد مخرج نهائي بعد (قد يكون الـ job فشل أو لم يكتمل).";
             pre.textContent = "";
             btn.disabled = true;
-            document.getElementById("final-preview-shell").hidden = true;
             return;
           }
-          var p = syntaxHighlightJson(JSON.stringify(finalItems));
+          var p = syntaxHighlightJson(JSON.stringify(finalRawItems));
           pre.innerHTML = p.html;
-          meta.textContent = "تم العثور على " + String(finalItems.length) + " سؤالًا نهائيًا.";
+          meta.textContent = "تم العثور على " + String(finalRawItems.length) + " سؤالًا نهائيًا.";
           btn.disabled = false;
-          renderFinalPreview();
         }
         function renderFinalPreview() {
           var phone = document.getElementById("final-preview-phone");
           var prev = document.getElementById("final-prev-btn");
           var next = document.getElementById("final-next-btn");
-          if (!finalItems.length) {
+          if (!finalPreviewItems.length) {
             phone.innerHTML = '<div class="preview-empty">لا توجد بيانات للمعاينة.</div>';
             prev.disabled = true;
             next.disabled = true;
             return;
           }
           if (finalIndex < 0) finalIndex = 0;
-          if (finalIndex >= finalItems.length) finalIndex = finalItems.length - 1;
-          var item = finalItems[finalIndex] || {};
-          var options = Array.isArray(item.options) ? item.options : [];
-          var correctIndex = Number(item.correctIndex);
-          var optsHtml = options.map(function (opt, i) {
-            var cls = "preview-option" + (i === correctIndex ? " correct" : "");
-            return '<div class="' + cls + '">' + esc(opt) + "</div>";
-          }).join("");
+          if (finalIndex >= finalPreviewItems.length) finalIndex = finalPreviewItems.length - 1;
+          var item = finalPreviewItems[finalIndex] || {};
+          var options = item.options || [];
+          var correctIndex = item.correctIndex;
+          var optsHtml = options
+            .map(function (opt, i) {
+              var cls = "preview-option" + (i === correctIndex ? " correct" : "");
+              return '<div class="' + cls + '">' + esc(opt) + "</div>";
+            })
+            .join("");
           var optionsClass = options.length === 2 ? "preview-options two-options" : "preview-options";
+          var qtAr = questionTypeLabelAr(item.questionTypeEn);
           phone.innerHTML =
-            '<div class="preview-meta"><span>السؤال ' + String(finalIndex + 1) + " / " + String(finalItems.length) + '</span><span>' + esc(item.difficulty || "-") + "</span></div>" +
-            '<div class="preview-prompt">' + esc(item.prompt || "") + "</div>" +
-            '<div class="' + optionsClass + '">' + optsHtml + "</div>" +
-            '<div class="preview-study"><b>بطاقة المذاكرة:</b><div style="margin-top:0.4rem">' + esc(item.studyBody || "") + "</div></div>";
+            '<div class="preview-meta"><span>السؤال ' +
+            String(finalIndex + 1) +
+            " / " +
+            String(finalPreviewItems.length) +
+            '</span><span>' +
+            esc(item.difficulty || "-") +
+            "</span></div>" +
+            '<div class="preview-subline">' +
+            esc(item.subcategoryKey || "") +
+            " · " +
+            esc(qtAr) +
+            "</div>" +
+            '<div class="preview-prompt">' +
+            esc(item.prompt || "") +
+            "</div>" +
+            '<div class="' +
+            optionsClass +
+            '">' +
+            optsHtml +
+            "</div>" +
+            '<div class="preview-study"><b>بطاقة المذاكرة:</b><div style="margin-top:0.45rem">' +
+            esc(item.studyBody || "") +
+            "</div></div>";
           prev.disabled = finalIndex <= 0;
-          next.disabled = finalIndex >= finalItems.length - 1;
+          next.disabled = finalIndex >= finalPreviewItems.length - 1;
         }
         async function loadInspection() {
           var secret = document.getElementById("admin-secret").value.trim();
@@ -713,11 +1143,15 @@
           msg.textContent = "";
           if (!secret) {
             effSection.hidden = true;
+            window.__afInspectionPageBundle = null;
+            setPageExportUi(false);
             msg.textContent = "أدخل Admin Secret أولاً.";
             return;
           }
           if (!Number.isInteger(jobId) || jobId < 1) {
             effSection.hidden = true;
+            window.__afInspectionPageBundle = null;
+            setPageExportUi(false);
             msg.textContent = "أدخل Job ID صحيح.";
             return;
           }
@@ -741,9 +1175,13 @@
             renderFlow(json.layers || []);
             renderErrorsTimeline(json.errorsTimeline || []);
             renderFinalOutput(json.finalOutput);
+            window.__afInspectionPageBundle = buildFullPageBundle(json, effRes, effJson);
+            setPageExportUi(true);
             msg.textContent = "تم تحميل بيانات الفحص وتقرير الكفاءة.";
           } catch {
             msg.textContent = "تعذر تحميل بيانات الفحص.";
+            window.__afInspectionPageBundle = null;
+            setPageExportUi(false);
             if (effInner.innerHTML.indexOf("جاري تحميل تقرير الكفاءة") !== -1) {
               effInner.innerHTML =
                 '<p class="muted" style="margin:0">تعذر تحميل البيانات (الشبكة أو الاستجابة).</p>';
@@ -754,16 +1192,32 @@
             renderFinalOutput(null);
           }
         }
+        document.getElementById("copy-full-page-json-btn").addEventListener("click", function () {
+          if (!window.__afInspectionPageBundle) {
+            alert("حمّل الفحص أولاً (زر «تحميل الفحص») ثم انسخ التقرير الكامل.");
+            return;
+          }
+          var txt = JSON.stringify(window.__afInspectionPageBundle, null, 2);
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(txt).then(function () {
+              alert("تم نسخ تقرير الصفحة كاملًا (JSON). يمكن لصقه في محرر أو إرساله لنموذج ذكاء للتحليل.");
+            });
+          } else {
+            prompt("انسخ JSON:", txt);
+          }
+        });
         document.getElementById("load-btn").addEventListener("click", loadInspection);
         document.getElementById("back-btn").addEventListener("click", function () {
           window.location.href = "/admin";
         });
         document.getElementById("preview-final-btn").addEventListener("click", function () {
+          if (!buildFinalPreviewFromRaw()) return;
           document.getElementById("final-preview-shell").hidden = false;
           renderFinalPreview();
         });
         document.getElementById("final-close-btn").addEventListener("click", function () {
           document.getElementById("final-preview-shell").hidden = true;
+          resetFinalPreviewPlaceholder();
         });
         document.getElementById("final-prev-btn").addEventListener("click", function () {
           if (finalIndex <= 0) return;
@@ -771,7 +1225,7 @@
           renderFinalPreview();
         });
         document.getElementById("final-next-btn").addEventListener("click", function () {
-          if (finalIndex >= finalItems.length - 1) return;
+          if (finalIndex >= finalPreviewItems.length - 1) return;
           finalIndex += 1;
           renderFinalPreview();
         });
@@ -790,7 +1244,7 @@
             var txt = JSON.stringify(window.__afInspectionEfficiencyReport, null, 2);
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(txt).then(function () {
-                alert("تم نسخ تقرير الكفاءة (JSON).");
+                alert("تم نسخ JSON تقرير الكفاءة فقط (بدون باقي الصفحة).");
               });
             } else {
               prompt("انسخ JSON:", txt);

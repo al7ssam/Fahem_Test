@@ -3111,7 +3111,16 @@
               sec.style.padding = "0.5rem";
               sec.style.border = "1px solid rgba(223,187,106,0.25)";
               sec.style.borderRadius = "6px";
-              var t = rep.totals;
+              var t = rep.totals || {};
+              var ce = rep.costEstimate || {};
+              var estUsd = t.estimatedCostUsd != null ? t.estimatedCostUsd : 0;
+              var estSar = t.estimatedCostSar != null ? t.estimatedCostSar : 0;
+              var logsUsd = ce.sumFromUsageLogsUsd != null ? ce.sumFromUsageLogsUsd : 0;
+              var fmtCost = function (n) {
+                var x = Number(n);
+                if (!Number.isFinite(x)) return "0";
+                return x.toFixed(6);
+              };
               var dom = rep.indicators.dominantLayerByTotal || "—";
               var thShare =
                 rep.indicators.thoughtsShareOfTotal != null
@@ -3128,8 +3137,10 @@
                   layerRows +=
                     "<tr><td>" +
                     layer +
-                    "</td><td colspan='5' style='opacity:0.72'>— لا يوجد استدعاء مسجل</td></tr>";
+                    "</td><td colspan='7' style='opacity:0.72'>— لا يوجد استدعاء مسجل</td></tr>";
                 } else {
+                  var uC = b.estimatedCostUsd != null ? b.estimatedCostUsd : 0;
+                  var sC = b.estimatedCostSar != null ? b.estimatedCostSar : 0;
                   layerRows +=
                     "<tr><td>" +
                     layer +
@@ -3143,7 +3154,11 @@
                     b.totalTokenCount +
                     "</strong></td><td>" +
                     pct +
-                    "%</td></tr>";
+                    "%</td><td>" +
+                    fmtCost(uC) +
+                    "</td><td>" +
+                    fmtCost(sC) +
+                    "</td></tr>";
                 }
               });
               var uchk =
@@ -3164,8 +3179,17 @@
                 "</strong> — نسبة التفكير من الإجمالي: <strong>" +
                 thShare +
                 "</strong></div>" +
+                "<div style='font-size:0.82rem;opacity:0.9;margin-bottom:0.35rem'>تقدير التكلفة (prompt + thoughts+candidates): <strong>" +
+                fmtCost(estUsd) +
+                " USD</strong> / <strong>" +
+                fmtCost(estSar) +
+                " SAR</strong> — مجموع <code>ai_usage_logs</code>: <strong>" +
+                fmtCost(logsUsd) +
+                " USD</strong>. <a href=\"" +
+                String(ce.pricingDocUrl || "https://ai.google.dev/gemini-api/docs/pricing") +
+                "\" target=\"_blank\" rel=\"noopener noreferrer\">تسعير Google</a></div>" +
                 "<table style='width:100%;border-collapse:collapse;font-size:0.86rem;margin-bottom:0.35rem'>" +
-                "<thead><tr><th style='text-align:right'>طبقة</th><th>prompt</th><th>thoughts</th><th>candidates</th><th>total</th><th>% من job</th></tr></thead><tbody>" +
+                "<thead><tr><th style='text-align:right'>طبقة</th><th>prompt</th><th>thoughts</th><th>candidates</th><th>total</th><th>% من job</th><th>USD</th><th>SAR</th></tr></thead><tbody>" +
                 layerRows +
                 "<tr style='font-weight:bold;border-top:1px solid rgba(223,187,106,0.28)'><td>الإجمالي</td><td>" +
                 t.promptTokenCount +
@@ -3175,7 +3199,11 @@
                 t.candidatesTokenCount +
                 "</td><td>" +
                 t.totalTokenCount +
-                "</td><td>100%</td></tr></tbody></table>" +
+                "</td><td>100%</td><td>" +
+                fmtCost(estUsd) +
+                "</td><td>" +
+                fmtCost(estSar) +
+                "</td></tr></tbody></table>" +
                 "<div style='font-size:0.8rem;opacity:0.75'>المصدر: <code>usageMetadata</code> من سجلات الفحص. مطابقة الفوترة: " +
                 uchk +
                 "</div>";
