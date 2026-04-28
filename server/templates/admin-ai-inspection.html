@@ -145,6 +145,50 @@
         white-space: pre-wrap;
         color: #f9d9d9;
       }
+      .eff-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.45rem;
+      }
+      .eff-summary {
+        font-size: 0.88rem;
+        opacity: 0.92;
+        margin-bottom: 0.4rem;
+      }
+      .eff-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+        margin-bottom: 0.4rem;
+        direction: ltr;
+        text-align: center;
+      }
+      .eff-table th,
+      .eff-table td {
+        border: 1px solid rgba(223, 187, 106, 0.22);
+        padding: 0.38rem 0.28rem;
+      }
+      .eff-table th:first-child,
+      .eff-table td:first-child {
+        text-align: right;
+        direction: rtl;
+      }
+      .eff-table tbody tr:last-child td {
+        font-weight: 800;
+        border-top: 1px solid rgba(223, 187, 106, 0.32);
+      }
+      .eff-foot {
+        font-size: 0.78rem;
+        opacity: 0.78;
+        line-height: 1.45;
+      }
+      button.eff-copy-btn {
+        width: auto;
+        padding: 0.4rem 0.75rem;
+        font-size: 0.82rem;
+      }
     </style>
   </head>
   <body>
@@ -174,6 +218,11 @@
       <div class="card">
         <div id="job-meta" class="meta"></div>
         <div id="msg" class="msg"></div>
+      </div>
+
+      <div id="efficiency-card" class="card" hidden>
+        <h3 class="layer-title" style="margin-bottom: 0.35rem">تقرير كفاءة الاستهلاك</h3>
+        <div id="efficiency-card-inner" class="muted">—</div>
       </div>
 
       <div id="flow" class="flow"></div>
@@ -301,6 +350,96 @@
             box.appendChild(row);
           });
         }
+        function renderEfficiencyReport(effRes, effJson) {
+          var inner = document.getElementById("efficiency-card-inner");
+          if (!effRes.ok || !effJson.ok || !effJson.report) {
+            window.__afInspectionEfficiencyReport = null;
+            inner.innerHTML =
+              '<p class="muted" style="margin:0">تعذر تحميل تقرير الكفاءة لهذا الـ job.</p>';
+            return;
+          }
+          var rep = effJson.report;
+          window.__afInspectionEfficiencyReport = rep;
+          var t = rep.totals;
+          var dom = rep.indicators.dominantLayerByTotal || "—";
+          var thShare =
+            rep.indicators.thoughtsShareOfTotal != null
+              ? Math.round(rep.indicators.thoughtsShareOfTotal * 100) + "%"
+              : "—";
+          var layerRows = "";
+          ["architect", "creator", "auditor", "refiner"].forEach(function (layer) {
+            var b = rep.byLayer && rep.byLayer[layer];
+            var pct =
+              (rep.indicators.layerShareOfTotalTokensPercent &&
+                rep.indicators.layerShareOfTotalTokensPercent[layer]) ||
+              0;
+            if (!b || b.callCount === 0) {
+              layerRows +=
+                "<tr><td>" +
+                esc(layer) +
+                "</td><td colspan=\"5\" style=\"opacity:0.72\">— لا يوجد استدعاء مسجل</td></tr>";
+            } else {
+              layerRows +=
+                "<tr><td>" +
+                esc(layer) +
+                "</td><td>" +
+                esc(String(b.promptTokenCount)) +
+                "</td><td>" +
+                esc(String(b.thoughtsTokenCount)) +
+                "</td><td>" +
+                esc(String(b.candidatesTokenCount)) +
+                "</td><td><strong>" +
+                esc(String(b.totalTokenCount)) +
+                "</strong></td><td>" +
+                esc(String(pct)) +
+                "%</td></tr>";
+            }
+          });
+          var uchk =
+            rep.usageLogCrossCheck && rep.usageLogCrossCheck.length
+              ? rep.usageLogCrossCheck
+                  .map(function (u) {
+                    return esc(String(u.layerType || "")) + " in/out=" + esc(String(u.inputTokens)) + "/" + esc(String(u.outputTokens));
+                  })
+                  .join(" | ")
+              : "لا صفوف";
+          inner.innerHTML =
+            '<div class="eff-toolbar">' +
+            '<button type="button" class="eff-copy-btn" data-inspection-eff-json-copy>نسخ JSON</button>' +
+            "</div>" +
+            '<div class="eff-summary">أعلى طبقة حسب total: <strong>' +
+            esc(dom) +
+            "</strong> — نسبة التفكير من الإجمالي: <strong>" +
+            esc(thShare) +
+            "</strong></div>" +
+            '<table class="eff-table"><thead><tr><th>طبقة</th><th>prompt</th><th>thoughts</th><th>candidates</th><th>total</th><th>% من job</th></tr></thead><tbody>' +
+            layerRows +
+            "<tr><td>الإجمالي</td><td>" +
+            esc(String(t.promptTokenCount)) +
+            "</td><td>" +
+            esc(String(t.thoughtsTokenCount)) +
+            "</td><td>" +
+            esc(String(t.candidatesTokenCount)) +
+            "</td><td>" +
+            esc(String(t.totalTokenCount)) +
+            '</td><td>100%</td></tr></tbody></table>' +
+            '<div class="eff-foot">المصدر: <code>usageMetadata</code> من سجلات الفحص. مطابقة الفوترة: ' +
+            uchk +
+            "</div>";
+          var copyBtn = inner.querySelector("[data-inspection-eff-json-copy]");
+          if (copyBtn) {
+            copyBtn.addEventListener("click", function () {
+              var txt = JSON.stringify(window.__afInspectionEfficiencyReport, null, 2);
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(txt).then(function () {
+                  alert("تم نسخ تقرير الكفاءة (JSON).");
+                });
+              } else {
+                prompt("انسخ JSON:", txt);
+              }
+            });
+          }
+        }
         function renderFinalOutput(finalOutput) {
           var meta = document.getElementById("final-output-meta");
           var pre = document.getElementById("final-output-json");
@@ -352,22 +491,50 @@
           var secret = document.getElementById("admin-secret").value.trim();
           var jobId = Number(document.getElementById("job-id").value || "0");
           var msg = document.getElementById("msg");
+          var effCard = document.getElementById("efficiency-card");
+          var effInner = document.getElementById("efficiency-card-inner");
           msg.textContent = "";
-          if (!secret) { msg.textContent = "أدخل Admin Secret أولاً."; return; }
-          if (!Number.isInteger(jobId) || jobId < 1) { msg.textContent = "أدخل Job ID صحيح."; return; }
+          if (!secret) {
+            effCard.hidden = true;
+            msg.textContent = "أدخل Admin Secret أولاً.";
+            return;
+          }
+          if (!Number.isInteger(jobId) || jobId < 1) {
+            effCard.hidden = true;
+            msg.textContent = "أدخل Job ID صحيح.";
+            return;
+          }
+          effCard.hidden = false;
+          effInner.innerHTML = '<p class="muted" style="margin:0">جاري تحميل تقرير الكفاءة…</p>';
+          var hdr = { headers: { "X-Admin-Secret": secret } };
+          var base = "/api/admin/ai-factory/jobs/" + jobId + "/";
           try {
-            var res = await fetch("/api/admin/ai-factory/jobs/" + jobId + "/inspection", {
-              headers: { "X-Admin-Secret": secret }
-            });
-            var json = await res.json();
-            if (!res.ok || !json.ok) throw new Error("read_failed");
+            var resEff = await Promise.all([
+              fetch(base + "inspection", hdr),
+              fetch(base + "efficiency", hdr),
+            ]);
+            var inspRes = resEff[0];
+            var effRes = resEff[1];
+            var parsed = await Promise.all([inspRes.json(), effRes.json()]);
+            var json = parsed[0];
+            var effJson = parsed[1];
+            renderEfficiencyReport(effRes, effJson);
+            if (!inspRes.ok || !json.ok) throw new Error("read_failed");
             renderMeta(json.job || {});
             renderFlow(json.layers || []);
             renderErrorsTimeline(json.errorsTimeline || []);
             renderFinalOutput(json.finalOutput);
-            msg.textContent = "تم تحميل بيانات الفحص.";
+            msg.textContent = "تم تحميل بيانات الفحص وتقرير الكفاءة.";
           } catch {
             msg.textContent = "تعذر تحميل بيانات الفحص.";
+            if (effInner.innerHTML.indexOf("جاري تحميل تقرير الكفاءة") !== -1) {
+              effInner.innerHTML =
+                '<p class="muted" style="margin:0">تعذر تحميل البيانات (الشبكة أو الاستجابة).</p>';
+            }
+            document.getElementById("flow").innerHTML = "";
+            document.getElementById("job-meta").innerHTML = "";
+            renderErrorsTimeline([]);
+            renderFinalOutput(null);
           }
         }
         document.getElementById("load-btn").addEventListener("click", loadInspection);
