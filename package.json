@@ -17,7 +17,10 @@
     "list-gemini-models": "tsx server/scripts/list-gemini-models.ts",
     "ai-factory:baseline": "tsx server/scripts/aiFactoryBaselineMetrics.ts",
     "ai-factory:ab-report": "tsx server/scripts/aiFactoryAbReport.ts",
-    "ai-factory:tune-reasoning": "tsx server/scripts/tuneFactoryReasoning.ts"
+    "ai-factory:tune-reasoning": "tsx server/scripts/tuneFactoryReasoning.ts",
+    "ai-factory:prompt-stats": "tsx server/scripts/aiFactoryInspectionPromptStats.ts",
+    "ai-factory:quality-signals": "tsx server/scripts/aiFactoryQualitySignals.ts",
+    "verify:refiner": "tsx server/scripts/verifyRefinerScenarios.ts"
   },
   "engines": {
     "node": ">=20"

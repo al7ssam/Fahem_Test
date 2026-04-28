@@ -1,7 +1,13 @@
 import { getPool } from "../../db/pool";
 import { getLayerConfigHealth, LayerExecutionError, runLayerModel } from "./modelManager";
 import { calculateGeminiCost, insertAiUsageLog } from "./usageAnalytics";
-import { extractJsonArray, normalizeFactoryQuestion, normalizeFactoryQuestionsLenient } from "./utils";
+import {
+  extractJsonArray,
+  normalizeFactoryQuestion,
+  normalizeFactoryQuestionsLenient,
+  tryParseRefinerPatches,
+  type RefinerPatchRow,
+} from "./utils";
 import type {
   FactoryAuditReport,
   FactoryJobPayload,
@@ -21,6 +27,12 @@ type JobRow = {
   attempt_count: number;
   max_attempts: number;
 };
+
+function assertLayerOutputNotTruncated(layer: FactoryLayer, finishReason: string | null): void {
+  if (finishReason === "MAX_TOKENS") {
+    throw new Error(`layer_output_truncated_max_tokens:layer=${layer}`);
+  }
+}
 
 class JobCancelledError extends Error {
   readonly layer: FactoryLayer | null;
@@ -231,6 +243,14 @@ type PromptConstraintPack = {
   output: string;
 };
 
+/** Compact single contract for Creator/Refiner optimized paths (replaces repeating SHARED blocks). */
+const FACTORY_OUTPUT_CONTRACT_V1 = [
+  "Output contract V1 (Arabic quiz rows):",
+  "- Fields: prompt, options (2 or 4), correctIndex in-range, studyBody, subcategoryKey, difficulty (easy|medium|hard English), questionType (conceptual|procedural|application).",
+  "- Target mix per batch: ~30% conceptual, ~30% procedural, ~40% application.",
+  "- studyBody: [principle/rule] + [why correct] + [memory tip]; concise, flashcard-friendly.",
+].join("\n");
+
 const SHARED_PROMPT_CONSTRAINTS: PromptConstraintPack = {
   schema:
     "Each question must contain: prompt, options, correctIndex, studyBody, subcategoryKey, difficulty, questionType. options length must be 2 or 4, correctIndex must be in range.",
@@ -261,6 +281,7 @@ function buildPromptArchitectureAnalysis(input: {
     subcategoryKey: input.subcategoryKey,
     subcategoryName: input.subcategoryName,
     mainCategoryName: input.mainCategoryName,
+    outputContractV1: FACTORY_OUTPUT_CONTRACT_V1,
     sharedConstraintPack: SHARED_PROMPT_CONSTRAINTS,
   };
 }
@@ -355,10 +376,7 @@ function buildCreatorPrompt(args: {
     `Batch size: ${args.batchSize}`,
     `Subcategory key must be exactly: ${args.subcategoryKey}`,
     `Difficulty mode: ${args.difficultyMode}`,
-    SHARED_PROMPT_CONSTRAINTS.schema,
-    SHARED_PROMPT_CONSTRAINTS.distribution,
-    "difficulty values must be English only: easy | medium | hard.",
-    SHARED_PROMPT_CONSTRAINTS.studyBody,
+    FACTORY_OUTPUT_CONTRACT_V1,
     "Language must be Arabic and suitable for active recall.",
     `Already generated in current run: ${args.alreadyGenerated}`,
     SHARED_PROMPT_CONSTRAINTS.output,
@@ -391,6 +409,9 @@ function buildAuditorPrompt(
       `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
       "Return JSON object with fields: summary (string), issues (array of strings), requiresRefine (boolean).",
       "If there are no issues, issues should be empty and requiresRefine false.",
+      "If requiresRefine is false, issues MUST be an empty array []. Put optional non-blocking notes in summary only.",
+      "Do not restate mechanical schema problems already described in validationErrors unless you tie them to a clear pedagogical risk.",
+      `Server batch questionType counts (context only): ${summarizeQuestionTypeCounts(questions)}`,
       JSON.stringify(questions),
     ].join("\n");
   }
@@ -400,9 +421,12 @@ function buildAuditorPrompt(
     "Focus on: pedagogical mismatch, weak active-recall wording, malformed micro-lesson structure, or wrong conceptual/procedural/application intent.",
     "Distribution targets and studyBody micro-lesson rules were already enforced in Creator; infer violations only from the compact previews and validation errors below.",
     "difficulty must be English only: easy | medium | hard.",
+    "Do not restate mechanical schema problems already listed in validationErrors unless they indicate a deeper pedagogical defect.",
     `Pre-validation errors from server: ${JSON.stringify(validationErrors)}`,
+    `Server batch questionType counts (context only): ${summarizeQuestionTypeCounts(questions)}`,
     "Return strict JSON object with fields:",
     `{"summary":"...", "issues":["..."], "requiresRefine": true|false}`,
+    "If requiresRefine is false, issues MUST be []. Optional pedagogical notes belong in summary only, not in issues.",
     "Do not use markdown fences.",
     "Compact batch (previews + metadata only, not full question text):",
     compactQuestionsForAuditorPrompt(questions),
@@ -443,19 +467,30 @@ function buildRefinerPrompt(
       JSON.stringify(questions),
     ].join("\n");
   }
+  const ctxIndices = collectRefinerContextIndices(
+    validationErrors,
+    audit.issues,
+    questions.length,
+    audit.requiresRefine,
+  );
+  const contextJson = buildRefinerContextJson(questions, ctxIndices);
   return [
     "You are The Refiner layer.",
     "Repair only issues reported by Auditor and validator while keeping valid rows unchanged as much as possible.",
-    SHARED_PROMPT_CONSTRAINTS.schema,
-    SHARED_PROMPT_CONSTRAINTS.distribution,
-    SHARED_PROMPT_CONSTRAINTS.studyBody,
-    SHARED_PROMPT_CONSTRAINTS.output,
+    FACTORY_OUTPUT_CONTRACT_V1,
+    "Return ONLY a JSON object (no markdown, no commentary) with shape:",
+    '{"patches":[{"index":0,"question":{complete question object}}, ...]}',
+    "Patch index is 0-based in the original Creator batch order (0 .. batchSize-1), even if contextRows below is a subset.",
+    "Include one patch per question that must change; omit indices that need no change.",
+    "Each question object must include all required fields (full row), not a partial delta.",
+    "This step runs only when refinement is required: return a non-empty patches array with at least one fixed row.",
     "Use standard double quotes for all JSON keys and string values.",
     `Audit summary: ${audit.summary}`,
     `Audit issues: ${JSON.stringify(audit.issues)}`,
     `requiresRefine: ${String(audit.requiresRefine)}`,
     `Validation errors from server: ${JSON.stringify(validationErrors)}`,
-    JSON.stringify(questions),
+    "Current batch context (full array or subset with neighbors for efficiency):",
+    contextJson,
   ].join("\n");
 }
 
@@ -522,6 +557,83 @@ function compactQuestionsForAuditorPrompt(questions: FactoryQuestion[]): string 
   );
 }
 
+function summarizeQuestionTypeCounts(questions: FactoryQuestion[]): string {
+  let conceptual = 0;
+  let procedural = 0;
+  let application = 0;
+  for (const q of questions) {
+    if (q.questionType === "conceptual") conceptual += 1;
+    else if (q.questionType === "procedural") procedural += 1;
+    else if (q.questionType === "application") application += 1;
+  }
+  return JSON.stringify({
+    conceptual,
+    procedural,
+    application,
+    total: questions.length,
+  });
+}
+
+function parseIndicesFromAuditIssues(issues: string[], batchSize: number): Set<number> {
+  const out = new Set<number>();
+  for (const issue of issues) {
+    const idxMatch = issue.match(/\b(?:index|idx)\s*[:=]\s*(\d+)\b/i);
+    if (idxMatch) {
+      const n = Number(idxMatch[1]);
+      if (Number.isInteger(n) && n >= 0 && n < batchSize) out.add(n);
+    }
+    const qMatch = issue.match(/\bquestion\s*#?\s*(\d+)\b/i);
+    if (qMatch) {
+      const oneBased = Number(qMatch[1]);
+      if (Number.isInteger(oneBased) && oneBased >= 1 && oneBased <= batchSize) {
+        out.add(oneBased - 1);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Indices to include in Refiner prompt (affected rows ±1 neighbor). Returns null = use full batch JSON.
+ */
+function collectRefinerContextIndices(
+  validationErrors: FactoryValidationError[],
+  auditIssues: string[],
+  batchSize: number,
+  requiresRefine: boolean,
+): Set<number> | null {
+  const base = new Set<number>();
+  for (const e of validationErrors) {
+    if (!Number.isInteger(e.index) || e.index < 0 || e.index >= batchSize) {
+      return null;
+    }
+    base.add(e.index);
+  }
+  for (const i of parseIndicesFromAuditIssues(auditIssues, batchSize)) {
+    base.add(i);
+  }
+  if (base.size === 0) {
+    return requiresRefine ? null : new Set();
+  }
+  const expanded = new Set<number>();
+  for (const i of base) {
+    expanded.add(i);
+    if (i > 0) expanded.add(i - 1);
+    if (i + 1 < batchSize) expanded.add(i + 1);
+  }
+  return expanded;
+}
+
+function buildRefinerContextJson(questions: FactoryQuestion[], indices: Set<number> | null): string {
+  const n = questions.length;
+  if (indices === null || indices.size === 0 || indices.size >= n) {
+    return JSON.stringify(questions);
+  }
+  const sorted = [...indices].sort((a, b) => a - b);
+  const contextRows = sorted.map((i) => ({ index: i, question: questions[i] }));
+  return JSON.stringify({ batchSize: n, contextRows });
+}
+
 type NormalizedCreatorBatch = {
   questions: FactoryQuestion[];
   validationErrors: FactoryValidationError[];
@@ -564,6 +676,51 @@ function normalizeQuestionsFromRefinerStrict(rawText: string, job: JobRow): Fact
     }
     return q;
   });
+}
+
+function assertRefinerQuestionInvariants(q: FactoryQuestion, idx: number, job: JobRow): void {
+  if (q.subcategoryKey !== job.subcategory_key) {
+    throw new Error(`question_${idx + 1}_invalid_subcategory_key_after_refiner`);
+  }
+  if (job.difficulty_mode !== "mix" && q.difficulty !== job.difficulty_mode) {
+    throw new Error(`question_${idx + 1}_invalid_difficulty_after_refiner`);
+  }
+}
+
+function applyRefinerPatches(baseQuestions: FactoryQuestion[], patches: RefinerPatchRow[], job: JobRow): FactoryQuestion[] {
+  const merged = baseQuestions.map((q) => ({ ...q }));
+  const seen = new Set<number>();
+  for (const p of patches) {
+    if (seen.has(p.index)) {
+      throw new Error(`refiner_duplicate_patch_index:${p.index}`);
+    }
+    seen.add(p.index);
+    if (p.index >= merged.length) {
+      throw new Error(`refiner_patch_out_of_range:index=${p.index}:batch=${merged.length}`);
+    }
+    const q = normalizeFactoryQuestion(p.question, p.index);
+    assertRefinerQuestionInvariants(q, p.index, job);
+    merged[p.index] = q;
+  }
+  return merged;
+}
+
+function normalizeRefinerOutput(
+  rawText: string,
+  job: JobRow,
+  baseQuestions: FactoryQuestion[],
+  variant: FactoryPromptVariant,
+): FactoryQuestion[] {
+  if (variant === "optimized") {
+    const parsed = tryParseRefinerPatches(rawText);
+    if (parsed) {
+      if (parsed.patches.length === 0) {
+        throw new Error("refiner_patches_empty_but_refinement_required");
+      }
+      return applyRefinerPatches(baseQuestions, parsed.patches, job);
+    }
+  }
+  return normalizeQuestionsFromRefinerStrict(rawText, job);
 }
 
 async function insertQuestionsAllOrNothing(questions: FactoryQuestion[]): Promise<number> {
@@ -825,6 +982,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
     await appendJobLog(job.id, "info", "Creator layer started", "creator");
     const creator = await runLayerModel("creator", creatorPrompt);
+    assertLayerOutputNotTruncated("creator", creator.finishReason);
     await assertNotCancelled(job.id, failedLayer);
     await appendInspectionLog({
       jobId: job.id,
@@ -891,9 +1049,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
     });
 
     const shouldRunRefiner =
-      creatorNormalized.validationErrors.length > 0 ||
-      auditReport.issues.length > 0 ||
-      auditReport.requiresRefine;
+      creatorNormalized.validationErrors.length > 0 || auditReport.requiresRefine;
     await appendJobLog(job.id, "info", "Refiner gating decision", undefined, {
       shouldRunRefiner,
       reasons: {
@@ -923,6 +1079,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
       );
       await appendJobLog(job.id, "info", "Refiner layer started", "refiner");
       const refiner = await runLayerModel("refiner", refinerPrompt);
+      assertLayerOutputNotTruncated("refiner", refiner.finishReason);
       await assertNotCancelled(job.id, failedLayer);
       await appendInspectionLog({
         jobId: job.id,
@@ -941,7 +1098,7 @@ export async function runFactoryJob(job: JobRow): Promise<void> {
         status: "success",
         usage: refiner.usageMetadata,
       });
-      finalQuestions = normalizeQuestionsFromRefinerStrict(refiner.text, job);
+      finalQuestions = normalizeRefinerOutput(refiner.text, job, creatorQuestions, promptVariant);
       finalLayerUsed = "refiner";
     } else {
       await appendJobLog(job.id, "info", "Refiner skipped by gate", undefined, {

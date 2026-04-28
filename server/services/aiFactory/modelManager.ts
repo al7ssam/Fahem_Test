@@ -81,6 +81,8 @@ export const AI_FACTORY_THINKING_LEVEL_MODEL_IDS: readonly string[] = [
 type ModelCallResult = {
   text: string;
   rawResponseText: string;
+  /** Gemini `candidates[0].finishReason` when present (e.g. STOP, MAX_TOKENS). */
+  finishReason: string | null;
   apiVersion: "v1" | "v1beta";
   modelName: string;
   provider: string;
@@ -91,6 +93,17 @@ type ModelCallResult = {
     raw: unknown;
   };
 };
+
+/** Parse finishReason from `JSON.stringify(response)` shape used in inspection logs. */
+export function extractGeminiFinishReason(rawResponseText: string): string | null {
+  try {
+    const obj = JSON.parse(rawResponseText) as { candidates?: Array<{ finishReason?: unknown }> };
+    const fr = obj?.candidates?.[0]?.finishReason;
+    return typeof fr === "string" && fr.trim() ? fr.trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 export type LayerFailureMeta = {
   layer: FactoryLayer;
@@ -423,9 +436,11 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
     if (!text) {
       throw new Error("provider_empty_response");
     }
+    const finishReason = extractGeminiFinishReason(rawResponseText);
     return {
       text,
       rawResponseText,
+      finishReason,
       apiVersion,
       modelName: config.modelName,
       provider: config.provider,

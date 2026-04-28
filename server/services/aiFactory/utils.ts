@@ -74,6 +74,75 @@ export function extractJsonArray(raw: string): unknown[] | null {
   return null;
 }
 
+function repairLikelyJsonObject(input: string): string {
+  const normalized = normalizeJsonLikeText(input);
+  const noFences = stripMarkdownFences(normalized);
+  return removeTrailingCommas(noFences).trim();
+}
+
+function tryParseJsonObjectCandidate(candidate: string, useRepair: boolean): Record<string, unknown> | null {
+  const payload = useRepair ? repairLikelyJsonObject(candidate) : candidate.trim();
+  if (!payload) return null;
+  try {
+    const parsed = JSON.parse(payload);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/** Extract a single JSON object `{ ... }` from model text (fences, trailing commas). */
+export function extractJsonObject(raw: string): Record<string, unknown> | null {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+
+  const blockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+
+  const candidates: string[] = [text];
+  if (blockMatch?.[1]) candidates.push(blockMatch[1]);
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(text.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const c of candidates) {
+    const parsed = tryParseJsonObjectCandidate(c, false);
+    if (parsed) return parsed;
+  }
+  for (const c of candidates) {
+    const parsed = tryParseJsonObjectCandidate(c, true);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+export type RefinerPatchRow = { index: number; question: unknown };
+
+/**
+ * Parses optimized Refiner output: `{ "patches": [ { "index": n, "question": { ... } } ] }`.
+ * Returns null if the payload is not that shape (caller may fall back to full-array parsing).
+ */
+export function tryParseRefinerPatches(raw: string): { patches: RefinerPatchRow[] } | null {
+  const obj = extractJsonObject(raw);
+  if (!obj) return null;
+  if (!Array.isArray(obj.patches)) return null;
+  const patches: RefinerPatchRow[] = [];
+  for (const entry of obj.patches) {
+    if (!entry || typeof entry !== "object") return null;
+    const row = entry as Record<string, unknown>;
+    const index = Number(row.index);
+    if (!Number.isInteger(index) || index < 0) return null;
+    const q = row.question;
+    if (q === undefined || q === null || typeof q !== "object" || Array.isArray(q)) return null;
+    patches.push({ index, question: q });
+  }
+  return { patches };
+}
+
 export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQuestion {
   if (!item || typeof item !== "object") {
     throw new Error(`question_${idx + 1}_invalid_object`);
