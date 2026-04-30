@@ -10,12 +10,16 @@ import { Match } from "../game/Match";
 import {
   countExpiredAiFactoryLogs,
   countExpiredQuestions,
+  countExpiredSimpleContentRuns,
   getAiFactoryLogsCleanupSettings,
   getCleanupSettings,
+  getSimpleContentRunsCleanupSettings,
   performAiFactoryLogsCleanup,
   performCleanup,
+  performSimpleContentRunsCleanup,
   updateAiFactoryLogsCleanupSettings,
   updateCleanupSettings,
+  updateSimpleContentRunsCleanupSettings,
 } from "../services/cleanup";
 import {
   AI_FACTORY_AVAILABLE_MODELS,
@@ -45,17 +49,25 @@ import {
   getAutomation,
   getPromptBody,
   getRunById,
+  getRunsUsageSummaryForSubcategory,
   getSimpleContentDraftTemplateForAdmin,
+  getSimpleContentPresetUiDefaults,
+  getSimpleContentSchedulerStats,
   getSubcategoryContextForAdmin,
   listActivePresets,
   listRuns,
   runSimpleContentGenerate,
   runSimpleContentGeneratePreview,
   saveSimpleContentDraftTemplate,
+  setSimpleContentPresetUiDefaults,
   upsertAutomation,
   upsertPromptBody,
 } from "../services/simpleContent/service";
 import { getAdminPromptTemplatesPayload } from "../services/simpleContent/promptContract";
+import {
+  classifySimpleContentError,
+  simpleContentErrorKindHintAr,
+} from "../services/simpleContent/errorKind";
 
 const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
 const questionOptionsSchema = z
@@ -172,6 +184,11 @@ const aiFactoryLogsCleanupSettingsPatchSchema = z.object({
   deletionThresholdDays: z.number().int().min(1).max(3650),
 });
 
+const simpleContentRunsCleanupSettingsPatchSchema = z.object({
+  autoDeleteEnabled: z.boolean(),
+  deletionThresholdDays: z.number().int().min(1).max(3650),
+});
+
 const factorySettingsPatchSchema = z.object({
   enabled: z.boolean(),
   batchSize: z.number().int().min(1).max(200),
@@ -224,6 +241,15 @@ const simpleContentAutomationPutSchema = z.object({
   intervalMinutes: z.number().int().min(5).max(10080),
   modelPresetId: z.number().int().positive().nullable(),
 });
+
+const simpleContentPresetDefaultsPutSchema = z
+  .object({
+    draftPresetId: z.number().int().positive().nullable().optional(),
+    generatePresetId: z.number().int().positive().nullable().optional(),
+  })
+  .refine((d) => d.draftPresetId !== undefined || d.generatePresetId !== undefined, {
+    message: "at_least_one_field",
+  });
 
 const factoryModelPatchSchema = z.object({
   layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
@@ -1321,9 +1347,11 @@ export function registerAdminRoutes(app: Express): void {
   app.get("/api/admin/simple-content/presets", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
     try {
-      const items = await listActivePresets();
+      const [items, defaults] = await Promise.all([listActivePresets(), getSimpleContentPresetUiDefaults()]);
       res.json({
         ok: true,
+        defaultDraftPresetId: defaults.defaultDraftPresetId,
+        defaultGeneratePresetId: defaults.defaultGeneratePresetId,
         items: items.map((p) => ({
           id: p.id,
           provider: p.provider,
@@ -1333,6 +1361,95 @@ export function registerAdminRoutes(app: Express): void {
       });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.put("/api/admin/simple-content/preset-defaults", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = simpleContentPresetDefaultsPutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      await setSimpleContentPresetUiDefaults(parsed.data);
+      res.json({ ok: true });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "";
+      if (msg === "simple_content_invalid_preset") {
+        res.status(400).json({ ok: false, error: "simple_content_invalid_preset" });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "write_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/runs-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getSimpleContentRunsCleanupSettings();
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/simple-content/runs-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = simpleContentRunsCleanupSettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const settings = await updateSimpleContentRunsCleanupSettings(parsed.data);
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/simple-content/runs-cleanup/preview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getSimpleContentRunsCleanupSettings();
+      const expiredCount = await countExpiredSimpleContentRuns(settings.deletionThresholdDays);
+      res.json({
+        ok: true,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        expiredCount,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "preview_failed" });
+    }
+  });
+
+  app.post("/api/admin/simple-content/runs-cleanup/run", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const result = await performSimpleContentRunsCleanup({ source: "manual", forceRun: true });
+      res.json({
+        ok: true,
+        deletionThresholdDays: result.thresholdDays,
+        deletedCount: result.deletedCount,
+        runDate: result.runDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "cleanup_failed" });
     }
   });
 
@@ -1402,10 +1519,14 @@ export function registerAdminRoutes(app: Express): void {
       const result = await generatePromptDraft(parsed.data.subcategoryKey, parsed.data.presetId);
       res.json({ ok: true, ...result });
     } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown_error";
+      const errorKind = classifySimpleContentError(reason);
       res.status(500).json({
         ok: false,
         error: "draft_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
+        reason,
+        errorKind,
+        errorKindHint: simpleContentErrorKindHintAr(errorKind),
       });
     }
   });
@@ -1427,10 +1548,14 @@ export function registerAdminRoutes(app: Express): void {
       });
       res.json({ ok: true, ...result });
     } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown_error";
+      const errorKind = classifySimpleContentError(reason);
       res.status(500).json({
         ok: false,
         error: "generate_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
+        reason,
+        errorKind,
+        errorKindHint: simpleContentErrorKindHintAr(errorKind),
       });
     }
   });
@@ -1455,10 +1580,14 @@ export function registerAdminRoutes(app: Express): void {
         error != null && typeof (error as { runId?: unknown }).runId === "number"
           ? (error as { runId: number }).runId
           : undefined;
+      const reason = error instanceof Error ? error.message : "unknown_error";
+      const errorKind = classifySimpleContentError(reason);
       res.status(500).json({
         ok: false,
         error: "generate_preview_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
+        reason,
+        errorKind,
+        errorKindHint: simpleContentErrorKindHintAr(errorKind),
         ...(runId != null ? { runId } : {}),
       });
     }
@@ -1484,6 +1613,46 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/admin/simple-content/runs/summary", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const subcategoryKey = String(req.query.subcategoryKey ?? "").trim();
+    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
+      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
+      return;
+    }
+    try {
+      const summary = await getRunsUsageSummaryForSubcategory(subcategoryKey);
+      res.json({ ok: true, summary });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/scheduler-stats", async (_req: Request, res: Response) => {
+    if (!verifyAdmin(_req, res)) return;
+    res.json({ ok: true, ...getSimpleContentSchedulerStats() });
+  });
+
+  app.get("/api/admin/simple-content/runs", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const subcategoryKey = String(req.query.subcategoryKey ?? "").trim();
+    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
+      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
+      return;
+    }
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 20));
+    const tk = String(req.query.triggerKind ?? "").trim();
+    const st = String(req.query.status ?? "").trim();
+    const triggerKind = tk === "manual" || tk === "scheduled" ? tk : undefined;
+    const status = st.length > 0 ? st : undefined;
+    try {
+      const items = await listRuns(subcategoryKey, limit, { triggerKind, status });
+      res.json({ ok: true, items });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
   app.get("/api/admin/simple-content/runs/:id", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
     const id = Number(req.params.id);
@@ -1497,7 +1666,15 @@ export function registerAdminRoutes(app: Express): void {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
       }
-      res.json({ ok: true, run: row });
+      const errorKind = classifySimpleContentError(row.error);
+      res.json({
+        ok: true,
+        run: {
+          ...row,
+          errorKind,
+          errorKindHint: row.error ? simpleContentErrorKindHintAr(errorKind) : null,
+        },
+      });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
     }
@@ -1589,22 +1766,6 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true });
     } catch {
       res.status(500).json({ ok: false, error: "write_failed" });
-    }
-  });
-
-  app.get("/api/admin/simple-content/runs", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const subcategoryKey = String(req.query.subcategoryKey ?? "").trim();
-    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
-      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
-      return;
-    }
-    const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 20));
-    try {
-      const items = await listRuns(subcategoryKey, limit);
-      res.json({ ok: true, items });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
 

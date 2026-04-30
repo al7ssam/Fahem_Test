@@ -6,8 +6,8 @@ let scheduledTask: ScheduledTask | null = null;
 export function startSimpleContentScheduler(): void {
   if (scheduledTask) return;
   scheduledTask = cron.schedule("* * * * *", () => {
-    void runSimpleContentSchedulerTick().catch(() => {
-      // errors are persisted per-run in simple_content_runs
+    void runSimpleContentSchedulerTick().catch((error) => {
+      console.error("[simple_content_scheduler] tick-level failure", error);
     });
   });
 }

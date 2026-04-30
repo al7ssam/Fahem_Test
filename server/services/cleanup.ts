@@ -412,3 +412,180 @@ export async function maybeRunStartupAiFactoryLogsCleanup(): Promise<AiFactoryLo
   }
   return performAiFactoryLogsCleanup({ source: "startup" });
 }
+
+const SIMPLE_CONTENT_RUNS_SETTINGS_KEYS = {
+  enabled: "simple_content_runs_cleanup_enabled",
+  thresholdDays: "simple_content_runs_cleanup_threshold_days",
+  lastRunDate: "simple_content_runs_cleanup_last_run_date",
+} as const;
+
+type SimpleContentRunsCleanupSettings = {
+  autoDeleteEnabled: boolean;
+  deletionThresholdDays: number;
+  lastRunDate: string;
+};
+
+type SimpleContentRunsCleanupResult = {
+  deletedCount: number;
+  thresholdDays: number;
+  runDate: string;
+};
+
+let runningSimpleContentRunsCleanup: Promise<SimpleContentRunsCleanupResult> | null = null;
+
+async function readSimpleContentRunsSettingsMap(client: PoolClient): Promise<Map<string, string>> {
+  const keys = [
+    SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.enabled,
+    SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays,
+    SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.lastRunDate,
+  ];
+  const rows = await client.query<{ key: string; value: string }>(
+    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    [keys],
+  );
+  return new Map(rows.rows.map((r) => [r.key, r.value]));
+}
+
+export async function getSimpleContentRunsCleanupSettings(): Promise<SimpleContentRunsCleanupSettings> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const map = await readSimpleContentRunsSettingsMap(client);
+    return {
+      autoDeleteEnabled: parseEnabled(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.enabled)),
+      deletionThresholdDays: parseThreshold(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays)),
+      lastRunDate: normalizeRunDate(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.lastRunDate)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateSimpleContentRunsCleanupSettings(input: {
+  autoDeleteEnabled: boolean;
+  deletionThresholdDays: number;
+}): Promise<SimpleContentRunsCleanupSettings> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const thresholdDays = Math.max(1, Math.floor(input.deletionThresholdDays));
+    await upsertSettings(client, [
+      {
+        key: SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.enabled,
+        value: input.autoDeleteEnabled ? "1" : "0",
+      },
+      {
+        key: SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays,
+        value: String(thresholdDays),
+      },
+    ]);
+    const map = await readSimpleContentRunsSettingsMap(client);
+    return {
+      autoDeleteEnabled: parseEnabled(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.enabled)),
+      deletionThresholdDays: parseThreshold(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays)),
+      lastRunDate: normalizeRunDate(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.lastRunDate)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function countExpiredSimpleContentRuns(
+  thresholdDays: number,
+  clientArg?: PoolClient,
+): Promise<number> {
+  const threshold = Math.max(1, Math.floor(thresholdDays));
+  const run = async (client: PoolClient): Promise<number> => {
+    const r = await client.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
+       FROM simple_content_runs
+       WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+      [threshold],
+    );
+    return Number(r.rows[0]?.c ?? 0);
+  };
+  if (clientArg) return run(clientArg);
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    return await run(client);
+  } finally {
+    client.release();
+  }
+}
+
+export async function performSimpleContentRunsCleanup(input: {
+  source: CleanupSource;
+  forceRun?: boolean;
+}): Promise<SimpleContentRunsCleanupResult> {
+  if (runningSimpleContentRunsCleanup) return runningSimpleContentRunsCleanup;
+
+  const pool = getPool();
+  runningSimpleContentRunsCleanup = (async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const settingsMap = await readSimpleContentRunsSettingsMap(client);
+      const enabled = parseEnabled(settingsMap.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.enabled));
+      const thresholdDays = parseThreshold(settingsMap.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays));
+      const today = toISODate();
+
+      if (!input.forceRun && !enabled) {
+        await client.query("ROLLBACK");
+        console.log(`[simple_content_runs_cleanup] skipped source=${input.source} reason=disabled`);
+        return {
+          deletedCount: 0,
+          thresholdDays,
+          runDate: normalizeRunDate(settingsMap.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.lastRunDate)),
+        };
+      }
+
+      const expiredCount = await countExpiredSimpleContentRuns(thresholdDays, client);
+      await client.query(
+        `DELETE FROM simple_content_runs
+         WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+        [thresholdDays],
+      );
+
+      await upsertSettings(client, [
+        { key: SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.lastRunDate, value: today },
+      ]);
+      await client.query("COMMIT");
+      console.log(
+        `[simple_content_runs_cleanup] success source=${input.source} date=${today} thresholdDays=${thresholdDays} deleted=${expiredCount}`,
+      );
+      return {
+        deletedCount: expiredCount,
+        thresholdDays,
+        runDate: today,
+      };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore rollback error */
+      }
+      console.error(`[simple_content_runs_cleanup] failed source=${input.source}`, error);
+      throw error;
+    } finally {
+      client.release();
+      runningSimpleContentRunsCleanup = null;
+    }
+  })();
+
+  return runningSimpleContentRunsCleanup;
+}
+
+export async function maybeRunStartupSimpleContentRunsCleanup(): Promise<SimpleContentRunsCleanupResult | null> {
+  const settings = await getSimpleContentRunsCleanupSettings();
+  const today = toISODate();
+  if (!settings.autoDeleteEnabled) {
+    console.log("[simple_content_runs_cleanup] startup skipped reason=disabled");
+    return null;
+  }
+  if (settings.lastRunDate === today) {
+    console.log("[simple_content_runs_cleanup] startup skipped reason=already-ran-today");
+    return null;
+  }
+  return performSimpleContentRunsCleanup({ source: "startup" });
+}

@@ -438,6 +438,10 @@
         background: linear-gradient(135deg, rgba(50, 38, 55, 0.45), rgba(10, 12, 24, 0.92));
         border-color: rgba(248, 113, 113, 0.22);
       }
+      details.sc-region--cleanup {
+        background: linear-gradient(135deg, rgba(38, 50, 58, 0.48), rgba(10, 12, 22, 0.92));
+        border-color: rgba(148, 163, 184, 0.28);
+      }
       details.sc-last-draft-inner {
         margin-top: 0.5rem;
         border: 1px dashed rgba(255, 255, 255, 0.12);
@@ -464,6 +468,7 @@
         color: #fecaca;
         font-size: var(--fs-sm);
         font-weight: 600;
+        white-space: pre-wrap;
       }
       #sc-work .sc-step-h {
         margin-top: 0.55rem;
@@ -480,8 +485,8 @@
   </head>
   <body>
     <div class="wrap">
-      <p class="subtitle"><span class="badge">مسار بسيط</span> — ليس المصنع متعدد الطبقات. معاينة ثم تعميد للتوليد اليدوي.</p>
-      <h1>توليد المحتوى (المسار البسيط)</h1>
+      <p class="subtitle"><span class="badge">مسار بسيط</span> — معاينة ثم تعميد (بدون مصنع الطبقات).</p>
+      <h1>المسار البسيط لتوليد المحتوى</h1>
       <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong></p>
 
       <div class="topbar">
@@ -491,16 +496,16 @@
         </div>
         <button type="button" class="btn btn-secondary" id="sc-back">← لوحة الإدارة</button>
         <button type="button" class="btn" id="sc-load-cats">تحميل التصنيفات</button>
-        <button type="button" class="btn btn-secondary" id="sc-load-templates">عرض قوالب النظام (مرجع فقط)</button>
+        <button type="button" class="btn btn-secondary" id="sc-load-templates">قوالب النظام (مرجع)</button>
         <span class="sc-section-status" id="sc-sec-templates-status" aria-live="polite"></span>
       </div>
       <p class="sc-top-steps">
-        ترتيب مقترح: أدخل مفتاح الإدارة ← <strong>تحميل التصنيفات</strong> ← اختر رئيسيًا ثم فرعيًا. زر «قوالب النظام» للاطلاع على النصوص المرجعية دون تعديلها هنا.
+        مفتاح الإدارة ← <strong>تحميل التصنيفات</strong> ← رئيسي ثم فرعي. «قوالب النظام» للاطلاع فقط.
       </p>
       <div class="msg" id="sc-msg"></div>
       <div class="card" id="sc-templates-wrap" style="display: none">
-        <h2>قوالب النظام (للمراجعة فقط — لا تُعدّل من هذه الصفحة)</h2>
-        <p class="subtitle">مسودة اقتراح البرومبت وعقد JSON للتوليد؛ للاطلاع والنسخ. التعديل الفعلي لقالب المسودة العام من مساحة العمل داخل القسم القابل للطي.</p>
+        <h2>قوالب النظام (قراءة فقط)</h2>
+        <p class="subtitle">مسودة البرومبت وعقد JSON — للاطلاع والنسخ. تعديل قالب المسودة من مساحة العمل.</p>
         <h3 style="font-size: 0.9rem; color: var(--amber)">مسودة البرومبت — رسالة النظام</h3>
         <pre class="mono" id="sc-tpl-draft-sys"></pre>
         <h3 style="font-size: 0.9rem; color: var(--amber)">مسودة البرومبت — قالب رسالة المستخدم</h3>
@@ -523,12 +528,12 @@
         <h2 id="sc-work-title">مساحة العمل</h2>
         <p class="subtitle" id="sc-ctx-line"></p>
         <p class="sc-path-hint">
-          <strong>مسار العمل اليومي:</strong> اكتب أو حدّث <em>برومبت هذا الفرع</em> (أو اقتراحًا بالذكاء) ← <strong>توليد معاينة</strong> ← راجع السجل والتفاصيل (JSON أو معاينة التطبيق) ← <strong>تعميد الإدراج</strong>. تقدم كل قسم يظهر بجانب عنوانه أثناء الاتصال بالنموذج.
+          <strong>الترتيب:</strong> برومبت الفرع (أو اقتراح بالذكاء) ← <strong>توليد معاينة</strong> ← السجل والتفاصيل ← <strong>تعميد الإدراج</strong>. حالة الاتصال تظهر بجانب كل قسم.
         </p>
 
         <details class="sc-region sc-region--project" id="sc-draft-template-fold">
           <summary>
-            <span class="sc-region-title">إعدادات المشروع (نادرًا): قالب اقتراح <em>نص برومبت الفرع</em> بالذكاء</span>
+            <span class="sc-region-title">قالب اقتراح البرومبت (مشروع)</span>
             <span class="sc-section-status" id="sc-sec-project-status" aria-live="polite"></span>
           </summary>
           <div class="sc-inner-muted">
@@ -546,40 +551,36 @@
 
         <details class="sc-region sc-region--prompt" open id="sc-region-prompt">
           <summary>
-            <span class="sc-region-title">أ — برومبت هذا الفرع (المحفوظ)</span>
+            <span class="sc-region-title">البرومبت المحفوظ</span>
             <span class="sc-section-status" id="sc-sec-prompt-status" aria-live="polite"></span>
           </summary>
-          <p class="sc-step-lead">
-            يُرسل إلى نموذج <strong>توليد الأسئلة</strong> مع تعليمات النظام. قالب المشروع في القسم أعلاه يخص زر «اقتراح برومبت» فقط.
-          </p>
+          <p class="sc-step-lead">يُستخدم عند <strong>توليد المعاينة</strong>. قالب «المشروع» أعلاه يخص <strong>اقتراح بالذكاء</strong> فقط.</p>
           <p class="hint" id="sc-last-usage"></p>
-          <label for="sc-prompt">نص البرومبت المحفوظ لهذا الفرع</label>
+          <label for="sc-prompt">نص البرومبت</label>
           <div class="row">
             <button type="button" class="btn btn-secondary" id="sc-edit-prompt">تعديل</button>
-            <button type="button" class="btn" id="sc-save-prompt">حفظ البرومبت في النظام</button>
-            <button type="button" class="btn btn-secondary" id="sc-copy-prompt">نسخ النص</button>
+            <button type="button" class="btn" id="sc-save-prompt">حفظ البرومبت</button>
+            <button type="button" class="btn btn-secondary" id="sc-copy-prompt">نسخ</button>
           </div>
           <textarea id="sc-prompt" readonly spellcheck="false"></textarea>
         </details>
 
         <details class="sc-region sc-region--draft" open id="sc-region-draftai">
           <summary>
-            <span class="sc-region-title">ب — اقتراح نص البرومبت بالذكاء (اختياري)</span>
+            <span class="sc-region-title">اقتراح البرومبت بالذكاء</span>
             <span class="sc-section-status" id="sc-sec-draftai-status" aria-live="polite"></span>
           </summary>
-          <p class="sc-step-lead">يملأ حقل البرومبت في القسم «أ». النموذج هنا مستقل عن نموذج توليد الأسئلة في «ج».</p>
+          <p class="sc-step-lead">يملأ حقل البرومبت أعلاه. نموذج مستقل عن نموذج «توليد المعاينة».</p>
           <div class="row">
-            <label
-              >نموذج لاقتراح نص البرومبت
-              <select id="sc-draft-preset"></select>
-            </label>
+            <label>النموذج <select id="sc-draft-preset"></select></label>
+            <button type="button" class="btn btn-secondary" id="sc-save-default-draft">حفظ كافتراضي للمسودة</button>
             <div class="hint" id="sc-draft-preset-hint"></div>
           </div>
           <div class="row">
-            <button type="button" class="btn btn-secondary" id="sc-draft-prompt">اقتراح برومبت بالذكاء الاصطناعي</button>
+            <button type="button" class="btn btn-secondary" id="sc-draft-prompt">اقتراح بالذكاء</button>
           </div>
           <details class="sc-last-draft-inner" id="sc-last-draft-call-fold">
-            <summary>آخر استدعاء اقتراح مسودة (طلب / رد أو خطأ — للتشخيص)</summary>
+            <summary>آخر طلب مسودة (تشخيص)</summary>
             <p class="hint" style="margin-top: 0.35rem">يُحدَّث بعد كل محاولة؛ لا يُحفظ في قاعدة البيانات.</p>
             <h4 style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0 0.2rem">ملخص الطلب</h4>
             <pre class="mono" id="sc-last-draft-req" style="max-height: 8rem"></pre>
@@ -590,10 +591,10 @@
 
         <details class="sc-region sc-region--gen" open id="sc-region-generate">
           <summary>
-            <span class="sc-region-title">ج — توليد أسئلة (معاينة دون إدراج)</span>
+            <span class="sc-region-title">توليد معاينة</span>
             <span class="sc-section-status" id="sc-sec-generate-status" aria-live="polite"></span>
           </summary>
-          <p class="sc-step-lead">نموذج توليد الأسئلة وJSON العقد. بعد نجاح المعاينة يمكن التعميد أو معاينة شكل التطبيق من قسم «د».</p>
+          <p class="sc-step-lead">بدون إدراج فوري. بعد النجاح: التعميد أو معاينة الواجهة من قسم السجل.</p>
           <div class="row">
             <label>حجم الدفعة <input type="number" id="sc-batch" min="1" max="50" value="10" /></label>
             <label
@@ -605,14 +606,12 @@
                 <option value="hard">صعب</option>
               </select>
             </label>
-            <label
-              >نموذج توليد الأسئلة
-              <select id="sc-preset"></select>
-            </label>
+            <label>النموذج <select id="sc-preset"></select></label>
+            <button type="button" class="btn btn-secondary" id="sc-save-default-generate">حفظ كافتراضي للمعاينة</button>
             <div class="hint" id="sc-preset-hint" style="flex-basis: 100%"></div>
           </div>
           <div class="row">
-            <button type="button" class="btn" id="sc-generate-preview">توليد معاينة (لا إدراج)</button>
+            <button type="button" class="btn" id="sc-generate-preview">توليد معاينة</button>
             <button type="button" class="btn" id="sc-commit" disabled>تعميد الإدراج</button>
           </div>
           <p class="subtitle" id="sc-pending-note" style="display: none"></p>
@@ -620,14 +619,47 @@
 
         <details class="sc-region sc-region--review" open id="sc-region-review">
           <summary>
-            <span class="sc-region-title">د — السجل، التفاصيل، ومعاينة التطبيق</span>
+            <span class="sc-region-title">السجل والمعاينة</span>
             <span class="sc-section-status" id="sc-sec-review-status" aria-live="polite"></span>
           </summary>
-          <p class="sc-step-lead">اختر سطرًا من السجل (يُظهر النموذج وعدد الأسئلة). تُعرض الطلبات والردود أيضًا عند فشل التشغيل.</p>
+          <p class="sc-step-lead">
+            اختر تشغيلًا من السجل. عند الفشل تُعرض الطلب والرد.
+            <strong>يدوي / معاينة</strong> يمرّ عبر «توليد معاينة» ثم يمكن <strong>تعميد الإدراج</strong>؛
+            <strong>مجدول</strong> يُدرج تلقائيًا من الجدولة دون تعميد من هذه الشاشة.
+          </p>
+
+          <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
+            <h2 style="font-size: 0.88rem; margin: 0 0 0.35rem">ملخص الرموز والتكلفة (هذا الفرع)</h2>
+            <p class="hint" id="sc-usage-summary" style="margin: 0">حمّل مساحة العمل لعرض الإجماليات.</p>
+          </div>
 
           <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
             <h2 style="font-size: 0.88rem; margin: 0 0 0.3rem">سجل التشغيلات</h2>
-            <p class="subtitle" style="margin-bottom: 0.4rem; font-size: var(--fs-sm)">الأحدث أولًا — النموذج وعدد الأسئلة في السطر.</p>
+            <p class="subtitle" style="margin-bottom: 0.4rem; font-size: var(--fs-sm)">
+              الأحدث أولًا. زر التعميد أعلاه يخصّ تشغيل معاينة يدوي بحالة «قيد المراجعة» فقط.
+            </p>
+            <div class="row" style="margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem; align-items: center">
+              <label style="font-size: var(--fs-sm)"
+                >المصدر
+                <select id="sc-runs-filter-trigger" style="margin-inline-start: 0.25rem">
+                  <option value="">الكل</option>
+                  <option value="manual">يدوي / معاينة</option>
+                  <option value="scheduled">مجدول</option>
+                </select>
+              </label>
+              <label style="font-size: var(--fs-sm)"
+                >الحالة
+                <select id="sc-runs-filter-status" style="margin-inline-start: 0.25rem">
+                  <option value="">الكل</option>
+                  <option value="succeeded">نجاح</option>
+                  <option value="failed">فشل</option>
+                  <option value="pending_review">قيد المراجعة</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-secondary" id="sc-runs-apply-filters" style="padding: 0.35rem 0.65rem; font-size: 0.78rem">
+                تطبيق التصفية
+              </button>
+            </div>
             <div class="runs" id="sc-runs"></div>
           </div>
 
@@ -645,13 +677,13 @@
             <pre class="mono" id="sc-run-questions"></pre>
           </div>
 
-          <p class="sc-step-lead" style="margin-top: 0.65rem">معاينة شكل التطبيق (بعد وجود أسئلة مطبّعة في التشغيل المحمّل)</p>
+          <p class="sc-step-lead" style="margin-top: 0.65rem">معاينة واجهة السؤال (يتطلب تشغيلًا يحوي أسئلة).</p>
           <div class="row">
-            <button type="button" class="btn btn-secondary" id="sc-phone-preview-btn">فتح معاينة شكل التطبيق</button>
+            <button type="button" class="btn btn-secondary" id="sc-phone-preview-btn">معاينة الواجهة</button>
           </div>
           <div class="preview-shell" id="sc-preview-shell" hidden>
             <div class="preview-phone" id="sc-preview-phone">
-              <div class="preview-empty">اختر تشغيلًا من السجل أو نفّذ «توليد معاينة» ثم اضغط «فتح معاينة شكل التطبيق».</div>
+              <div class="preview-empty">اختر تشغيلًا من السجل أو نفّذ «توليد معاينة» ثم «معاينة الواجهة».</div>
             </div>
             <div class="row" style="margin-top: 0.65rem; justify-content: center">
               <button type="button" class="btn btn-secondary" id="sc-preview-prev">السابق</button>
@@ -663,13 +695,11 @@
 
         <details class="sc-region sc-region--auto" id="sc-auto-fold">
           <summary>
-            <span class="sc-region-title">جدولة تلقائية — إدراج مباشر دون تعميد</span>
+            <span class="sc-region-title">الجدولة التلقائية</span>
             <span class="sc-section-status" id="sc-sec-auto-status" aria-live="polite"></span>
           </summary>
           <div class="sc-inner-muted">
-            <p class="sc-step-lead" style="margin-top: 0">
-              عند التفعيل يُدرج المحتوى تلقائيًا؛ لا يمر بخطوة «تعميد الإدراج». راجع النموذج والفاصل بعناية.
-            </p>
+            <p class="sc-step-lead" style="margin-top: 0">إدراج تلقائي دون تعميد يدوي. راجع النموذج والفاصل.</p>
             <div class="row">
               <label><input type="checkbox" id="sc-auto-en" /> تفعيل الجدولة</label>
               <label>كل <input type="number" id="sc-auto-min" min="5" max="10080" value="60" style="width: 4.5rem" /> دقيقة</label>
@@ -679,6 +709,37 @@
               </label>
               <div class="hint" id="sc-auto-preset-hint" style="flex-basis: 100%"></div>
               <button type="button" class="btn btn-secondary" id="sc-save-auto">حفظ الجدولة</button>
+            </div>
+            <p class="hint" id="sc-auto-dates" style="margin-top: 0.5rem; flex-basis: 100%"></p>
+            <p class="hint" id="sc-auto-tick-hint" style="margin-top: 0.35rem; flex-basis: 100%; font-size: var(--fs-sm)">
+              الخادم يفحص الفروع المستحقة كل دقيقة. إذا استمرت الدورة السابقة (توليد طويل أو عدة فروع)، قد يُؤجَّل
+              التشغيل دقيقة إضافية ويُسجَّل تخطي التيك في السجلات.
+            </p>
+            <p class="hint" id="sc-scheduler-stats-line" style="margin-top: 0.25rem; flex-basis: 100%; font-size: var(--fs-sm)"></p>
+          </div>
+        </details>
+
+        <details class="sc-region sc-region--cleanup" id="sc-runs-cleanup-fold">
+          <summary>
+            <span class="sc-region-title">حذف سجلات التشغيل القديمة</span>
+            <span class="sc-section-status" id="sc-sec-runs-cleanup-status" aria-live="polite"></span>
+          </summary>
+          <div class="sc-inner-muted">
+            <p class="sc-step-lead" style="margin-top: 0">
+              حذف صفوف <code>simple_content_runs</code> الأقدم من عدد الأيام المحدد (معاينات وطلبات/ردود محفوظة). لا يحذف أسئلة
+              <code>questions</code> المدرجة؛ تنظيف الأسئلة من لوحة الإدارة الرئيسية.
+            </p>
+            <div class="row">
+              <label><input type="checkbox" id="sc-runs-cleanup-enabled" /> تفعيل الحذف التلقائي (مهمة يومية 03:00)</label>
+            </div>
+            <div class="row">
+              <label>حذف ما هو أقدم من <input type="number" id="sc-runs-cleanup-days" min="1" max="3650" value="30" style="width: 4.5rem" /> يومًا</label>
+              <span class="hint" id="sc-runs-cleanup-last-run">آخر تشغيل: —</span>
+            </div>
+            <div class="row">
+              <button type="button" class="btn" id="sc-runs-cleanup-save">حفظ الإعدادات</button>
+              <button type="button" class="btn btn-secondary" id="sc-runs-cleanup-preview">معاينة العدد</button>
+              <button type="button" class="btn btn-secondary" id="sc-runs-cleanup-run">تشغيل الحذف الآن</button>
             </div>
           </div>
         </details>
@@ -698,22 +759,30 @@
         var WORK_ACTION_IDS = [
           "sc-edit-prompt",
           "sc-save-prompt",
-          "sc-copy-prompt",
           "sc-draft-prompt",
+          "sc-save-default-draft",
+          "sc-save-default-generate",
           "sc-generate-preview",
           "sc-commit",
           "sc-draft-template-load",
           "sc-draft-template-save",
           "sc-save-auto",
+          "sc-runs-cleanup-save",
+          "sc-runs-cleanup-preview",
+          "sc-runs-cleanup-run",
         ];
         var SECTION = {
           templates: { status: "sc-sec-templates-status", buttons: ["sc-load-templates"] },
           project: { status: "sc-sec-project-status", buttons: ["sc-draft-template-load", "sc-draft-template-save"] },
           prompt: { status: "sc-sec-prompt-status", buttons: ["sc-save-prompt", "sc-edit-prompt"] },
-          draftAi: { status: "sc-sec-draftai-status", buttons: ["sc-draft-prompt"] },
-          generate: { status: "sc-sec-generate-status", buttons: ["sc-generate-preview"] },
+          draftAi: { status: "sc-sec-draftai-status", buttons: ["sc-draft-prompt", "sc-save-default-draft"] },
+          generate: { status: "sc-sec-generate-status", buttons: ["sc-generate-preview", "sc-save-default-generate"] },
           review: { status: "sc-sec-review-status", buttons: [] },
           auto: { status: "sc-sec-auto-status", buttons: ["sc-save-auto"] },
+          runsCleanup: {
+            status: "sc-sec-runs-cleanup-status",
+            buttons: ["sc-runs-cleanup-save", "sc-runs-cleanup-preview", "sc-runs-cleanup-run"],
+          },
         };
 
         function secret() {
@@ -722,6 +791,30 @@
         function setPromptReadOnly(ro) {
           var ta = document.getElementById("sc-prompt");
           if (ta) ta.readOnly = !!ro;
+        }
+        /** نسخ إلى الحافظة: Clipboard API في السياق الآمن، وإلا execCommand كاحتياط. */
+        function copyTextToClipboard(text) {
+          return new Promise(function (resolve, reject) {
+            var s = String(text ?? "");
+            if (window.isSecureContext && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+              navigator.clipboard.writeText(s).then(resolve, reject);
+              return;
+            }
+            try {
+              var ta = document.createElement("textarea");
+              ta.value = s;
+              ta.setAttribute("readonly", "");
+              ta.style.position = "fixed";
+              ta.style.left = "-9999px";
+              document.body.appendChild(ta);
+              ta.select();
+              var ok = document.execCommand("copy");
+              document.body.removeChild(ta);
+              ok ? resolve() : reject(new Error("execCommand failed"));
+            } catch (e) {
+              reject(e instanceof Error ? e : new Error(String(e)));
+            }
+          });
         }
         function msg(text, ok) {
           var el = document.getElementById("sc-msg");
@@ -737,7 +830,7 @@
             return "النموذج أخرج أسئلة لا تطابق الشكل المطلوب (خيارات، فهرس صحيح، إلخ). عدّل البرومبت أو قلّل حجم الدفعة ثم أعد التوليد. (تفاصيل تقنية: " + s.slice(0, 220) + (s.length > 220 ? "…" : "") + ")";
           }
           if (s.indexOf("invalid_json_output") !== -1) {
-            return "لم يُرجع النموذج JSON صالحًا. صغّر الدفعة أو وضّح في البرومبت شكل المخرجات ثم أعد «توليد المعاينة».";
+            return "لم يُرجع النموذج JSON صالحًا. صغّر الدفعة أو وضّح شكل المخرجات ثم أعد «توليد معاينة».";
           }
           if (s.indexOf("layer_output_truncated_max_tokens") !== -1) {
             return "رد النموذج وصل لحد الطول وقُطع؛ قلّل حجم الدفعة أو راجع سقف الرموز في إعدادات النموذج ثم أعد المحاولة.";
@@ -745,9 +838,9 @@
           var map = {
             simple_content_invalid_preset: "النموذج المختار غير صالح أو غير مفعّل. اختر نموذجًا آخر من القائمة.",
             simple_content_no_active_preset: "لا يوجد نموذج مفعّل في النظام. راجع إعدادات النماذج.",
-            simple_content_prompt_empty: "البرومبت المحفوظ لهذا الفرع فارغ. اكتب نصًا أو استخدم «اقتراح برومبت بالذكاء» ثم «حفظ البرومبت».",
+            simple_content_prompt_empty: "البرومبت المحفوظ فارغ. اكتب نصًا أو استخدم «اقتراح بالذكاء» ثم «حفظ البرومبت».",
             simple_content_no_valid_questions: "لم يُنتج النموذج أسئلة صالحة بعد التحقق. عدّل البرومبت أو الصعوبة أو حجم الدفعة.",
-            simple_content_commit_invalid: "لا يمكن التعميد الآن: يلزم تشغيل معاينة يدوية بانتظار المراجعة (pending_review). نفّذ «توليد معاينة» أولًا أو اختر التشغيل الصحيح من السجل.",
+            simple_content_commit_invalid: "لا يمكن التعميد: يلزم معاينة يدوية قيد المراجعة. نفّذ «توليد معاينة» أو اختر التشغيل المناسب من السجل.",
             simple_content_commit_empty: "لا توجد أسئلة مطبّعة في هذا التشغيل للإدراج.",
             draft_failed: "فشل اقتراح البرومبت بالذكاء. تحقق من المفتاح والنموذج وحاول مرة أخرى.",
             generate_preview_failed: "فشل توليد المعاينة. راجع البرومبت والنموذج والاتصال بالخدمة.",
@@ -755,8 +848,86 @@
           return map[s] || "";
         }
 
-        function userVisibleApiError(reason, errCode) {
-          return friendlyApiReason(reason) || friendlyApiReason(errCode) || String(reason || errCode || "حدث خطأ. راجع الرسالة أو السجلات.");
+        function userVisibleApiError(reason, errCode, payload) {
+          var base =
+            friendlyApiReason(reason) ||
+            friendlyApiReason(errCode) ||
+            String(reason || errCode || "حدث خطأ. راجع الرسالة أو السجلات.");
+          if (payload && payload.errorKindHint) {
+            return base + "\n" + payload.errorKindHint;
+          }
+          return base;
+        }
+
+        function formatTsIso(iso) {
+          if (!iso) return "—";
+          try {
+            var d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return String(iso);
+            return d.toLocaleString("ar-SA", { dateStyle: "medium", timeStyle: "short" });
+          } catch (e) {
+            return String(iso);
+          }
+        }
+
+        function updateAutomationDates(automation) {
+          var el = document.getElementById("sc-auto-dates");
+          if (!el) return;
+          if (!automation) {
+            el.textContent =
+              "آخر تشغيل مجدول (عند آخر محاولة حسب السياسة): — | التشغيل التالي المخطَّط: — (لم تُعرِف جدولة لهذا الفرع بعد)";
+            return;
+          }
+          el.textContent =
+            "آخر تشغيل مجدول (عند آخر محاولة حسب السياسة): " +
+            formatTsIso(automation.lastRunAt) +
+            " | التشغيل التالي المخطَّط: " +
+            formatTsIso(automation.nextRunAt);
+        }
+
+        async function loadUsageSummary(subKey) {
+          var el = document.getElementById("sc-usage-summary");
+          if (!el || !subKey || !secret()) return;
+          var enc = encodeURIComponent(subKey);
+          var res = await fetch("/api/admin/simple-content/runs/summary?subcategoryKey=" + enc, hdr());
+          var data = await res.json();
+          if (!res.ok || !data.ok || !data.summary) {
+            el.textContent = "تعذر تحميل ملخص الرموز والتكلفة.";
+            return;
+          }
+          var s = data.summary;
+          var cost =
+            s.sumEstimatedCostUsd != null && Number.isFinite(Number(s.sumEstimatedCostUsd))
+              ? "≈ $" + Number(s.sumEstimatedCostUsd).toFixed(6) + " USD"
+              : "—";
+          el.textContent =
+            "تشغيلات: " +
+            s.runCount +
+            " (نجاح " +
+            s.successCount +
+            "، فشل " +
+            s.failedCount +
+            ") | توكنز إجمالي دخل/خرج/مجموع: " +
+            s.sumInputTokens +
+            " / " +
+            s.sumOutputTokens +
+            " / " +
+            s.sumTotalTokens +
+            " | مجموع تقدير التكلفة: " +
+            cost;
+        }
+
+        async function loadSchedulerStatsLine() {
+          var el = document.getElementById("sc-scheduler-stats-line");
+          if (!el || !secret()) return;
+          var res = await fetch("/api/admin/simple-content/scheduler-stats", hdr());
+          var data = await res.json();
+          if (res.ok && data.ok && typeof data.skippedTicksBusy === "number") {
+            el.textContent =
+              "على مستوى الخادم الحالي: مرات تخطّي تيك الجدولة لانشغال دورة سابقة = " + data.skippedTicksBusy;
+          } else {
+            el.textContent = "";
+          }
         }
 
         function updateRunListHighlight(runId) {
@@ -769,6 +940,27 @@
 
         function hdr() {
           return { headers: { "X-Admin-Secret": secret(), "Content-Type": "application/json" } };
+        }
+
+        function applyRunsCleanupSettings(j) {
+          if (!j || !j.ok) return;
+          document.getElementById("sc-runs-cleanup-enabled").checked = !!j.autoDeleteEnabled;
+          document.getElementById("sc-runs-cleanup-days").value = String(j.deletionThresholdDays ?? 30);
+          var lr = document.getElementById("sc-runs-cleanup-last-run");
+          if (lr) lr.textContent = "آخر تشغيل: " + (j.lastRunDate ? String(j.lastRunDate) : "—");
+        }
+
+        async function refreshRunsListForWorkspace() {
+          if (!selectedSubKey || !secret()) return;
+          var enc = encodeURIComponent(selectedSubKey);
+          var tk = String(document.getElementById("sc-runs-filter-trigger").value || "").trim();
+          var st = String(document.getElementById("sc-runs-filter-status").value || "").trim();
+          var q = "subcategoryKey=" + enc + "&limit=20";
+          if (tk === "manual" || tk === "scheduled") q += "&triggerKind=" + encodeURIComponent(tk);
+          if (st) q += "&status=" + encodeURIComponent(st);
+          var rr = await fetch("/api/admin/simple-content/runs?" + q, hdr());
+          var rj = await rr.json();
+          if (rr.ok && rj.ok) renderRuns(rj.items || []);
         }
 
         function setSectionStatus(statusId, text, busy) {
@@ -1036,8 +1228,19 @@
           nextB.disabled = scPreviewIndex >= scPreviewItems.length - 1;
         }
 
-        function fillPresets(items) {
-          lastPresetsItems = items || [];
+        function fillPresets(presetsPayload) {
+          var items = Array.isArray(presetsPayload) ? presetsPayload : presetsPayload.items || [];
+          var defaultDraftId = null;
+          var defaultGenId = null;
+          if (!Array.isArray(presetsPayload)) {
+            if (presetsPayload.defaultDraftPresetId != null && Number.isFinite(Number(presetsPayload.defaultDraftPresetId))) {
+              defaultDraftId = Number(presetsPayload.defaultDraftPresetId);
+            }
+            if (presetsPayload.defaultGeneratePresetId != null && Number.isFinite(Number(presetsPayload.defaultGeneratePresetId))) {
+              defaultGenId = Number(presetsPayload.defaultGeneratePresetId);
+            }
+          }
+          lastPresetsItems = items;
           ["sc-preset", "sc-auto-preset", "sc-draft-preset"].forEach(function (selId) {
             var sel = document.getElementById(selId);
             sel.innerHTML = "";
@@ -1049,6 +1252,17 @@
             });
             sel.onchange = updatePresetHints;
           });
+          function applySelectDefault(selId, defId) {
+            if (defId == null || !Number.isFinite(defId) || defId < 1) return;
+            var sel = document.getElementById(selId);
+            var want = String(defId);
+            var found = Array.prototype.some.call(sel.options, function (o) {
+              return o.value === want;
+            });
+            if (found) sel.value = want;
+          }
+          applySelectDefault("sc-draft-preset", defaultDraftId);
+          applySelectDefault("sc-preset", defaultGenId);
           updatePresetHints();
         }
 
@@ -1059,7 +1273,7 @@
           var note = document.getElementById("sc-pending-note");
           if (id != null) {
             note.style.display = "block";
-            note.textContent = "معاينة جاهزة: تشغيل #" + id + " — " + count + " سؤال. راجع التفاصيل ثم اضغط تعميد الإدراج.";
+            note.textContent = "معاينة جاهزة — تشغيل #" + id + " (" + count + " سؤال). راجع التفاصيل ثم «تعميد الإدراج».";
           } else {
             note.style.display = "none";
             note.textContent = "";
@@ -1105,7 +1319,8 @@
           if (ban) {
             if (r.error) {
               ban.hidden = false;
-              ban.textContent = "خطأ التشغيل: " + r.error;
+              var hint = r.errorKindHint ? "\n" + r.errorKindHint : "";
+              ban.textContent = "خطأ التشغيل: " + r.error + hint;
             } else {
               ban.hidden = true;
               ban.textContent = "";
@@ -1168,33 +1383,40 @@
           setWorkspaceLoading(true);
           try {
             var enc = encodeURIComponent(subKey);
-            var [ctxRes, prRes, presetsRes, autoRes, runsRes] = await Promise.all([
+            var [ctxRes, prRes, presetsRes, autoRes, runsRes, cleanupSettingsRes] = await Promise.all([
               fetch("/api/admin/simple-content/context/" + enc, hdr()),
               fetch("/api/admin/simple-content/prompt/" + enc, hdr()),
               fetch("/api/admin/simple-content/presets", hdr()),
               fetch("/api/admin/simple-content/automation/" + enc, hdr()),
               fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr()),
+              fetch("/api/admin/simple-content/runs-cleanup-settings", hdr()),
             ]);
             var ctx = await ctxRes.json();
             var pr = await prRes.json();
             var presets = await presetsRes.json();
             var auto = await autoRes.json();
             var runs = await runsRes.json();
+            var cleanupSt = await cleanupSettingsRes.json();
+            if (cleanupSettingsRes.ok && cleanupSt.ok) applyRunsCleanupSettings(cleanupSt);
             if (!prRes.ok || !pr.ok) throw new Error("prompt_load");
             document.getElementById("sc-prompt").value = pr.promptBody || "";
             setPromptReadOnly(true);
-            fillPresets(presets.items || []);
+            fillPresets(presets);
             if (auto.ok && auto.automation) {
               document.getElementById("sc-auto-en").checked = !!auto.automation.enabled;
               document.getElementById("sc-auto-min").value = String(auto.automation.intervalMinutes || 60);
               if (auto.automation.modelPresetId)
                 document.getElementById("sc-auto-preset").value = String(auto.automation.modelPresetId);
+              updateAutomationDates(auto.automation);
             } else {
               document.getElementById("sc-auto-en").checked = false;
               document.getElementById("sc-auto-min").value = "60";
+              updateAutomationDates(null);
             }
             updatePresetHints();
             renderRuns(runs.items || []);
+            await loadUsageSummary(subKey);
+            void loadSchedulerStatsLine();
             if (ctxRes.ok && ctx.ok) {
               document.getElementById("sc-ctx-line").textContent =
                 ctx.mainCategoryName + " ← " + ctx.subcategoryName + " (" + subKey + ")";
@@ -1259,20 +1481,62 @@
 
         document.getElementById("sc-copy-prompt").addEventListener("click", function () {
           var t = document.getElementById("sc-prompt").value;
-          var done = function (ok) {
-            msg(ok ? "تم نسخ نص البرومبت." : "تعذر النسخ. انسخ يدويًا من الحقل.", ok);
-          };
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(t).then(
-              function () {
-                done(true);
-              },
-              function () {
-                done(false);
-              },
-            );
-          } else {
-            done(false);
+          copyTextToClipboard(t).then(
+            function () {
+              msg("تم النسخ.", true);
+              setSectionStatus("sc-sec-prompt-status", "تم النسخ", false);
+            },
+            function () {
+              msg("تعذر النسخ تلقائيًا. انسخ يدويًا من الحقل (Ctrl+C).", false);
+              setSectionStatus("sc-sec-prompt-status", "فشل النسخ", false);
+            },
+          );
+        });
+
+        async function putPresetDefaults(body) {
+          var res = await fetch("/api/admin/simple-content/preset-defaults", {
+            method: "PUT",
+            headers: hdr().headers,
+            body: JSON.stringify(body),
+          });
+          var data = { ok: false };
+          try {
+            data = await res.json();
+          } catch (e) {}
+          return { res: res, data: data };
+        }
+
+        document.getElementById("sc-save-default-draft").addEventListener("click", async function () {
+          if (!secret()) return;
+          var pid = Number(document.getElementById("sc-draft-preset").value);
+          if (!Number.isFinite(pid) || pid < 1) {
+            msg("اختر نموذجًا من القائمة.", false);
+            return;
+          }
+          setSectionBusy("draftAi", true, "جاري الحفظ…");
+          try {
+            var out = await putPresetDefaults({ draftPresetId: pid });
+            msg(out.res.ok && out.data.ok ? "تم حفظ النموذج الافتراضي للمسودة." : "فشل الحفظ.", !!(out.res.ok && out.data.ok));
+            setSectionStatus("sc-sec-draftai-status", out.res.ok && out.data.ok ? "تم" : "فشل", false);
+          } finally {
+            setSectionBusy("draftAi", false);
+          }
+        });
+
+        document.getElementById("sc-save-default-generate").addEventListener("click", async function () {
+          if (!secret()) return;
+          var pid = Number(document.getElementById("sc-preset").value);
+          if (!Number.isFinite(pid) || pid < 1) {
+            msg("اختر نموذجًا من القائمة.", false);
+            return;
+          }
+          setSectionBusy("generate", true, "جاري الحفظ…");
+          try {
+            var out = await putPresetDefaults({ generatePresetId: pid });
+            msg(out.res.ok && out.data.ok ? "تم حفظ النموذج الافتراضي للمعاينة." : "فشل الحفظ.", !!(out.res.ok && out.data.ok));
+            setSectionStatus("sc-sec-generate-status", out.res.ok && out.data.ok ? "تم" : "فشل", false);
+          } finally {
+            setSectionBusy("generate", false);
           }
         });
 
@@ -1295,7 +1559,7 @@
 
         document.getElementById("sc-draft-prompt").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
-          msg("جاري الاتصال بالنموذج لاقتراح مسودة…", true);
+          msg("جاري اقتراح المسودة…", true);
           var draftPid = Number(document.getElementById("sc-draft-preset").value);
           var preset = lastPresetsItems.find(function (x) {
             return String(x.id) === String(draftPid);
@@ -1326,12 +1590,12 @@
               var resBlob = String(data.draft);
               if (resBlob.length > 12000) resBlob = resBlob.slice(0, 12000) + "\n…(مقطوع للعرض)";
               document.getElementById("sc-last-draft-res").textContent = resBlob;
-              msg("تم توليد مسودة — راجعها ثم احفظ.", true);
+              msg("تم الاقتراح — راجع النص ثم احفظ البرومبت.", true);
               setSectionStatus("sc-sec-draftai-status", "تم", false);
             } else {
               formatDraftUsageLine(null);
-              document.getElementById("sc-last-draft-res").textContent = userVisibleApiError(data.reason, data.error);
-              msg(userVisibleApiError(data.reason, data.error), false);
+              document.getElementById("sc-last-draft-res").textContent = userVisibleApiError(data.reason, data.error, data);
+              msg(userVisibleApiError(data.reason, data.error, data), false);
               setSectionStatus("sc-sec-draftai-status", "فشل", false);
             }
           } catch (e) {
@@ -1373,12 +1637,10 @@
               data = { ok: false, reason: "تعذر قراءة جسم الاستجابة." };
             }
             if (res.ok && data.ok && data.runId) {
-              msg("تمت المعاينة — راجع التفاصيل ثم عمّد.", true);
+              msg("تمت المعاينة. راجع السجل ثم التعميد.", true);
               await loadRunDetail(data.runId);
-              var enc = encodeURIComponent(selectedSubKey);
-              var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
-              var rj = await rr.json();
-              if (rr.ok && rj.ok) renderRuns(rj.items || []);
+              await refreshRunsListForWorkspace();
+              await loadUsageSummary(selectedSubKey);
               setSectionStatus("sc-sec-generate-status", "تم المعاينة", false);
               var revOk = document.getElementById("sc-region-review");
               if (revOk) {
@@ -1386,14 +1648,12 @@
                 revOk.scrollIntoView({ behavior: "smooth", block: "nearest" });
               }
             } else {
-              msg(userVisibleApiError(data.reason, data.error), false);
+              msg(userVisibleApiError(data.reason, data.error, data), false);
               setSectionStatus("sc-sec-generate-status", "فشل", false);
               if (data.runId != null) {
                 highlightedRunId = data.runId;
-                var enc2 = encodeURIComponent(selectedSubKey);
-                var rr2 = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc2 + "&limit=20", hdr());
-                var rj2 = await rr2.json();
-                if (rr2.ok && rj2.ok) renderRuns(rj2.items || []);
+                await refreshRunsListForWorkspace();
+                await loadUsageSummary(selectedSubKey);
                 await loadRunDetail(data.runId);
                 var rev = document.getElementById("sc-region-review");
                 if (rev) {
@@ -1422,14 +1682,12 @@
             if (res.ok && data.ok) {
               msg("تم الإدراج: " + data.inserted + " سؤال.", true);
               setPendingRun(null, 0);
-              var enc = encodeURIComponent(selectedSubKey);
-              var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
-              var rj = await rr.json();
-              if (rr.ok && rj.ok) renderRuns(rj.items || []);
+              await refreshRunsListForWorkspace();
+              await loadUsageSummary(selectedSubKey);
               await loadRunDetail(rid);
               setSectionStatus("sc-sec-generate-status", "تم التعميد", false);
             } else {
-              msg(userVisibleApiError(data.reason, data.error), false);
+              msg(userVisibleApiError(data.reason, data.error, data), false);
               setSectionStatus("sc-sec-generate-status", "فشل التعميد", false);
             }
           } finally {
@@ -1456,8 +1714,100 @@
             var data = await res.json();
             msg(res.ok && data.ok ? "تم حفظ الجدولة." : "فشل حفظ الجدولة.", res.ok && data.ok);
             setSectionStatus("sc-sec-auto-status", res.ok && data.ok ? "تم" : "فشل", false);
+            if (res.ok && data.ok) {
+              var ar = await fetch("/api/admin/simple-content/automation/" + enc, hdr());
+              var aj = await ar.json();
+              if (ar.ok && aj.ok && aj.automation) updateAutomationDates(aj.automation);
+              else updateAutomationDates(null);
+              await loadUsageSummary(selectedSubKey);
+            }
           } finally {
             setSectionBusy("auto", false);
+          }
+        });
+
+        document.getElementById("sc-runs-apply-filters").addEventListener("click", function () {
+          void refreshRunsListForWorkspace();
+        });
+
+        document.getElementById("sc-runs-cleanup-save").addEventListener("click", async function () {
+          if (!secret()) {
+            msg("أدخل مفتاح الإدارة.", false);
+            return;
+          }
+          var days = parseInt(String(document.getElementById("sc-runs-cleanup-days").value || ""), 10);
+          if (!days || days < 1) {
+            msg("عدد الأيام يجب أن يكون 1 أو أكثر.", false);
+            return;
+          }
+          setSectionBusy("runsCleanup", true, "جاري الحفظ…");
+          try {
+            var res = await fetch("/api/admin/simple-content/runs-cleanup-settings", {
+              method: "PATCH",
+              headers: hdr().headers,
+              body: JSON.stringify({
+                autoDeleteEnabled: document.getElementById("sc-runs-cleanup-enabled").checked,
+                deletionThresholdDays: days,
+              }),
+            });
+            var data = await res.json();
+            if (res.ok && data.ok) {
+              applyRunsCleanupSettings(data);
+              msg("تم حفظ إعدادات حذف السجلات.", true);
+              setSectionStatus("sc-sec-runs-cleanup-status", "تم", false);
+            } else {
+              msg("تعذر الحفظ.", false);
+              setSectionStatus("sc-sec-runs-cleanup-status", "فشل", false);
+            }
+          } finally {
+            setSectionBusy("runsCleanup", false);
+          }
+        });
+
+        document.getElementById("sc-runs-cleanup-preview").addEventListener("click", async function () {
+          if (!secret()) return;
+          setSectionBusy("runsCleanup", true, "جاري العدّ…");
+          try {
+            var res = await fetch("/api/admin/simple-content/runs-cleanup/preview", { method: "POST", headers: hdr().headers });
+            var data = await res.json();
+            if (res.ok && data.ok) {
+              msg(
+                "وفق الإعداد الحالي: " + data.expiredCount + " صفًا أقدم من " + data.deletionThresholdDays + " يومًا.",
+                true,
+              );
+              setSectionStatus("sc-sec-runs-cleanup-status", "معاينة", false);
+            } else {
+              msg("تعذر جلب المعاينة.", false);
+              setSectionStatus("sc-sec-runs-cleanup-status", "فشل", false);
+            }
+          } finally {
+            setSectionBusy("runsCleanup", false);
+          }
+        });
+
+        document.getElementById("sc-runs-cleanup-run").addEventListener("click", async function () {
+          if (!secret()) return;
+          if (!confirm("سيتم حذف سجلات التشغيل الأقدم من عدد الأيام المحدد في الإعدادات (كل الفروع). متابعة؟")) return;
+          setSectionBusy("runsCleanup", true, "جاري الحذف…");
+          try {
+            var res = await fetch("/api/admin/simple-content/runs-cleanup/run", { method: "POST", headers: hdr().headers });
+            var data = await res.json();
+            if (res.ok && data.ok) {
+              applyRunsCleanupSettings({
+                ok: true,
+                autoDeleteEnabled: document.getElementById("sc-runs-cleanup-enabled").checked,
+                deletionThresholdDays: data.deletionThresholdDays,
+                lastRunDate: data.runDate,
+              });
+              msg("تم حذف " + data.deletedCount + " سجلًا.", true);
+              setSectionStatus("sc-sec-runs-cleanup-status", "تم الحذف", false);
+              await refreshRunsListForWorkspace();
+            } else {
+              msg("فشل الحذف.", false);
+              setSectionStatus("sc-sec-runs-cleanup-status", "فشل", false);
+            }
+          } finally {
+            setSectionBusy("runsCleanup", false);
           }
         });
 
@@ -1496,7 +1846,7 @@
         document.getElementById("sc-phone-preview-btn").addEventListener("click", function () {
           var built = buildPreviewItemsFromQuestions(lastPreviewQuestions);
           if (built.error) {
-            msg(built.error + " — جرّب تعديل البرومبت أو إعادة «توليد المعاينة» ثم اختر التشغيل من السجل.", false);
+            msg(built.error + " — عدّل البرومبت أو أعد «توليد معاينة» واختر التشغيل من السجل.", false);
             return;
           }
           scPreviewItems = built.items;

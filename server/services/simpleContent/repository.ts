@@ -3,6 +3,8 @@ import type { SimpleContentAutomation, SimpleContentPreset } from "./types";
 
 export const APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM = "simple_content_draft_system_template";
 export const APP_KEY_SIMPLE_CONTENT_DRAFT_USER = "simple_content_draft_user_template";
+export const APP_KEY_SIMPLE_CONTENT_DEFAULT_DRAFT_PRESET_ID = "simple_content_default_draft_preset_id";
+export const APP_KEY_SIMPLE_CONTENT_DEFAULT_GENERATE_PRESET_ID = "simple_content_default_generate_preset_id";
 
 function mapPreset(row: {
   id: number;
@@ -316,9 +318,63 @@ type RunRow = {
   display_question_count: string | null;
 };
 
+export type ListRunsOptions = {
+  triggerKind?: "manual" | "scheduled";
+  status?: string;
+};
+
+export async function getRunsUsageSummaryForSubcategory(subcategoryKey: string): Promise<{
+  runCount: number;
+  successCount: number;
+  failedCount: number;
+  /** مجموع تقديرات التكلفة (USD) عندما يكون الحقل غير فارغ */
+  sumEstimatedCostUsd: number | null;
+  sumInputTokens: number;
+  sumOutputTokens: number;
+  sumTotalTokens: number;
+}> {
+  const pool = getPool();
+  const r = await pool.query<{
+    run_count: string;
+    success_count: string;
+    failed_count: string;
+    sum_cost: string | null;
+    sum_in: string | null;
+    sum_out: string | null;
+    sum_tot: string | null;
+  }>(
+    `SELECT
+       COUNT(*)::text AS run_count,
+       COUNT(*) FILTER (WHERE status = 'succeeded')::text AS success_count,
+       COUNT(*) FILTER (WHERE status = 'failed')::text AS failed_count,
+       SUM(estimated_cost_usd)::text AS sum_cost,
+       COALESCE(SUM(usage_input_tokens) FILTER (WHERE usage_input_tokens IS NOT NULL), 0)::text AS sum_in,
+       COALESCE(SUM(usage_output_tokens) FILTER (WHERE usage_output_tokens IS NOT NULL), 0)::text AS sum_out,
+       COALESCE(SUM(usage_total_tokens) FILTER (WHERE usage_total_tokens IS NOT NULL), 0)::text AS sum_tot
+     FROM simple_content_runs
+     WHERE subcategory_key = $1`,
+    [subcategoryKey],
+  );
+  const row = r.rows[0];
+  const num = (v: string | null | undefined) => (v != null && v !== "" && Number.isFinite(Number(v)) ? Number(v) : 0);
+  const costRaw = row?.sum_cost;
+  const sumEstimatedCostUsd =
+    costRaw != null && costRaw !== "" && Number.isFinite(Number(costRaw)) ? Number(costRaw) : null;
+  return {
+    runCount: num(row?.run_count),
+    successCount: num(row?.success_count),
+    failedCount: num(row?.failed_count),
+    sumEstimatedCostUsd,
+    sumInputTokens: num(row?.sum_in),
+    sumOutputTokens: num(row?.sum_out),
+    sumTotalTokens: num(row?.sum_tot),
+  };
+}
+
 export async function listRuns(
   subcategoryKey: string,
   limit: number,
+  options?: ListRunsOptions,
 ): Promise<
   Array<{
     id: number;
@@ -334,6 +390,22 @@ export async function listRuns(
   }>
 > {
   const pool = getPool();
+  const clauses: string[] = ["subcategory_key = $1"];
+  const params: unknown[] = [subcategoryKey];
+  let p = 2;
+  if (options?.triggerKind === "manual" || options?.triggerKind === "scheduled") {
+    clauses.push(`trigger_kind = $${p}`);
+    params.push(options.triggerKind);
+    p++;
+  }
+  if (options?.status && String(options.status).trim()) {
+    clauses.push(`status = $${p}`);
+    params.push(String(options.status).trim());
+    p++;
+  }
+  const whereSql = clauses.join(" AND ");
+  params.push(Math.max(1, Math.min(100, limit)));
+  const limitIdx = p;
   const r = await pool.query<RunRow>(
     `SELECT id::text, status, trigger_kind, inserted_count::text, error, created_at, provider, model_id,
             COALESCE(
@@ -350,10 +422,10 @@ export async function listRuns(
               CASE WHEN inserted_count > 0 THEN inserted_count END
             )::text AS display_question_count
      FROM simple_content_runs
-     WHERE subcategory_key = $1
+     WHERE ${whereSql}
      ORDER BY id DESC
-     LIMIT $2`,
-    [subcategoryKey, Math.max(1, Math.min(100, limit))],
+     LIMIT $${limitIdx}`,
+    params,
   );
   return r.rows.map((row) => {
     const qcRaw = row.display_question_count;

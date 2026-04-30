@@ -12,6 +12,8 @@ import {
 import {
   APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM,
   APP_KEY_SIMPLE_CONTENT_DRAFT_USER,
+  APP_KEY_SIMPLE_CONTENT_DEFAULT_DRAFT_PRESET_ID,
+  APP_KEY_SIMPLE_CONTENT_DEFAULT_GENERATE_PRESET_ID,
   bumpAutomationNextRun,
   createRun,
   finalizeSimpleContentRun,
@@ -21,6 +23,7 @@ import {
   getRunById,
   listActivePresets,
   listDueAutomations,
+  getRunsUsageSummaryForSubcategory,
   listRuns,
   upsertAppSettingValue,
   upsertPromptBody,
@@ -415,29 +418,139 @@ export async function commitSimpleContentRun(runId: number): Promise<{ inserted:
   return { inserted: questionIds.length, questionIds };
 }
 
-export async function runSimpleContentSchedulerTick(): Promise<void> {
-  const due = await listDueAutomations();
-  const defaultBatch = Math.max(
-    1,
-    Math.min(50, Number(process.env.SIMPLE_CONTENT_SCHEDULER_BATCH_SIZE ?? 10) || 10),
-  );
-  for (const row of due) {
-    const presetId = row.modelPresetId ?? (await listActivePresets())[0]?.id;
-    if (!presetId) continue;
-    try {
-      await runSimpleContentGenerate({
-        subcategoryKey: row.subcategoryKey,
-        batchSize: defaultBatch,
-        difficultyMode: "mix",
-        presetId,
-        triggerKind: "scheduled",
-      });
-    } catch {
-      // errors recorded in simple_content_runs
+function parsePositiveIntSetting(raw: string | null): number | null {
+  if (raw == null || !String(raw).trim()) return null;
+  const n = Number(String(raw).trim());
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+async function getSimpleContentPresetUiDefaults(): Promise<{
+  defaultDraftPresetId: number | null;
+  defaultGeneratePresetId: number | null;
+}> {
+  const [draftRaw, genRaw] = await Promise.all([
+    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DEFAULT_DRAFT_PRESET_ID),
+    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DEFAULT_GENERATE_PRESET_ID),
+  ]);
+  return {
+    defaultDraftPresetId: parsePositiveIntSetting(draftRaw),
+    defaultGeneratePresetId: parsePositiveIntSetting(genRaw),
+  };
+}
+
+async function setSimpleContentPresetUiDefaults(input: {
+  draftPresetId?: number | null;
+  generatePresetId?: number | null;
+}): Promise<void> {
+  const active = await listActivePresets();
+  const activeIds = new Set(active.map((p) => p.id));
+  const assertValid = (id: number | null) => {
+    if (id != null && !activeIds.has(id)) {
+      throw new Error("simple_content_invalid_preset");
     }
-    await bumpAutomationNextRun(row.subcategoryKey, row.intervalMinutes);
+  };
+  if (Object.prototype.hasOwnProperty.call(input, "draftPresetId")) {
+    const v = input.draftPresetId ?? null;
+    assertValid(v);
+    await upsertAppSettingValue(
+      APP_KEY_SIMPLE_CONTENT_DEFAULT_DRAFT_PRESET_ID,
+      v == null ? "" : String(v),
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "generatePresetId")) {
+    const v = input.generatePresetId ?? null;
+    assertValid(v);
+    await upsertAppSettingValue(
+      APP_KEY_SIMPLE_CONTENT_DEFAULT_GENERATE_PRESET_ID,
+      v == null ? "" : String(v),
+    );
   }
 }
 
-export { getPromptBody, upsertPromptBody, listRuns, listActivePresets, getRunById };
+/** يمنع تشغيل دورة جديدة قبل انتهاء السابقة (تيك cron كل دقيقة قد يتداخل). */
+let simpleContentSchedulerTickRunning = false;
+
+/** يُزاد عند تخطّي تيك لأن الدورة السابقة ما زالت تعمل (مراقبة تشغيلية). */
+let simpleContentSchedulerSkippedBusyTicks = 0;
+
+/** بعد الفشل: إن كانت `false` لا يُحدَّث `next_run_at` (إعادة المحاولة عند الاستحقاق دون تأخير إضافي). أنظر `SIMPLE_CONTENT_SCHEDULER_BUMP_AFTER_FAILURE`. */
+function bumpScheduledAfterFailure(): boolean {
+  const raw = process.env.SIMPLE_CONTENT_SCHEDULER_BUMP_AFTER_FAILURE;
+  if (raw === undefined || raw === "") return true;
+  const v = String(raw).trim().toLowerCase();
+  return v !== "false" && v !== "0" && v !== "no";
+}
+
+export function getSimpleContentSchedulerStats(): { skippedTicksBusy: number } {
+  return { skippedTicksBusy: simpleContentSchedulerSkippedBusyTicks };
+}
+
+/**
+ * سياسة الموعد للجدولة الافتراضية: بعد محاولة ناجحة نُحدّث `next_run_at`.
+ * عند الفشل: يُحدَّث الموعد أيضًا ما لم يُضبط `SIMPLE_CONTENT_SCHEDULER_BUMP_AFTER_FAILURE=false`
+ * (حينها يبقى الموعد الحالي فيُعاد الاستحقاق في التيكات التالية بلا تأخير إضافي بمقدار الفاصل).
+ * تفاصيل الفشل في `simple_content_runs` والسجلات.
+ */
+export async function runSimpleContentSchedulerTick(): Promise<void> {
+  if (simpleContentSchedulerTickRunning) {
+    simpleContentSchedulerSkippedBusyTicks += 1;
+    console.info("[simple_content_scheduler] tick skipped (previous tick still running)");
+    return;
+  }
+  simpleContentSchedulerTickRunning = true;
+  try {
+    const due = await listDueAutomations();
+    const defaultBatch = Math.max(
+      1,
+      Math.min(50, Number(process.env.SIMPLE_CONTENT_SCHEDULER_BATCH_SIZE ?? 10) || 10),
+    );
+    const bumpAfterFail = bumpScheduledAfterFailure();
+    for (const row of due) {
+      const presetId = row.modelPresetId ?? (await listActivePresets())[0]?.id;
+      if (!presetId) continue;
+      let generateOk = false;
+      try {
+        await runSimpleContentGenerate({
+          subcategoryKey: row.subcategoryKey,
+          batchSize: defaultBatch,
+          difficultyMode: "mix",
+          presetId,
+          triggerKind: "scheduled",
+        });
+        generateOk = true;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `[simple_content_scheduler] scheduled generate failed subcategory=${row.subcategoryKey} intervalMin=${row.intervalMinutes}: ${detail}`,
+        );
+      }
+      const shouldBump = generateOk || bumpAfterFail;
+      if (shouldBump) {
+        await bumpAutomationNextRun(row.subcategoryKey, row.intervalMinutes);
+        if (!generateOk) {
+          console.info(
+            `[simple_content_scheduler] next_run bumped after failure subcategory=${row.subcategoryKey} (see simple_content_runs for run row)`,
+          );
+        }
+      } else if (!generateOk) {
+        console.info(
+          `[simple_content_scheduler] next_run not bumped after failure (SIMPLE_CONTENT_SCHEDULER_BUMP_AFTER_FAILURE=false) subcategory=${row.subcategoryKey}`,
+        );
+      }
+    }
+  } finally {
+    simpleContentSchedulerTickRunning = false;
+  }
+}
+
+export {
+  getPromptBody,
+  upsertPromptBody,
+  listRuns,
+  listActivePresets,
+  getRunById,
+  getRunsUsageSummaryForSubcategory,
+  getSimpleContentPresetUiDefaults,
+  setSimpleContentPresetUiDefaults,
+};
 export { getAutomation, upsertAutomation } from "./repository";

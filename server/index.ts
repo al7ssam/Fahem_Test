@@ -7,8 +7,10 @@ import { GameManager } from "./game/GameManager";
 import {
   maybeRunStartupAiFactoryLogsCleanup,
   maybeRunStartupCleanup,
+  maybeRunStartupSimpleContentRunsCleanup,
   performAiFactoryLogsCleanup,
   performCleanup,
+  performSimpleContentRunsCleanup,
 } from "./services/cleanup";
 import { aiFactoryRuntime } from "./services/aiFactory/runtime";
 import { startSimpleContentScheduler, stopSimpleContentScheduler } from "./services/simpleContent/scheduler";
@@ -27,6 +29,11 @@ function scheduleCleanupCron(): void {
     }
     try {
       await performAiFactoryLogsCleanup({ source: "cron" });
+    } catch {
+      // detailed log is emitted inside cleanup service
+    }
+    try {
+      await performSimpleContentRunsCleanup({ source: "cron" });
     } catch {
       // detailed log is emitted inside cleanup service
     }
@@ -56,6 +63,11 @@ async function startServer(): Promise<void> {
   }
   try {
     await maybeRunStartupAiFactoryLogsCleanup();
+  } catch {
+    // detailed log is emitted inside cleanup service
+  }
+  try {
+    await maybeRunStartupSimpleContentRunsCleanup();
   } catch {
     // detailed log is emitted inside cleanup service
   }
