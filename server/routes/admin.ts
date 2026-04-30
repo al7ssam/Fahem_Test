@@ -267,6 +267,22 @@ const openAiPricingPutSchema = z.object({
   ),
 });
 
+const unifiedPricingPutSchema = z.object({
+  openai: openAiPricingPutSchema,
+  google: z.object({
+    fallbackPolicy: z.enum(["use_default", "block"]).default("use_default"),
+    models: z.record(
+      z.string().trim().min(1).max(120),
+      z.object({
+        inputPer1M: z.number().min(0).max(100),
+        cachedInputPer1M: z.number().min(0).max(100),
+        outputPer1M: z.number().min(0).max(100),
+        note: z.string().trim().min(1).max(200).optional(),
+      }),
+    ),
+  }),
+});
+
 const factoryModelPatchSchema = z.object({
   layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
   provider: z.string().trim().min(1).max(50),
@@ -372,6 +388,46 @@ function checkPricingUpdateRateLimit(key: string): boolean {
   list.push(now);
   pricingUpdateRateLimit.set(key, list);
   return true;
+}
+
+async function readGooglePricingSettingsForAdmin(): Promise<{
+  fallbackPolicy: "use_default" | "block";
+  models: Record<string, { inputPer1M: number; cachedInputPer1M: number; outputPer1M: number; note?: string }>;
+}> {
+  const pool = getPool();
+  const keys = ["pricing_models_google_v1", "pricing_fallback_policy_google"];
+  const r = await pool.query<{ key: string; value: string }>(`SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`, [keys]);
+  const m = new Map(r.rows.map((x) => [x.key, x.value]));
+  const fallbackRaw = String(m.get("pricing_fallback_policy_google") ?? "use_default").trim().toLowerCase();
+  const fallbackPolicy: "use_default" | "block" = fallbackRaw === "block" ? "block" : "use_default";
+  const raw = String(m.get("pricing_models_google_v1") ?? "").trim();
+  if (!raw) return { fallbackPolicy, models: {} };
+  try {
+    const parsed = JSON.parse(raw) as Record<string, { inputPer1M: number; cachedInputPer1M: number; outputPer1M: number; note?: string }>;
+    return { fallbackPolicy, models: parsed && typeof parsed === "object" ? parsed : {} };
+  } catch {
+    return { fallbackPolicy, models: {} };
+  }
+}
+
+async function saveGooglePricingSettingsForAdmin(input: {
+  actor: string;
+  fallbackPolicy: "use_default" | "block";
+  models: Record<string, { inputPer1M: number; cachedInputPer1M: number; outputPer1M: number; note?: string }>;
+}): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES
+      ('pricing_models_google_v1', $1),
+      ('pricing_fallback_policy_google', $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [JSON.stringify(input.models), input.fallbackPolicy],
+  );
+  await pool.query(
+    `INSERT INTO simple_content_pricing_audit_logs (actor, action, details_json)
+     VALUES ($1, 'google_pricing_updated', $2::jsonb)`,
+    [input.actor, JSON.stringify({ fallbackPolicy: input.fallbackPolicy, modelCount: Object.keys(input.models).length })],
+  );
 }
 
 function adminTemplatePath(): string {
@@ -1574,6 +1630,67 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true, ...data });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/pricing/models", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const [openai, google] = await Promise.all([getOpenAiPricingSettingsForAdmin(), readGooglePricingSettingsForAdmin()]);
+      res.json({ ok: true, openai, google });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.put("/api/admin/pricing/models", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const rateKey = String(req.ip || req.header("x-forwarded-for") || "unknown");
+    if (!checkPricingUpdateRateLimit(rateKey)) {
+      res.status(429).json({ ok: false, error: "rate_limited" });
+      return;
+    }
+    const parsed = unifiedPricingPutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      const actor = String(req.header("x-admin-secret") ?? "admin").slice(0, 16);
+      await saveOpenAiPricingSettingsForAdmin({
+        actor,
+        fallbackPolicy: parsed.data.openai.fallbackPolicy,
+        models: Object.fromEntries(
+          Object.entries(parsed.data.openai.models).map(([modelId, row]) => [
+            modelId.trim(),
+            {
+              inputPer1M: Number(row.inputPer1M),
+              cachedInputPer1M: Number(row.cachedInputPer1M),
+              outputPer1M: Number(row.outputPer1M),
+              note: row.note?.trim() || `admin:${modelId}`,
+            },
+          ]),
+        ),
+      });
+      await saveGooglePricingSettingsForAdmin({
+        actor,
+        fallbackPolicy: parsed.data.google.fallbackPolicy,
+        models: Object.fromEntries(
+          Object.entries(parsed.data.google.models).map(([modelId, row]) => [
+            modelId.trim(),
+            {
+              inputPer1M: Number(row.inputPer1M),
+              cachedInputPer1M: Number(row.cachedInputPer1M),
+              outputPer1M: Number(row.outputPer1M),
+              note: row.note?.trim() || `admin:${modelId}`,
+            },
+          ]),
+        ),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "write_failed";
+      res.status(500).json({ ok: false, error: "write_failed", reason });
     }
   });
 

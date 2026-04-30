@@ -1,0 +1,5 @@
+ALTER TABLE ai_usage_logs
+  ADD COLUMN IF NOT EXISTS pricing_input_per_1m DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS pricing_cached_input_per_1m DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS pricing_output_per_1m DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS pricing_source TEXT;

@@ -960,6 +960,43 @@
       </div>
 
       <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="pricing-models">
+          <span class="accordion-title">إدارة تسعير النماذج (OpenAI + Google)</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <p class="subtitle">تسعير مركزي على مستوى النظام لـ Simple Content و AI Factory.</p>
+            <div class="factory-grid">
+              <div>
+                <label for="pricing-openai-fallback">Fallback OpenAI</label>
+                <select id="pricing-openai-fallback">
+                  <option value="use_default">use_default</option>
+                  <option value="block">block</option>
+                </select>
+              </div>
+              <div>
+                <label for="pricing-google-fallback">Fallback Google</label>
+                <select id="pricing-google-fallback">
+                  <option value="use_default">use_default</option>
+                  <option value="block">block</option>
+                </select>
+              </div>
+            </div>
+            <label style="margin-top:0.7rem" for="pricing-openai-json">OpenAI models JSON</label>
+            <textarea id="pricing-openai-json" rows="8" placeholder='{"gpt-5.4-nano":{"inputPer1M":0.2,"cachedInputPer1M":0.02,"outputPer1M":1.25}}'></textarea>
+            <label style="margin-top:0.7rem" for="pricing-google-json">Google models JSON</label>
+            <textarea id="pricing-google-json" rows="8" placeholder='{"gemini-2.5-flash":{"inputPer1M":0.3,"cachedInputPer1M":0.03,"outputPer1M":2.5}}'></textarea>
+            <div class="btn-row">
+              <button type="button" class="btn btn-secondary" id="pricing-load-btn">تحميل</button>
+              <button type="button" class="btn" id="pricing-save-btn">حفظ</button>
+            </div>
+            <div class="msg" id="pricing-msg"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="categories">
           <span class="accordion-title">إدارة التصنيفات (صفحة مستقلة)</span>
           <span class="accordion-icon">⌄</span>
@@ -2958,6 +2995,53 @@
             });
           } catch (e) {}
         }
+        async function loadUnifiedPricing() {
+          var msg = document.getElementById("pricing-msg");
+          try {
+            msg.textContent = "جاري تحميل التسعير...";
+            var r = await fetch("/api/admin/pricing/models", { headers: { "X-Admin-Secret": secret() } });
+            var j = await r.json();
+            if (!r.ok || !j.ok) throw new Error(j.error || "read_failed");
+            document.getElementById("pricing-openai-fallback").value = j.openai && j.openai.fallbackPolicy ? j.openai.fallbackPolicy : "use_default";
+            document.getElementById("pricing-google-fallback").value = j.google && j.google.fallbackPolicy ? j.google.fallbackPolicy : "use_default";
+            document.getElementById("pricing-openai-json").value = JSON.stringify((j.openai && j.openai.models) || {}, null, 2);
+            document.getElementById("pricing-google-json").value = JSON.stringify((j.google && j.google.models) || {}, null, 2);
+            msg.textContent = "تم تحميل التسعير.";
+          } catch (e) {
+            msg.textContent = "فشل تحميل التسعير: " + (e && e.message ? e.message : "unknown");
+          }
+        }
+        async function saveUnifiedPricing() {
+          var msg = document.getElementById("pricing-msg");
+          try {
+            var openaiModels = JSON.parse(document.getElementById("pricing-openai-json").value || "{}");
+            var googleModels = JSON.parse(document.getElementById("pricing-google-json").value || "{}");
+            msg.textContent = "جاري حفظ التسعير...";
+            var body = {
+              openai: {
+                fallbackPolicy: document.getElementById("pricing-openai-fallback").value || "use_default",
+                models: openaiModels
+              },
+              google: {
+                fallbackPolicy: document.getElementById("pricing-google-fallback").value || "use_default",
+                models: googleModels
+              }
+            };
+            var r = await fetch("/api/admin/pricing/models", { method: "PUT", headers: hdr(), body: JSON.stringify(body) });
+            var j = await r.json();
+            if (!r.ok || !j.ok) throw new Error(j.error || "write_failed");
+            msg.textContent = "تم حفظ التسعير بنجاح.";
+          } catch (e) {
+            msg.textContent = "فشل حفظ التسعير: " + (e && e.message ? e.message : "unknown");
+          }
+        }
+        var pricingLoadBtn = document.getElementById("pricing-load-btn");
+        var pricingSaveBtn = document.getElementById("pricing-save-btn");
+        if (pricingLoadBtn && pricingSaveBtn) {
+          pricingLoadBtn.addEventListener("click", loadUnifiedPricing);
+          pricingSaveBtn.addEventListener("click", saveUnifiedPricing);
+        }
+
         document.getElementById("af-load-btn").addEventListener("click", loadFactory);
         document.getElementById("af-save-btn").addEventListener("click", saveFactorySettingsUi);
         document.getElementById("af-model-save-btn").addEventListener("click", saveModelsUi);

@@ -175,7 +175,7 @@ export async function buildFactoryJobEfficiencyReport(jobId: number): Promise<Fa
     const agg = byLayer[layerKey];
     if (parsed) {
       const outputTokensForBilling = parsed.thoughtsTokenCount + parsed.candidatesTokenCount;
-      const cost = calculateGeminiCost(parsed.promptTokenCount, outputTokensForBilling, row.modelName);
+      const cost = await calculateGeminiCost(parsed.promptTokenCount, outputTokensForBilling, row.modelName);
       agg.promptTokenCount += parsed.promptTokenCount;
       agg.thoughtsTokenCount += parsed.thoughtsTokenCount;
       agg.candidatesTokenCount += parsed.candidatesTokenCount;

@@ -99,7 +99,7 @@ async function appendAiUsageLogSafe(input: {
   } | null;
 }): Promise<void> {
   try {
-    const pricing = calculateGeminiCost(
+    const pricing = await calculateGeminiCost(
       input.usage?.inputTokens ?? 0,
       input.usage?.outputTokens ?? 0,
       input.modelId,
@@ -112,6 +112,10 @@ async function appendAiUsageLogSafe(input: {
       outputTokens: pricing.outputTokens,
       costUsd: pricing.costUsd,
       costSar: pricing.costSar,
+      pricingInputPer1M: pricing.pricingInputPer1M,
+      pricingCachedInputPer1M: pricing.pricingCachedInputPer1M,
+      pricingOutputPer1M: pricing.pricingOutputPer1M,
+      pricingSource: pricing.pricingSource,
       subject: input.subject,
       status: input.status,
     });

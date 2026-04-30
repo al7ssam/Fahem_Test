@@ -2,8 +2,11 @@ import { getPool } from "../../db/pool";
 import type { FactoryLayer } from "./types";
 
 const USD_TO_SAR_RATE = 3.75;
+const APP_KEY_PRICING_MODELS_GOOGLE_V1 = "pricing_models_google_v1";
+const APP_KEY_PRICING_FALLBACK_POLICY_GOOGLE = "pricing_fallback_policy_google";
 type GeminiPricing = {
   inputPerMillion: number;
+  cachedInputPerMillion: number;
   outputPerMillion: number;
   source: string;
 };
@@ -18,22 +21,23 @@ export const GEMINI_PRICING_DOC_URL = "https://ai.google.dev/gemini-api/docs/pri
 
 const GEMINI_FALLBACK_PRICING: GeminiPricing = {
   inputPerMillion: 0.075,
+  cachedInputPerMillion: 0.02,
   outputPerMillion: 0.3,
   source: "fallback:gemini-1.5-flash",
 };
 
 /** USD per 1M tokens; ≤200k prompt tier where Google lists split tiers. Order: most specific pattern first. */
 const GEMINI_PRICING_RULES: GeminiPricingRule[] = [
-  { pattern: /gemini-3\.1-flash-lite|gemini-3-flash-lite/i, pricing: { inputPerMillion: 0.25, outputPerMillion: 1.5, source: "gemini-3.1-flash-lite" } },
-  { pattern: /gemini-2\.5-flash-lite/i, pricing: { inputPerMillion: 0.1, outputPerMillion: 0.4, source: "gemini-2.5-flash-lite" } },
-  { pattern: /gemini-2\.5-flash(?!-lite)/i, pricing: { inputPerMillion: 0.3, outputPerMillion: 2.5, source: "gemini-2.5-flash" } },
-  { pattern: /gemini-2\.5-pro/i, pricing: { inputPerMillion: 1.25, outputPerMillion: 10.0, source: "gemini-2.5-pro" } },
-  { pattern: /gemini-2\.0-flash-lite/i, pricing: { inputPerMillion: 0.075, outputPerMillion: 0.3, source: "gemini-2.0-flash-lite" } },
-  { pattern: /gemini-2\.0-flash(?!-lite)/i, pricing: { inputPerMillion: 0.15, outputPerMillion: 0.6, source: "gemini-2.0-flash" } },
-  { pattern: /gemini-3(?:\.\d+)?-flash/i, pricing: { inputPerMillion: 0.5, outputPerMillion: 3.0, source: "gemini-3-flash" } },
-  { pattern: /gemini-3(?:\.\d+)?-pro/i, pricing: { inputPerMillion: 2.0, outputPerMillion: 12.0, source: "gemini-3-pro" } },
-  { pattern: /gemini-1\.5-pro/i, pricing: { inputPerMillion: 3.5, outputPerMillion: 10.5, source: "gemini-1.5-pro" } },
-  { pattern: /gemini-1\.5-flash/i, pricing: { inputPerMillion: 0.075, outputPerMillion: 0.3, source: "gemini-1.5-flash" } },
+  { pattern: /gemini-3\.1-flash-lite|gemini-3-flash-lite/i, pricing: { inputPerMillion: 0.25, cachedInputPerMillion: 0.03, outputPerMillion: 1.5, source: "gemini-3.1-flash-lite" } },
+  { pattern: /gemini-2\.5-flash-lite/i, pricing: { inputPerMillion: 0.1, cachedInputPerMillion: 0.02, outputPerMillion: 0.4, source: "gemini-2.5-flash-lite" } },
+  { pattern: /gemini-2\.5-flash(?!-lite)/i, pricing: { inputPerMillion: 0.3, cachedInputPerMillion: 0.03, outputPerMillion: 2.5, source: "gemini-2.5-flash" } },
+  { pattern: /gemini-2\.5-pro/i, pricing: { inputPerMillion: 1.25, cachedInputPerMillion: 0.12, outputPerMillion: 10.0, source: "gemini-2.5-pro" } },
+  { pattern: /gemini-2\.0-flash-lite/i, pricing: { inputPerMillion: 0.075, cachedInputPerMillion: 0.02, outputPerMillion: 0.3, source: "gemini-2.0-flash-lite" } },
+  { pattern: /gemini-2\.0-flash(?!-lite)/i, pricing: { inputPerMillion: 0.15, cachedInputPerMillion: 0.02, outputPerMillion: 0.6, source: "gemini-2.0-flash" } },
+  { pattern: /gemini-3(?:\.\d+)?-flash/i, pricing: { inputPerMillion: 0.5, cachedInputPerMillion: 0.05, outputPerMillion: 3.0, source: "gemini-3-flash" } },
+  { pattern: /gemini-3(?:\.\d+)?-pro/i, pricing: { inputPerMillion: 2.0, cachedInputPerMillion: 0.2, outputPerMillion: 12.0, source: "gemini-3-pro" } },
+  { pattern: /gemini-1\.5-pro/i, pricing: { inputPerMillion: 3.5, cachedInputPerMillion: 0.35, outputPerMillion: 10.5, source: "gemini-1.5-pro" } },
+  { pattern: /gemini-1\.5-flash/i, pricing: { inputPerMillion: 0.075, cachedInputPerMillion: 0.02, outputPerMillion: 0.3, source: "gemini-1.5-flash" } },
 ];
 
 export type UsageTokens = {
@@ -46,6 +50,9 @@ export type GeminiCostResult = UsageTokens & {
   costUsd: number;
   costSar: number;
   pricingSource: string;
+  pricingInputPer1M: number;
+  pricingCachedInputPer1M: number;
+  pricingOutputPer1M: number;
 };
 
 export type UsageFilters = {
@@ -71,7 +78,7 @@ function safeRate(value: number, fallback: number): number {
   return value;
 }
 
-function resolveGeminiPricing(modelId: string): GeminiPricing {
+function resolveGeminiPricingFromDefaults(modelId: string): GeminiPricing {
   const normalized = String(modelId || "").trim().toLowerCase();
   for (const rule of GEMINI_PRICING_RULES) {
     if (rule.pattern.test(normalized)) {
@@ -81,22 +88,63 @@ function resolveGeminiPricing(modelId: string): GeminiPricing {
   return GEMINI_FALLBACK_PRICING;
 }
 
+async function resolveGeminiPricing(modelId: string): Promise<GeminiPricing> {
+  const pool = getPool();
+  const keys = [APP_KEY_PRICING_MODELS_GOOGLE_V1, APP_KEY_PRICING_FALLBACK_POLICY_GOOGLE];
+  const r = await pool.query<{ key: string; value: string }>(
+    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    [keys],
+  );
+  const m = new Map(r.rows.map((x) => [x.key, x.value]));
+  const fallbackPolicy = String(m.get(APP_KEY_PRICING_FALLBACK_POLICY_GOOGLE) ?? "use_default").trim().toLowerCase();
+  const raw = String(m.get(APP_KEY_PRICING_MODELS_GOOGLE_V1) ?? "").trim();
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, { inputPer1M?: unknown; cachedInputPer1M?: unknown; outputPer1M?: unknown; note?: unknown }>;
+      const row = parsed?.[modelId];
+      if (row) {
+        const input = Number(row.inputPer1M ?? NaN);
+        const cached = Number(row.cachedInputPer1M ?? NaN);
+        const output = Number(row.outputPer1M ?? NaN);
+        if (Number.isFinite(input) && Number.isFinite(cached) && Number.isFinite(output)) {
+          return {
+            inputPerMillion: Math.max(0, input),
+            cachedInputPerMillion: Math.max(0, cached),
+            outputPerMillion: Math.max(0, output),
+            source: typeof row.note === "string" && row.note.trim() ? row.note.trim() : `admin:${modelId}`,
+          };
+        }
+      }
+    } catch {
+      // ignore malformed admin pricing json and fallback below
+    }
+  }
+  if (fallbackPolicy === "block") {
+    throw new Error(`google_pricing_missing_model:${modelId}`);
+  }
+  return resolveGeminiPricingFromDefaults(modelId);
+}
+
 export function usdToSar(usd: number, rate = USD_TO_SAR_RATE): number {
   const safeUsd = Number.isFinite(usd) ? Math.max(0, usd) : 0;
   const safeRate = Number.isFinite(rate) && rate > 0 ? rate : USD_TO_SAR_RATE;
   return roundMoney(safeUsd * safeRate);
 }
 
-export function calculateGeminiCost(inputTokensRaw: unknown, outputTokensRaw: unknown, modelId: string): GeminiCostResult {
+export async function calculateGeminiCost(inputTokensRaw: unknown, outputTokensRaw: unknown, modelId: string): Promise<GeminiCostResult> {
   const inputTokens = toSafeTokens(inputTokensRaw);
   const outputTokens = toSafeTokens(outputTokensRaw);
   const totalTokens = inputTokens + outputTokens;
-  const pricing = resolveGeminiPricing(modelId);
+  const pricing = await resolveGeminiPricing(modelId);
   const inputRate = safeRate(pricing.inputPerMillion, GEMINI_FALLBACK_PRICING.inputPerMillion);
   const outputRate = safeRate(pricing.outputPerMillion, GEMINI_FALLBACK_PRICING.outputPerMillion);
-  const inputCost = (inputTokens / 1_000_000) * inputRate;
+  const cachedRate = safeRate(pricing.cachedInputPerMillion, GEMINI_FALLBACK_PRICING.cachedInputPerMillion);
+  const cachedInputTokens = 0;
+  const uncachedInputTokens = inputTokens;
+  const inputCost = (uncachedInputTokens / 1_000_000) * inputRate;
+  const cachedInputCost = (cachedInputTokens / 1_000_000) * cachedRate;
   const outputCost = (outputTokens / 1_000_000) * outputRate;
-  const costUsd = roundMoney(inputCost + outputCost);
+  const costUsd = roundMoney(inputCost + cachedInputCost + outputCost);
   const costSar = usdToSar(costUsd);
   return {
     inputTokens,
@@ -105,6 +153,9 @@ export function calculateGeminiCost(inputTokensRaw: unknown, outputTokensRaw: un
     costUsd,
     costSar,
     pricingSource: `${pricing.source}:${modelId || "unknown"}`,
+    pricingInputPer1M: inputRate,
+    pricingCachedInputPer1M: cachedRate,
+    pricingOutputPer1M: outputRate,
   };
 }
 
@@ -112,22 +163,24 @@ function logPricingVerificationSamples(): void {
   if (process.env.NODE_ENV === "production") return;
   const sampleInput = 1_000_000;
   const sampleOutput = 500_000;
-  const pro15 = calculateGeminiCost(sampleInput, sampleOutput, "gemini-1.5-pro");
-  const flash3 = calculateGeminiCost(sampleInput, sampleOutput, "gemini-3-flash-preview");
-  console.log("[usageAnalytics] pricing-check gemini-1.5-pro", {
-    inputTokens: pro15.inputTokens,
-    outputTokens: pro15.outputTokens,
-    costUsd: pro15.costUsd,
-    costSar: pro15.costSar,
-    source: pro15.pricingSource,
-  });
-  console.log("[usageAnalytics] pricing-check gemini-3-flash-preview", {
-    inputTokens: flash3.inputTokens,
-    outputTokens: flash3.outputTokens,
-    costUsd: flash3.costUsd,
-    costSar: flash3.costSar,
-    source: flash3.pricingSource,
-  });
+  void (async () => {
+    const pro15 = await calculateGeminiCost(sampleInput, sampleOutput, "gemini-1.5-pro");
+    const flash3 = await calculateGeminiCost(sampleInput, sampleOutput, "gemini-3-flash-preview");
+    console.log("[usageAnalytics] pricing-check gemini-1.5-pro", {
+      inputTokens: pro15.inputTokens,
+      outputTokens: pro15.outputTokens,
+      costUsd: pro15.costUsd,
+      costSar: pro15.costSar,
+      source: pro15.pricingSource,
+    });
+    console.log("[usageAnalytics] pricing-check gemini-3-flash-preview", {
+      inputTokens: flash3.inputTokens,
+      outputTokens: flash3.outputTokens,
+      costUsd: flash3.costUsd,
+      costSar: flash3.costSar,
+      source: flash3.pricingSource,
+    });
+  })();
 }
 
 logPricingVerificationSamples();
@@ -140,14 +193,18 @@ export async function insertAiUsageLog(input: {
   outputTokens: number;
   costUsd: number;
   costSar: number;
+  pricingInputPer1M?: number | null;
+  pricingCachedInputPer1M?: number | null;
+  pricingOutputPer1M?: number | null;
+  pricingSource?: string | null;
   subject: string;
   status: "success" | "failed";
 }): Promise<void> {
   const pool = getPool();
   await pool.query(
     `INSERT INTO ai_usage_logs
-      (job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, subject, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      (job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, pricing_input_per_1m, pricing_cached_input_per_1m, pricing_output_per_1m, pricing_source, subject, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [
       input.jobId,
       input.modelId,
@@ -156,6 +213,10 @@ export async function insertAiUsageLog(input: {
       toSafeTokens(input.outputTokens),
       roundMoney(input.costUsd),
       roundMoney(input.costSar),
+      input.pricingInputPer1M ?? null,
+      input.pricingCachedInputPer1M ?? null,
+      input.pricingOutputPer1M ?? null,
+      input.pricingSource ?? null,
       String(input.subject || "غير محدد").trim() || "غير محدد",
       input.status,
     ],
