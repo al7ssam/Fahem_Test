@@ -435,7 +435,7 @@ export async function listRuns(
             )::text AS display_question_count
      FROM simple_content_runs
      WHERE ${whereSql}
-     ORDER BY id DESC
+     ORDER BY created_at DESC, id DESC
      LIMIT $${limitIdx}`,
     params,
   );
