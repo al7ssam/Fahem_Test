@@ -369,6 +369,7 @@ type RunRow = {
   provider: string | null;
   model_id: string | null;
   display_question_count: string | null;
+  estimated_cost_usd: string | null;
 };
 
 export type ListRunsOptions = {
@@ -440,6 +441,7 @@ export async function listRuns(
     createdAt: string;
     provider: string | null;
     modelId: string | null;
+    estimatedCostUsd: number | null;
     /** أسئلة في المعاينة من المصفوفة، أو من preview_json، أو inserted_count عند الإدراج */
     questionCount: number | null;
   }>
@@ -485,7 +487,8 @@ export async function listRuns(
                 THEN (preview_json->>'questionCount')::int
               END,
               CASE WHEN inserted_count > 0 THEN inserted_count END
-            )::text AS display_question_count
+            )::text AS display_question_count,
+            estimated_cost_usd::text
      FROM simple_content_runs
      WHERE ${whereSql}
      ORDER BY created_at DESC, id DESC
@@ -496,6 +499,9 @@ export async function listRuns(
     const qcRaw = row.display_question_count;
     const questionCount =
       qcRaw != null && qcRaw !== "" && Number.isFinite(Number(qcRaw)) ? Number(qcRaw) : null;
+    const costRaw = row.estimated_cost_usd;
+    const estimatedCostUsd =
+      costRaw != null && costRaw !== "" && Number.isFinite(Number(costRaw)) ? Number(costRaw) : null;
     return {
       id: Number(row.id),
       status: row.status,
@@ -505,6 +511,7 @@ export async function listRuns(
       createdAt: row.created_at.toISOString(),
       provider: row.provider,
       modelId: row.model_id,
+      estimatedCostUsd,
       questionCount,
     };
   });

@@ -635,22 +635,11 @@
           </div>
 
           <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
-            <h2 style="font-size: 0.88rem; margin: 0 0 0.35rem">
-              تسعير OpenAI (Billing)
-              <span class="sc-section-status" id="sc-sec-pricing-status" aria-live="polite"></span>
-            </h2>
-            <p class="hint" style="margin: 0 0 0.4rem">تعديل أسعار كل نموذج لكل 1M توكن (input / cached input / output).</p>
-            <div class="row" style="margin-bottom:0.45rem">
-              <label>سياسة fallback
-                <select id="sc-openai-fallback-policy">
-                  <option value="use_default">استخدم الجدول الافتراضي عند غياب النموذج</option>
-                  <option value="block">امنع التشغيل عند غياب النموذج</option>
-                </select>
-              </label>
-              <button type="button" class="btn btn-secondary" id="sc-openai-pricing-load">تحميل الأسعار</button>
-              <button type="button" class="btn btn-secondary" id="sc-openai-pricing-save">حفظ الأسعار</button>
-            </div>
-            <div id="sc-openai-pricing-editor"></div>
+            <h2 style="font-size: 0.88rem; margin: 0 0 0.35rem">إدارة التسعير</h2>
+            <p class="hint" style="margin: 0">
+              تم نقل إدارة تسعير النماذج بالكامل إلى صفحة الأدمن الرئيسية ضمن قسم
+              <strong>إدارة تسعير النماذج (OpenAI + Google)</strong>.
+            </p>
           </div>
 
           <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
@@ -684,6 +673,15 @@
               </label>
               <button type="button" class="btn btn-secondary" id="sc-runs-apply-filters" style="padding: 0.35rem 0.65rem; font-size: 0.78rem">
                 تطبيق التصفية
+              </button>
+              <button type="button" class="btn btn-secondary" id="sc-runs-copy-last10-success" style="padding: 0.35rem 0.65rem; font-size: 0.78rem">
+                نسخ السجلات المحددة
+              </button>
+              <button type="button" class="btn btn-secondary" id="sc-runs-select-all" style="padding: 0.35rem 0.65rem; font-size: 0.78rem">
+                تحديد الكل
+              </button>
+              <button type="button" class="btn btn-secondary" id="sc-runs-clear-selection" style="padding: 0.35rem 0.65rem; font-size: 0.78rem">
+                إلغاء التحديد
               </button>
             </div>
             <div class="runs" id="sc-runs"></div>
@@ -782,6 +780,7 @@
         var scPreviewItems = [];
         var scPreviewIndex = 0;
         var highlightedRunId = null;
+        var selectedRunIds = new Set();
         var WORK_ACTION_IDS = [
           "sc-edit-prompt",
           "sc-save-prompt",
@@ -792,12 +791,13 @@
           "sc-commit",
           "sc-draft-template-load",
           "sc-draft-template-save",
-          "sc-openai-pricing-load",
-          "sc-openai-pricing-save",
           "sc-save-auto",
           "sc-runs-cleanup-save",
           "sc-runs-cleanup-preview",
           "sc-runs-cleanup-run",
+          "sc-runs-copy-last10-success",
+          "sc-runs-select-all",
+          "sc-runs-clear-selection",
         ];
         var SECTION = {
           templates: { status: "sc-sec-templates-status", buttons: ["sc-load-templates"] },
@@ -809,7 +809,6 @@
           draftAi: { status: "sc-sec-draftai-status", buttons: ["sc-draft-prompt", "sc-save-default-draft"] },
           generate: { status: "sc-sec-generate-status", buttons: ["sc-generate-preview", "sc-save-default-generate"] },
           review: { status: "sc-sec-review-status", buttons: [] },
-          pricing: { status: "sc-sec-pricing-status", buttons: ["sc-openai-pricing-load", "sc-openai-pricing-save"] },
           auto: { status: "sc-sec-auto-status", buttons: ["sc-save-auto"] },
           runsCleanup: {
             status: "sc-sec-runs-cleanup-status",
@@ -1321,76 +1320,6 @@
           applySelectDefault("sc-draft-preset", defaultDraftId);
           applySelectDefault("sc-preset", defaultGenId);
           updatePresetHints();
-          renderOpenAiPricingEditor();
-        }
-
-        function renderOpenAiPricingEditor(pricingData) {
-          var box = document.getElementById("sc-openai-pricing-editor");
-          if (!box) return;
-          var fallbackEl = document.getElementById("sc-openai-fallback-policy");
-          var fromApiModels = pricingData && pricingData.models ? pricingData.models : {};
-          if (fallbackEl && pricingData && pricingData.fallbackPolicy) {
-            fallbackEl.value = String(pricingData.fallbackPolicy);
-          }
-          var models = [];
-          lastPresetsItems.forEach(function (p) {
-            if (String(p.provider) !== "openai") return;
-            if (models.indexOf(String(p.modelId)) === -1) models.push(String(p.modelId));
-          });
-          if (!models.length) {
-            box.innerHTML = '<div class="hint">لا توجد نماذج OpenAI مفعّلة في presets.</div>';
-            return;
-          }
-          box.innerHTML = "";
-          models.forEach(function (modelId) {
-            var row = fromApiModels[modelId] || {};
-            var wrap = document.createElement("div");
-            wrap.style.marginBottom = "0.4rem";
-            wrap.innerHTML =
-              '<div class="row" style="gap:0.45rem;align-items:center;flex-wrap:wrap">' +
-              '<span class="hint" style="min-width:14rem"><b>' +
-              escapeHtml(modelId) +
-              "</b></span>" +
-              '<label>Input/1M <input type="number" step="0.000001" min="0" max="100" data-pricing-in="' +
-              escapeHtml(modelId) +
-              '" value="' +
-              (row.inputPer1M != null ? String(row.inputPer1M) : "") +
-              '"/></label>' +
-              '<label>Cached/1M <input type="number" step="0.000001" min="0" max="100" data-pricing-cin="' +
-              escapeHtml(modelId) +
-              '" value="' +
-              (row.cachedInputPer1M != null ? String(row.cachedInputPer1M) : "") +
-              '"/></label>' +
-              '<label>Output/1M <input type="number" step="0.000001" min="0" max="100" data-pricing-out="' +
-              escapeHtml(modelId) +
-              '" value="' +
-              (row.outputPer1M != null ? String(row.outputPer1M) : "") +
-              '"/></label>' +
-              "</div>";
-            box.appendChild(wrap);
-          });
-        }
-
-        function collectOpenAiPricingPayload() {
-          var models = {};
-          document.querySelectorAll("[data-pricing-in]").forEach(function (inp) {
-            var modelId = String(inp.getAttribute("data-pricing-in") || "").trim();
-            var inV = Number(inp.value || 0);
-            var cinEl = document.querySelector('[data-pricing-cin="' + modelId.replace(/"/g, '\\"') + '"]');
-            var outEl = document.querySelector('[data-pricing-out="' + modelId.replace(/"/g, '\\"') + '"]');
-            var cinV = Number((cinEl && cinEl.value) || 0);
-            var outV = Number((outEl && outEl.value) || 0);
-            models[modelId] = {
-              inputPer1M: Number.isFinite(inV) ? inV : 0,
-              cachedInputPer1M: Number.isFinite(cinV) ? cinV : 0,
-              outputPer1M: Number.isFinite(outV) ? outV : 0,
-              note: "admin:" + modelId,
-            };
-          });
-          return {
-            fallbackPolicy: String(document.getElementById("sc-openai-fallback-policy").value || "use_default"),
-            models: models,
-          };
         }
 
         function setPendingRun(id, count) {
@@ -1510,14 +1439,13 @@
           setWorkspaceLoading(true);
           try {
             var enc = encodeURIComponent(subKey);
-            var [ctxRes, prRes, presetsRes, autoRes, runsRes, cleanupSettingsRes, openAiPricingRes] = await Promise.all([
+            var [ctxRes, prRes, presetsRes, autoRes, runsRes, cleanupSettingsRes] = await Promise.all([
               fetch("/api/admin/simple-content/context/" + enc, hdr()),
               fetch("/api/admin/simple-content/prompt/" + enc, hdr()),
               fetch("/api/admin/simple-content/presets", hdr()),
               fetch("/api/admin/simple-content/automation/" + enc, hdr()),
               fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr()),
               fetch("/api/admin/simple-content/runs-cleanup-settings", hdr()),
-              fetch("/api/admin/simple-content/openai-pricing", hdr()),
             ]);
             var ctx = await ctxRes.json();
             var pr = await prRes.json();
@@ -1525,15 +1453,11 @@
             var auto = await autoRes.json();
             var runs = await runsRes.json();
             var cleanupSt = await cleanupSettingsRes.json();
-            var openAiPricing = await openAiPricingRes.json();
             if (cleanupSettingsRes.ok && cleanupSt.ok) applyRunsCleanupSettings(cleanupSt);
             if (!prRes.ok || !pr.ok) throw new Error("prompt_load");
             document.getElementById("sc-prompt").value = pr.promptBody || "";
             setPromptReadOnly(true);
             fillPresets(presets);
-            if (openAiPricingRes.ok && openAiPricing.ok) {
-              renderOpenAiPricingEditor(openAiPricing);
-            }
             if (auto.ok && auto.automation) {
               document.getElementById("sc-auto-en").checked = !!auto.automation.enabled;
               document.getElementById("sc-auto-min").value = String(auto.automation.intervalMinutes || 60);
@@ -1565,20 +1489,52 @@
         function renderRuns(items) {
           var box = document.getElementById("sc-runs");
           box.innerHTML = "";
+          var visibleIdSet = new Set();
           if (!items.length) {
+            selectedRunIds.clear();
             box.textContent = "لا توجد تشغيلات بعد.";
             updateRunListHighlight(highlightedRunId);
             return;
           }
+          items.forEach(function (it) {
+            var id = Number(it && it.id);
+            if (Number.isFinite(id) && id > 0) visibleIdSet.add(id);
+          });
+          selectedRunIds.forEach(function (id) {
+            if (!visibleIdSet.has(id)) selectedRunIds.delete(id);
+          });
           items.forEach(function (r) {
+            var runId = Number(r.id);
+            var rowWrap = document.createElement("div");
+            rowWrap.style.display = "flex";
+            rowWrap.style.alignItems = "center";
+            rowWrap.style.gap = "0.35rem";
+            rowWrap.style.borderBottom = "1px solid rgba(255, 255, 255, 0.06)";
+            rowWrap.style.paddingInlineStart = "0.15rem";
+            var cb = document.createElement("input");
+            cb.type = "checkbox";
+            cb.checked = selectedRunIds.has(runId);
+            cb.setAttribute("aria-label", "تحديد التشغيل #" + runId);
+            cb.addEventListener("click", function (ev) {
+              ev.stopPropagation();
+            });
+            cb.addEventListener("change", function () {
+              if (cb.checked) selectedRunIds.add(runId);
+              else selectedRunIds.delete(runId);
+            });
             var b = document.createElement("button");
             b.type = "button";
             b.className = "run-line";
             b.setAttribute("data-run-id", String(r.id));
+            b.style.borderBottom = "none";
             var mid = r.modelId ? String(r.modelId) : "—";
             if (mid.length > 36) mid = mid.slice(0, 34) + "…";
             var providerTag = r.provider ? "[" + String(r.provider).toUpperCase() + "] " : "";
             var qc = r.questionCount != null && r.questionCount !== "" ? r.questionCount : "—";
+            var estCost =
+              r.estimatedCostUsd != null && Number.isFinite(Number(r.estimatedCostUsd))
+                ? " | التكلفة ≈ $" + Number(r.estimatedCostUsd).toFixed(6)
+                : "";
             b.textContent =
               r.createdAt +
               " | #" +
@@ -1592,13 +1548,16 @@
               mid +
               " | أسئلة: " +
               qc +
+              estCost +
               " | إدراج " +
               r.insertedCount +
               (r.error ? " | ⚠ " + String(r.error).slice(0, 80) + (String(r.error).length > 80 ? "…" : "") : "");
             b.addEventListener("click", function () {
               void loadRunDetail(r.id);
             });
-            box.appendChild(b);
+            rowWrap.appendChild(cb);
+            rowWrap.appendChild(b);
+            box.appendChild(rowWrap);
           });
           updateRunListHighlight(highlightedRunId);
         }
@@ -1903,51 +1862,111 @@
           void refreshRunsListForWorkspace();
         });
 
-        document.getElementById("sc-openai-pricing-load").addEventListener("click", async function () {
-          if (!secret()) return;
-          setSectionBusy("pricing", true, "جاري التحميل…");
+        document.getElementById("sc-runs-select-all").addEventListener("click", function () {
+          var inputs = document.querySelectorAll('#sc-runs input[type="checkbox"]');
+          if (!inputs.length) {
+            msg("لا توجد تشغيلات ظاهرة لتحديدها.", false);
+            return;
+          }
+          inputs.forEach(function (el) {
+            el.checked = true;
+            var rowWrap = el.parentElement;
+            var runBtn = rowWrap ? rowWrap.querySelector("[data-run-id]") : null;
+            var runIdAttr = runBtn ? runBtn.getAttribute("data-run-id") : null;
+            var runId = Number(runIdAttr);
+            if (Number.isFinite(runId) && runId > 0) selectedRunIds.add(runId);
+          });
+          msg("تم تحديد كل السجلات الظاهرة.", true);
+        });
+
+        document.getElementById("sc-runs-clear-selection").addEventListener("click", function () {
+          selectedRunIds.clear();
+          document.querySelectorAll('#sc-runs input[type="checkbox"]').forEach(function (el) {
+            el.checked = false;
+          });
+          msg("تم إلغاء تحديد السجلات.", true);
+        });
+
+        document.getElementById("sc-runs-copy-last10-success").addEventListener("click", async function () {
+          if (!selectedSubKey || !secret()) {
+            msg("اختر تصنيفًا فرعيًا وأدخل مفتاح الإدارة أولًا.", false);
+            return;
+          }
+          if (!selectedRunIds.size) {
+            msg("اختر سجلًا واحدًا على الأقل قبل النسخ.", false);
+            return;
+          }
+          var btn = document.getElementById("sc-runs-copy-last10-success");
+          if (btn) btn.disabled = true;
+          msg("جاري تجهيز بيانات السجلات المحددة...", true);
           try {
-            var res = await fetch("/api/admin/simple-content/openai-pricing", hdr());
-            var data = await res.json().catch(function () {
-              return {};
-            });
-            if (!res.ok || !data.ok) {
-              msg("تعذر تحميل تسعير OpenAI.", false);
-              setSectionStatus("sc-sec-pricing-status", "فشل", false);
+            var ids = Array.from(selectedRunIds.values()).sort(function (a, b) { return b - a; });
+            var detailPairs = await Promise.all(
+              ids.map(async function (id) {
+                var r = await fetch("/api/admin/simple-content/runs/" + id, hdr());
+                var j = await r.json().catch(function () {
+                  return {};
+                });
+                if (!r.ok || !j.ok || !j.run) return null;
+                return j.run;
+              }),
+            );
+            var runs = detailPairs.filter(Boolean);
+            if (!runs.length) {
+              msg("تعذر تحميل تفاصيل التشغيلات الناجحة.", false);
               return;
             }
-            renderOpenAiPricingEditor(data);
-            msg("تم تحميل تسعير OpenAI.", true);
-            setSectionStatus("sc-sec-pricing-status", "تم", false);
+            var totalEstimatedCostUsd = 0;
+            var totalInputTokens = 0;
+            var totalOutputTokens = 0;
+            var totalTokens = 0;
+            var outRuns = runs.map(function (r) {
+              var est = r.estimatedCostUsd != null && Number.isFinite(Number(r.estimatedCostUsd)) ? Number(r.estimatedCostUsd) : 0;
+              var inTok = r.usageInputTokens != null && Number.isFinite(Number(r.usageInputTokens)) ? Number(r.usageInputTokens) : 0;
+              var outTok = r.usageOutputTokens != null && Number.isFinite(Number(r.usageOutputTokens)) ? Number(r.usageOutputTokens) : 0;
+              var totTok = r.usageTotalTokens != null && Number.isFinite(Number(r.usageTotalTokens)) ? Number(r.usageTotalTokens) : inTok + outTok;
+              totalEstimatedCostUsd += est;
+              totalInputTokens += inTok;
+              totalOutputTokens += outTok;
+              totalTokens += totTok;
+              return {
+                runId: r.id,
+                createdAt: r.createdAt || null,
+                subcategoryKey: r.subcategoryKey || selectedSubKey,
+                provider: r.provider || null,
+                modelId: r.modelId || null,
+                usage: {
+                  inputTokens: r.usageInputTokens ?? null,
+                  cachedInputTokens: r.usageCachedInputTokens ?? null,
+                  outputTokens: r.usageOutputTokens ?? null,
+                  totalTokens: r.usageTotalTokens ?? null,
+                },
+                estimatedCostUsd: r.estimatedCostUsd ?? null,
+                normalizedQuestions: Array.isArray(r.normalizedQuestions) ? r.normalizedQuestions : [],
+              };
+            });
+            var payload = {
+              copiedAt: new Date().toISOString(),
+              subcategoryKey: selectedSubKey,
+              count: outRuns.length,
+              selectedRunIds: ids,
+              totals: {
+                totalEstimatedCostUsd: Number(totalEstimatedCostUsd.toFixed(6)),
+                totalInputTokens: totalInputTokens,
+                totalOutputTokens: totalOutputTokens,
+                totalTokens: totalTokens,
+              },
+              runs: outRuns,
+            };
+            await copyTextToClipboard(JSON.stringify(payload, null, 2));
+            msg("تم نسخ بيانات " + outRuns.length + " سجل(ات) محددة.", true);
+          } catch (e) {
+            msg("فشل تجهيز/نسخ بيانات التشغيلات.", false);
           } finally {
-            setSectionBusy("pricing", false);
+            if (btn) btn.disabled = false;
           }
         });
 
-        document.getElementById("sc-openai-pricing-save").addEventListener("click", async function () {
-          if (!secret()) return;
-          setSectionBusy("pricing", true, "جاري الحفظ…");
-          try {
-            var payload = collectOpenAiPricingPayload();
-            var res = await fetch("/api/admin/simple-content/openai-pricing", {
-              method: "PUT",
-              headers: hdr().headers,
-              body: JSON.stringify(payload),
-            });
-            var data = await res.json().catch(function () {
-              return {};
-            });
-            if (!res.ok || !data.ok) {
-              msg(userVisibleApiError(data.reason, data.error, data), false);
-              setSectionStatus("sc-sec-pricing-status", "فشل", false);
-              return;
-            }
-            msg("تم حفظ تسعير OpenAI.", true);
-            setSectionStatus("sc-sec-pricing-status", "تم", false);
-          } finally {
-            setSectionBusy("pricing", false);
-          }
-        });
 
         document.getElementById("sc-runs-cleanup-save").addEventListener("click", async function () {
           if (!secret()) {
