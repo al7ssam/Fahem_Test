@@ -70,6 +70,24 @@ function buildUserPromptBlock(input: {
   ].join("\n");
 }
 
+export async function buildFinalSimpleContentPromptForAdmin(input: {
+  subcategoryKey: string;
+  difficultyMode: FactoryDifficulty;
+  batchSize: number;
+}): Promise<{ prompt: string }> {
+  const promptBody = await getPromptBody(input.subcategoryKey);
+  if (!String(promptBody).trim()) {
+    throw new Error("simple_content_prompt_empty");
+  }
+  const prompt = buildUserPromptBlock({
+    promptBody,
+    subcategoryKey: input.subcategoryKey,
+    difficultyMode: input.difficultyMode,
+    batchSize: input.batchSize,
+  });
+  return { prompt };
+}
+
 function packUsageForFinalize(
   preset: SimpleContentPreset,
   usage: LLMTokenUsage | null | undefined,

@@ -561,6 +561,7 @@
             <button type="button" class="btn btn-secondary" id="sc-edit-prompt">تعديل</button>
             <button type="button" class="btn" id="sc-save-prompt">حفظ البرومبت</button>
             <button type="button" class="btn btn-secondary" id="sc-copy-prompt">نسخ</button>
+            <button type="button" class="btn btn-secondary" id="sc-copy-final-prompt">نسخ البرومبت الكامل</button>
           </div>
           <textarea id="sc-prompt" readonly spellcheck="false"></textarea>
         </details>
@@ -780,7 +781,10 @@
         var SECTION = {
           templates: { status: "sc-sec-templates-status", buttons: ["sc-load-templates"] },
           project: { status: "sc-sec-project-status", buttons: ["sc-draft-template-load", "sc-draft-template-save"] },
-          prompt: { status: "sc-sec-prompt-status", buttons: ["sc-save-prompt", "sc-edit-prompt"] },
+          prompt: {
+            status: "sc-sec-prompt-status",
+            buttons: ["sc-save-prompt", "sc-edit-prompt", "sc-copy-final-prompt"],
+          },
           draftAi: { status: "sc-sec-draftai-status", buttons: ["sc-draft-prompt", "sc-save-default-draft"] },
           generate: { status: "sc-sec-generate-status", buttons: ["sc-generate-preview", "sc-save-default-generate"] },
           review: { status: "sc-sec-review-status", buttons: [] },
@@ -1524,6 +1528,40 @@
               setSectionStatus("sc-sec-prompt-status", "فشل النسخ", false);
             },
           );
+        });
+
+        document.getElementById("sc-copy-final-prompt").addEventListener("click", async function () {
+          if (!selectedSubKey || !secret()) return;
+          setSectionBusy("prompt", true, "جاري تجهيز النسخة الكاملة…");
+          try {
+            var payload = {
+              subcategoryKey: selectedSubKey,
+              batchSize: Number(document.getElementById("sc-batch").value) || 10,
+              difficultyMode: document.getElementById("sc-diff").value,
+              presetId: Number(document.getElementById("sc-preset").value) || 0,
+            };
+            var res = await fetch("/api/admin/simple-content/prompt/final", {
+              method: "POST",
+              headers: hdr().headers,
+              body: JSON.stringify(payload),
+            });
+            var data = await res.json().catch(function () {
+              return {};
+            });
+            if (!res.ok || !data.ok || !data.prompt) {
+              msg(userVisibleApiError(data.reason, data.error, data), false);
+              setSectionStatus("sc-sec-prompt-status", "فشل تجهيز النسخة الكاملة", false);
+              return;
+            }
+            await copyTextToClipboard(String(data.prompt));
+            msg("تم نسخ البرومبت الكامل المرسل للنموذج.", true);
+            setSectionStatus("sc-sec-prompt-status", "تم نسخ البرومبت الكامل", false);
+          } catch (_e) {
+            msg("تعذر تجهيز/نسخ البرومبت الكامل.", false);
+            setSectionStatus("sc-sec-prompt-status", "فشل تجهيز النسخة الكاملة", false);
+          } finally {
+            setSectionBusy("prompt", false);
+          }
         });
 
         async function putPresetDefaults(body) {

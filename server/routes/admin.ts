@@ -45,6 +45,7 @@ import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../s
 import type { FactoryLayer } from "../services/aiFactory/types";
 import {
   commitSimpleContentRun,
+  buildFinalSimpleContentPromptForAdmin,
   generatePromptDraft,
   getAutomation,
   getPromptBody,
@@ -1657,6 +1658,33 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true });
     } catch {
       res.status(500).json({ ok: false, error: "write_failed" });
+    }
+  });
+
+  app.post("/api/admin/simple-content/prompt/final", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = simpleContentGeneratePreviewSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      const result = await buildFinalSimpleContentPromptForAdmin({
+        subcategoryKey: parsed.data.subcategoryKey,
+        difficultyMode: parsed.data.difficultyMode,
+        batchSize: parsed.data.batchSize,
+      });
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown_error";
+      const errorKind = classifySimpleContentError(reason);
+      res.status(500).json({
+        ok: false,
+        error: "final_prompt_failed",
+        reason,
+        errorKind,
+        errorKindHint: simpleContentErrorKindHintAr(errorKind),
+      });
     }
   });
 
