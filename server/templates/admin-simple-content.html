@@ -317,6 +317,69 @@
         font-size: 0.9rem;
         padding: 1.2rem 0.4rem;
       }
+      .sc-path-hint {
+        font-size: 0.82rem;
+        color: #d4c9a8;
+        margin: 0 0 0.85rem;
+        padding: 0.55rem 0.7rem;
+        border-radius: 0.55rem;
+        border: 1px solid rgba(232, 190, 102, 0.22);
+        background: rgba(0, 0, 0, 0.22);
+        line-height: 1.5;
+      }
+      .sc-step-h {
+        margin: 1.1rem 0 0.4rem;
+        font-size: 0.98rem;
+        font-weight: 800;
+        color: var(--amber);
+      }
+      .sc-step-h:first-of-type {
+        margin-top: 0.35rem;
+      }
+      .sc-step-lead {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin: 0 0 0.55rem;
+        line-height: 1.45;
+      }
+      details.sc-fold {
+        margin-top: 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 0.65rem 0.85rem;
+        background: rgba(0, 0, 0, 0.2);
+      }
+      details.sc-fold > summary {
+        cursor: pointer;
+        font-weight: 700;
+        font-size: 0.88rem;
+        color: #e6d4a8;
+        list-style: none;
+      }
+      details.sc-fold > summary::-webkit-details-marker {
+        display: none;
+      }
+      details.sc-fold[open] > summary {
+        margin-bottom: 0.65rem;
+        padding-bottom: 0.45rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .sc-inner-muted {
+        background: rgba(0, 0, 0, 0.18);
+        border-radius: 0.65rem;
+        padding: 0.75rem;
+        margin-top: 0.35rem;
+      }
+      .run-line.active {
+        background: rgba(232, 190, 102, 0.12);
+        border-inline-end: 3px solid var(--amber);
+      }
+      .sc-top-steps {
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin: -0.35rem 0 0.75rem;
+        line-height: 1.5;
+      }
     </style>
   </head>
   <body>
@@ -332,13 +395,16 @@
         </div>
         <button type="button" class="btn btn-secondary" id="sc-back">← لوحة الإدارة</button>
         <button type="button" class="btn" id="sc-load-cats">تحميل التصنيفات</button>
-        <button type="button" class="btn btn-secondary" id="sc-load-templates">عرض قوالب البرومبت</button>
+        <button type="button" class="btn btn-secondary" id="sc-load-templates">عرض قوالب النظام (مرجع فقط)</button>
       </div>
+      <p class="sc-top-steps">
+        ترتيب مقترح: أدخل مفتاح الإدارة ← <strong>تحميل التصنيفات</strong> ← اختر رئيسيًا ثم فرعيًا. زر «قوالب النظام» للاطلاع على النصوص المرجعية دون تعديلها هنا.
+      </p>
       <div class="msg" id="sc-msg"></div>
       <p class="loading-line" id="sc-loading-line">جاري الاتصال بالنموذج… يرجى الانتظار وعدم إغلاق الصفحة.</p>
       <div class="card" id="sc-templates-wrap" style="display: none">
-        <h2>قوالب النظام (مسودة + عقد JSON للتوليد)</h2>
-        <p class="subtitle">نسخ للمراجعة — لا تُرسل كما هي للنموذج دون استبدال العناصر النائبة.</p>
+        <h2>قوالب النظام (للمراجعة فقط — لا تُعدّل من هذه الصفحة)</h2>
+        <p class="subtitle">مسودة اقتراح البرومبت وعقد JSON للتوليد؛ للاطلاع والنسخ. التعديل الفعلي لقالب المسودة العام من مساحة العمل داخل القسم القابل للطي.</p>
         <h3 style="font-size: 0.9rem; color: var(--amber)">مسودة البرومبت — رسالة النظام</h3>
         <pre class="mono" id="sc-tpl-draft-sys"></pre>
         <h3 style="font-size: 0.9rem; color: var(--amber)">مسودة البرومبت — قالب رسالة المستخدم</h3>
@@ -360,32 +426,52 @@
       <div class="card" id="sc-work" style="display: none">
         <h2 id="sc-work-title">مساحة العمل</h2>
         <p class="subtitle" id="sc-ctx-line"></p>
-        <div class="card" style="margin-top: 0.75rem; background: rgba(0, 0, 0, 0.22)">
-          <h2 style="font-size: 0.95rem">قالب اقتراح مسودة البرومبت (عام — قابل للتعديل)</h2>
-          <p class="subtitle" id="sc-draft-template-help"></p>
-          <label for="sc-draft-template-sys">رسالة النظام للمسودة</label>
-          <textarea id="sc-draft-template-sys" class="sc-draft-tpl" rows="5"></textarea>
-          <label for="sc-draft-template-user" style="margin-top: 0.65rem; display: block">قالب رسالة المستخدم (عناصر نائبة)</label>
-          <textarea id="sc-draft-template-user" class="sc-draft-tpl user" rows="10"></textarea>
-          <div class="row">
-            <button type="button" class="btn btn-secondary" id="sc-draft-template-load">تحميل القالب الحالي</button>
-            <button type="button" class="btn" id="sc-draft-template-save">حفظ القالب</button>
+        <p class="sc-path-hint">
+          <strong>مسار العمل اليومي:</strong> اكتب أو حدّث <em>برومبت هذا الفرع</em> (أو اطلب اقتراحًا بالذكاء) ← <strong>توليد معاينة</strong> ← راجع التشغيل أدناه
+          (معاينة شكل التطبيق أو JSON) ← عند الجاهزية <strong>تعميد الإدراج</strong>. إعدادات المشروع العامة والجدولة التلقائية في أسفل الصفحة أو داخل الأقسام القابلة للطي.
+        </p>
+
+        <details class="sc-fold" id="sc-draft-template-fold">
+          <summary>إعدادات المشروع (تُعدّل نادرًا): قالب اقتراح <em>نص برومبت الفرع</em> عبر الذكاء — ليس برومبت التوليد نفسه</summary>
+          <div class="sc-inner-muted">
+            <p class="subtitle" id="sc-draft-template-help"></p>
+            <label for="sc-draft-template-sys">رسالة النظام لاقتراح البرومبت</label>
+            <textarea id="sc-draft-template-sys" class="sc-draft-tpl" rows="5"></textarea>
+            <label for="sc-draft-template-user" style="margin-top: 0.65rem; display: block">قالب رسالة المستخدم (عناصر نائبة للفرع الحالي)</label>
+            <textarea id="sc-draft-template-user" class="sc-draft-tpl user" rows="10"></textarea>
+            <div class="row">
+              <button type="button" class="btn btn-secondary" id="sc-draft-template-load">تحميل القالب الحالي</button>
+              <button type="button" class="btn" id="sc-draft-template-save">حفظ القالب</button>
+            </div>
           </div>
-        </div>
+        </details>
+
+        <h3 class="sc-step-h">أ — برومبت هذا الفرع (المحفوظ في النظام)</h3>
+        <p class="sc-step-lead">
+          هذا النص يُرسل إلى نموذج <strong>توليد الأسئلة</strong> مع تعليمات النظام. قالب المشروع أعلاه (إن فتحته) يؤثر فقط على زر «اقتراح برومبت بالذكاء» وليس على شكل JSON الناتج مباشرة.
+        </p>
         <p class="hint" id="sc-last-usage"></p>
-        <label for="sc-prompt">البرومبت المحفوظ لهذا الفرع</label>
+        <label for="sc-prompt">نص البرومبت المحفوظ لهذا الفرع</label>
         <textarea id="sc-prompt"></textarea>
+
+        <h3 class="sc-step-h">ب — اقتراح نص البرومبت بالذكاء (اختياري)</h3>
+        <p class="sc-step-lead">يملأ حقل البرومبت أعلاه؛ راجع النتيجة ثم احفظ إن رضيت. النموذج هنا مستقل عن نموذج توليد الأسئلة في المرحلة ج.</p>
         <div class="row">
           <label
-            >نموذج اقتراح المسودة
+            >نموذج لاقتراح نص البرومبت
             <select id="sc-draft-preset"></select>
           </label>
           <div class="hint" id="sc-draft-preset-hint"></div>
         </div>
         <div class="row">
-          <button type="button" class="btn btn-secondary" id="sc-save-prompt">حفظ البرومبت</button>
+          <button type="button" class="btn btn-secondary" id="sc-save-prompt">حفظ البرومبت في النظام</button>
           <button type="button" class="btn btn-secondary" id="sc-draft-prompt">اقتراح برومبت بالذكاء الاصطناعي</button>
         </div>
+
+        <h3 class="sc-step-h">ج — توليد أسئلة (معاينة دون إدراج)</h3>
+        <p class="sc-step-lead">
+          يستخدم <strong>نموذج توليد الأسئلة</strong> أدناه لإخراج JSON وفق عقد النظام. بعد نجاح المعاينة يمكنك «معاينة شكل التطبيق» ثم «تعميد الإدراج».
+        </p>
         <div class="row">
           <label>حجم الدفعة <input type="number" id="sc-batch" min="1" max="50" value="10" /></label>
           <label
@@ -398,7 +484,7 @@
             </select>
           </label>
           <label
-            >نموذج التوليد
+            >نموذج توليد الأسئلة
             <select id="sc-preset"></select>
           </label>
           <div class="hint" id="sc-preset-hint" style="flex-basis: 100%"></div>
@@ -406,23 +492,20 @@
         <div class="row">
           <button type="button" class="btn" id="sc-generate-preview">توليد معاينة (لا إدراج)</button>
           <button type="button" class="btn" id="sc-commit" disabled>تعميد الإدراج</button>
-          <button type="button" class="btn btn-secondary" id="sc-phone-preview-btn">معاينة شكل التطبيق</button>
-        </div>
-        <div class="preview-shell" id="sc-preview-shell" hidden>
-          <div class="preview-phone" id="sc-preview-phone">
-            <div class="preview-empty">حمّل تفاصيل تشغيل فيه أسئلة مطبّعة أو نفّذ «توليد معاينة» ثم اضغط «معاينة شكل التطبيق».</div>
-          </div>
-          <div class="row" style="margin-top: 0.65rem; justify-content: center">
-            <button type="button" class="btn btn-secondary" id="sc-preview-prev">السابق</button>
-            <button type="button" class="btn btn-secondary" id="sc-preview-next">التالي</button>
-            <button type="button" class="btn btn-secondary" id="sc-preview-close">إغلاق المعاينة</button>
-          </div>
         </div>
         <p class="subtitle" id="sc-pending-note" style="display: none"></p>
 
-        <div class="card" style="margin-top: 1rem; background: rgba(0, 0, 0, 0.25)">
-          <h2 style="font-size: 0.95rem">تفاصيل التشغيل / الطلب والرد</h2>
-          <p class="subtitle">اختر سطراً من «آخر التشغيلات» أو نفّذ معاينة لعرض البيانات.</p>
+        <h3 class="sc-step-h">د — التشغيلات والمراجعة</h3>
+        <p class="sc-step-lead">اختر سطرًا من السجل أولًا؛ تظهر التفاصيل والطلب والرد تحته. بعد التحميل يمكنك فتح معاينة شكل التطبيق.</p>
+
+        <div class="card" style="margin-top: 0.5rem; background: rgba(0, 0, 0, 0.22)">
+          <h2 style="font-size: 0.92rem; margin: 0 0 0.35rem">سجل التشغيلات لهذا الفرع</h2>
+          <p class="subtitle" style="margin-bottom: 0.5rem">الأحدث أولًا — اضغط سطرًا لعرض التفاصيل في الكتلة التالية.</p>
+          <div class="runs" id="sc-runs"></div>
+        </div>
+
+        <div class="card" style="margin-top: 0.75rem; background: rgba(0, 0, 0, 0.25)">
+          <h2 style="font-size: 0.92rem; margin: 0 0 0.35rem">تفاصيل التشغيل المختار</h2>
           <div class="row">
             <span id="sc-run-meta" class="hint"></span>
           </div>
@@ -434,25 +517,43 @@
           <pre class="mono" id="sc-run-questions"></pre>
         </div>
 
-        <div class="card" style="margin-top: 1rem; background: rgba(0, 0, 0, 0.2)">
-          <h2 style="font-size: 0.95rem">جدولة تلقائية (إدراج مباشر عند التشغيل)</h2>
-          <div class="row">
-            <label><input type="checkbox" id="sc-auto-en" /> تفعيل</label>
-            <label>كل <input type="number" id="sc-auto-min" min="5" max="10080" value="60" style="width: 4.5rem" /> دقيقة</label>
-            <label
-              >نموذج الجدولة
-              <select id="sc-auto-preset"></select>
-            </label>
-            <div class="hint" id="sc-auto-preset-hint" style="flex-basis: 100%"></div>
-            <button type="button" class="btn btn-secondary" id="sc-save-auto">حفظ الجدولة</button>
+        <h3 class="sc-step-h" style="margin-top: 0.85rem">معاينة شكل التطبيق (بعد وجود أسئلة مطبّعة)</h3>
+        <p class="sc-step-lead">تعتمد على آخر تشغيل محمّل أو آخر معاينة ناجحة. إن ظهرت رسالة خطأ في المعاينة، جرّب تعديل البرومبت أو إعادة «توليد المعاينة».</p>
+        <div class="row">
+          <button type="button" class="btn btn-secondary" id="sc-phone-preview-btn">فتح معاينة شكل التطبيق</button>
+        </div>
+        <div class="preview-shell" id="sc-preview-shell" hidden>
+          <div class="preview-phone" id="sc-preview-phone">
+            <div class="preview-empty">اختر تشغيلًا من السجل أو نفّذ «توليد معاينة» ثم اضغط «فتح معاينة شكل التطبيق».</div>
+          </div>
+          <div class="row" style="margin-top: 0.65rem; justify-content: center">
+            <button type="button" class="btn btn-secondary" id="sc-preview-prev">السابق</button>
+            <button type="button" class="btn btn-secondary" id="sc-preview-next">التالي</button>
+            <button type="button" class="btn btn-secondary" id="sc-preview-close">إغلاق المعاينة</button>
           </div>
         </div>
 
-        <h2 style="margin-top: 1rem; font-size: 0.95rem; color: var(--muted)">أسئلة هذا الفرع في النظام</h2>
-        <div id="sc-questions-list" class="runs"></div>
+        <details class="sc-fold" id="sc-auto-fold" style="margin-top: 1rem; border-color: rgba(248, 113, 113, 0.28)">
+          <summary>جدولة تلقائية — إدراج مباشر دون تعميد (مسار مختلف عن المعاينة اليدوية)</summary>
+          <div class="sc-inner-muted">
+            <p class="sc-step-lead" style="margin-top: 0">
+              عند التفعيل يُدرج المحتوى تلقائيًا حسب الجدولة؛ لا يمر بخطوة «تعميد الإدراج» أعلاه. راجع النموذج والفاصل الزمني بعناية.
+            </p>
+            <div class="row">
+              <label><input type="checkbox" id="sc-auto-en" /> تفعيل الجدولة</label>
+              <label>كل <input type="number" id="sc-auto-min" min="5" max="10080" value="60" style="width: 4.5rem" /> دقيقة</label>
+              <label
+                >نموذج الجدولة (توليد + إدراج)
+                <select id="sc-auto-preset"></select>
+              </label>
+              <div class="hint" id="sc-auto-preset-hint" style="flex-basis: 100%"></div>
+              <button type="button" class="btn btn-secondary" id="sc-save-auto">حفظ الجدولة</button>
+            </div>
+          </div>
+        </details>
 
-        <h2 style="margin-top: 1rem; font-size: 0.95rem; color: var(--muted)">آخر التشغيلات</h2>
-        <div class="runs" id="sc-runs"></div>
+        <h2 style="margin-top: 1.15rem; font-size: 0.95rem; color: var(--muted)">أسئلة هذا الفرع في النظام</h2>
+        <div id="sc-questions-list" class="runs"></div>
       </div>
     </div>
     <script>
@@ -465,6 +566,7 @@
         var lastPreviewQuestions = [];
         var scPreviewItems = [];
         var scPreviewIndex = 0;
+        var highlightedRunId = null;
         var BUSY_IDS = [
           "sc-generate-preview",
           "sc-commit",
@@ -484,6 +586,45 @@
           el.textContent = text || "";
           el.className = "msg " + (ok ? "ok" : "err");
         }
+
+        /** ترجمة رسائل الخادم التقنية إلى نص يوضح السبب والإجراء المقترح. */
+        function friendlyApiReason(raw) {
+          if (raw == null || raw === "") return "";
+          var s = String(raw);
+          if (s.indexOf("simple_content_validation_errors:") === 0) {
+            return "النموذج أخرج أسئلة لا تطابق الشكل المطلوب (خيارات، فهرس صحيح، إلخ). عدّل البرومبت أو قلّل حجم الدفعة ثم أعد التوليد. (تفاصيل تقنية: " + s.slice(0, 220) + (s.length > 220 ? "…" : "") + ")";
+          }
+          if (s.indexOf("invalid_json_output") !== -1) {
+            return "لم يُرجع النموذج JSON صالحًا. صغّر الدفعة أو وضّح في البرومبت شكل المخرجات ثم أعد «توليد المعاينة».";
+          }
+          if (s.indexOf("layer_output_truncated_max_tokens") !== -1) {
+            return "رد النموذج وصل لحد الطول وقُطع؛ قلّل حجم الدفعة أو راجع سقف الرموز في إعدادات النموذج ثم أعد المحاولة.";
+          }
+          var map = {
+            simple_content_invalid_preset: "النموذج المختار غير صالح أو غير مفعّل. اختر نموذجًا آخر من القائمة.",
+            simple_content_no_active_preset: "لا يوجد نموذج مفعّل في النظام. راجع إعدادات النماذج.",
+            simple_content_prompt_empty: "البرومبت المحفوظ لهذا الفرع فارغ. اكتب نصًا أو استخدم «اقتراح برومبت بالذكاء» ثم «حفظ البرومبت».",
+            simple_content_no_valid_questions: "لم يُنتج النموذج أسئلة صالحة بعد التحقق. عدّل البرومبت أو الصعوبة أو حجم الدفعة.",
+            simple_content_commit_invalid: "لا يمكن التعميد الآن: يلزم تشغيل معاينة يدوية بانتظار المراجعة (pending_review). نفّذ «توليد معاينة» أولًا أو اختر التشغيل الصحيح من السجل.",
+            simple_content_commit_empty: "لا توجد أسئلة مطبّعة في هذا التشغيل للإدراج.",
+            draft_failed: "فشل اقتراح البرومبت بالذكاء. تحقق من المفتاح والنموذج وحاول مرة أخرى.",
+            generate_preview_failed: "فشل توليد المعاينة. راجع البرومبت والنموذج والاتصال بالخدمة.",
+          };
+          return map[s] || "";
+        }
+
+        function userVisibleApiError(reason, errCode) {
+          return friendlyApiReason(reason) || friendlyApiReason(errCode) || String(reason || errCode || "حدث خطأ. راجع الرسالة أو السجلات.");
+        }
+
+        function updateRunListHighlight(runId) {
+          document.querySelectorAll("#sc-runs .run-line").forEach(function (b) {
+            var rid = b.getAttribute("data-run-id");
+            var on = runId != null && rid != null && Number(rid) === Number(runId);
+            b.classList.toggle("active", on);
+          });
+        }
+
         function hdr() {
           return { headers: { "X-Admin-Secret": secret(), "Content-Type": "application/json" } };
         }
@@ -805,6 +946,8 @@
           } else {
             setPendingRun(null, 0);
           }
+          highlightedRunId = r.id;
+          updateRunListHighlight(r.id);
         }
 
         async function refreshQuestionsList() {
@@ -852,6 +995,7 @@
           lastPreviewQuestions = [];
           scPreviewItems = [];
           scPreviewIndex = 0;
+          highlightedRunId = null;
           document.getElementById("sc-preview-shell").hidden = true;
           setPendingRun(null, 0);
           document.getElementById("sc-run-request").textContent = "";
@@ -914,12 +1058,14 @@
           box.innerHTML = "";
           if (!items.length) {
             box.textContent = "لا توجد تشغيلات بعد.";
+            updateRunListHighlight(highlightedRunId);
             return;
           }
           items.forEach(function (r) {
             var b = document.createElement("button");
             b.type = "button";
             b.className = "run-line";
+            b.setAttribute("data-run-id", String(r.id));
             b.textContent =
               r.createdAt +
               " | #" +
@@ -936,6 +1082,7 @@
             });
             box.appendChild(b);
           });
+          updateRunListHighlight(highlightedRunId);
         }
 
         document.getElementById("sc-save-prompt").addEventListener("click", async function () {
@@ -972,7 +1119,7 @@
               msg("تم توليد مسودة — راجعها ثم احفظ.", true);
             } else {
               formatDraftUsageLine(null);
-              msg(data.reason || "فشل الاقتراح.", false);
+              msg(userVisibleApiError(data.reason, data.error), false);
             }
           } finally {
             setBusy(false);
@@ -1004,7 +1151,7 @@
               var rj = await rr.json();
               if (rr.ok && rj.ok) renderRuns(rj.items || []);
             } else {
-              msg(data.reason || "فشل التوليد.", false);
+              msg(userVisibleApiError(data.reason, data.error), false);
             }
           } finally {
             setBusy(false);
@@ -1033,7 +1180,7 @@
               await refreshQuestionsList();
               await loadRunDetail(rid);
             } else {
-              msg(data.reason || data.error || "فشل التعميد.", false);
+              msg(userVisibleApiError(data.reason, data.error), false);
             }
           } finally {
             setBusy(false);
@@ -1096,7 +1243,7 @@
         document.getElementById("sc-phone-preview-btn").addEventListener("click", function () {
           var built = buildPreviewItemsFromQuestions(lastPreviewQuestions);
           if (built.error) {
-            msg(built.error, false);
+            msg(built.error + " — جرّب تعديل البرومبت أو إعادة «توليد المعاينة» ثم اختر التشغيل من السجل.", false);
             return;
           }
           scPreviewItems = built.items;
