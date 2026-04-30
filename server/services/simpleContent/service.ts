@@ -33,9 +33,20 @@ import { resolveSimpleContentProvider } from "./llm/registry";
 import type { SimpleContentPreset } from "./types";
 import type { LLMTokenUsage } from "./llm/types";
 import { estimateGeminiCallCostUsd, GEMINI_PRICING_DOC_URL } from "./geminiPricing";
+import { estimateOpenAiCallCostUsd, OPENAI_PRICING_DOC_URL } from "./openaiPricing";
 
 const PRICING_DISCLAIMER_AR =
   "تقدير تقريبي بناءً على أسعار المنشورات الرسمية لـ Google (طبقة Standard)؛ الفاتورة الفعلية من مزود الخدمة.";
+const OPENAI_PRICING_DISCLAIMER_AR =
+  "تقدير تقريبي بناءً على أسعار OpenAI الرسمية؛ الفاتورة الفعلية من مزود الخدمة.";
+
+function getPricingDocUrlByProvider(provider: SimpleContentPreset["provider"]): string {
+  return provider === "openai" ? OPENAI_PRICING_DOC_URL : GEMINI_PRICING_DOC_URL;
+}
+
+function getPricingDisclaimerByProvider(provider: SimpleContentPreset["provider"]): string {
+  return provider === "openai" ? OPENAI_PRICING_DISCLAIMER_AR : PRICING_DISCLAIMER_AR;
+}
 
 function chooseDifficulty(mode: "mix" | "easy" | "medium" | "hard", index: number): "easy" | "medium" | "hard" {
   if (mode === "easy" || mode === "medium" || mode === "hard") return mode;
@@ -75,6 +86,10 @@ function packUsageForFinalize(
   const outT = usage.outputTokens;
   const tot = usage.totalTokens;
   if (preset.provider !== "gemini") {
+    if (preset.provider === "openai") {
+      const { usd } = estimateOpenAiCallCostUsd(preset.modelId, inT, outT);
+      return { usageInputTokens: inT, usageOutputTokens: outT, usageTotalTokens: tot, estimatedCostUsd: usd };
+    }
     return { usageInputTokens: inT, usageOutputTokens: outT, usageTotalTokens: tot, estimatedCostUsd: null };
   }
   const { usd } = estimateGeminiCallCostUsd(preset.modelId, inT, outT);
@@ -223,8 +238,16 @@ export async function generatePromptDraft(
   const usage = out.usage ?? null;
   let costUsd: number | null = null;
   let tier: string;
-  if (preset.provider !== "gemini") {
-    tier = "non_gemini";
+  if (preset.provider === "openai") {
+    if (!usage) {
+      tier = "no_usage_metadata";
+    } else {
+      const est = estimateOpenAiCallCostUsd(preset.modelId, usage.inputTokens, usage.outputTokens);
+      costUsd = est.usd;
+      tier = est.pricingTier;
+    }
+  } else if (preset.provider !== "gemini") {
+    tier = "unknown_provider";
   } else if (!usage) {
     tier = "no_usage_metadata";
   } else {
@@ -237,8 +260,8 @@ export async function generatePromptDraft(
     usage,
     estimatedCostUsd: costUsd,
     pricingTier: tier,
-    pricingDocUrl: GEMINI_PRICING_DOC_URL,
-    pricingDisclaimer: PRICING_DISCLAIMER_AR,
+    pricingDocUrl: getPricingDocUrlByProvider(preset.provider),
+    pricingDisclaimer: getPricingDisclaimerByProvider(preset.provider),
   };
 }
 
