@@ -228,6 +228,95 @@
         color: var(--muted);
         margin-top: 0.2rem;
       }
+      .loading-line {
+        font-size: 0.85rem;
+        color: var(--amber);
+        margin-top: 0.35rem;
+        display: none;
+      }
+      .loading-line.on {
+        display: block;
+      }
+      textarea.sc-draft-tpl {
+        width: 100%;
+        min-height: 5rem;
+        padding: 0.55rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.28);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.82rem;
+      }
+      textarea.sc-draft-tpl.user {
+        min-height: 9rem;
+      }
+      .preview-shell {
+        margin-top: 0.75rem;
+        border: 1px solid rgba(223, 187, 106, 0.2);
+        border-radius: 1rem;
+        padding: 0.9rem;
+        background: rgba(6, 10, 21, 0.8);
+      }
+      .preview-phone {
+        max-width: 26rem;
+        margin: 0 auto;
+        border: 1px solid rgba(223, 187, 106, 0.24);
+        border-radius: 1.3rem;
+        padding: 0.85rem;
+        background: linear-gradient(to bottom, rgba(13, 19, 37, 0.96), rgba(8, 13, 27, 0.96));
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+      }
+      .preview-meta {
+        display: flex;
+        justify-content: space-between;
+        color: #ccb98d;
+        font-size: 0.84rem;
+        margin-bottom: 0.7rem;
+      }
+      .preview-prompt {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #f5eedf;
+        margin-bottom: 0.7rem;
+      }
+      .preview-options {
+        display: grid;
+        gap: 0.5rem;
+      }
+      .preview-options.two-options {
+        grid-template-columns: 1fr 1fr;
+      }
+      .preview-option {
+        border: 1px solid rgba(223, 187, 106, 0.22);
+        background: rgba(12, 17, 34, 0.95);
+        color: #f0e6d2;
+        border-radius: 0.7rem;
+        padding: 0.62rem 0.75rem;
+        text-align: right;
+        font-size: 0.95rem;
+      }
+      .preview-option.correct {
+        border-color: rgba(16, 185, 129, 0.72);
+        background: rgba(16, 185, 129, 0.2);
+        color: #baf7df;
+      }
+      .preview-study {
+        margin-top: 0.75rem;
+        border: 1px solid rgba(223, 187, 106, 0.24);
+        border-radius: 0.75rem;
+        background: rgba(25, 31, 57, 0.82);
+        padding: 0.7rem;
+      }
+      .preview-study b {
+        color: #f1dbac;
+      }
+      .preview-empty {
+        color: #c9ba97;
+        text-align: center;
+        font-size: 0.9rem;
+        padding: 1.2rem 0.4rem;
+      }
     </style>
   </head>
   <body>
@@ -246,6 +335,7 @@
         <button type="button" class="btn btn-secondary" id="sc-load-templates">عرض قوالب البرومبت</button>
       </div>
       <div class="msg" id="sc-msg"></div>
+      <p class="loading-line" id="sc-loading-line">جاري الاتصال بالنموذج… يرجى الانتظار وعدم إغلاق الصفحة.</p>
       <div class="card" id="sc-templates-wrap" style="display: none">
         <h2>قوالب النظام (مسودة + عقد JSON للتوليد)</h2>
         <p class="subtitle">نسخ للمراجعة — لا تُرسل كما هي للنموذج دون استبدال العناصر النائبة.</p>
@@ -270,6 +360,19 @@
       <div class="card" id="sc-work" style="display: none">
         <h2 id="sc-work-title">مساحة العمل</h2>
         <p class="subtitle" id="sc-ctx-line"></p>
+        <div class="card" style="margin-top: 0.75rem; background: rgba(0, 0, 0, 0.22)">
+          <h2 style="font-size: 0.95rem">قالب اقتراح مسودة البرومبت (عام — قابل للتعديل)</h2>
+          <p class="subtitle" id="sc-draft-template-help"></p>
+          <label for="sc-draft-template-sys">رسالة النظام للمسودة</label>
+          <textarea id="sc-draft-template-sys" class="sc-draft-tpl" rows="5"></textarea>
+          <label for="sc-draft-template-user" style="margin-top: 0.65rem; display: block">قالب رسالة المستخدم (عناصر نائبة)</label>
+          <textarea id="sc-draft-template-user" class="sc-draft-tpl user" rows="10"></textarea>
+          <div class="row">
+            <button type="button" class="btn btn-secondary" id="sc-draft-template-load">تحميل القالب الحالي</button>
+            <button type="button" class="btn" id="sc-draft-template-save">حفظ القالب</button>
+          </div>
+        </div>
+        <p class="hint" id="sc-last-usage"></p>
         <label for="sc-prompt">البرومبت المحفوظ لهذا الفرع</label>
         <textarea id="sc-prompt"></textarea>
         <div class="row">
@@ -303,6 +406,17 @@
         <div class="row">
           <button type="button" class="btn" id="sc-generate-preview">توليد معاينة (لا إدراج)</button>
           <button type="button" class="btn" id="sc-commit" disabled>تعميد الإدراج</button>
+          <button type="button" class="btn btn-secondary" id="sc-phone-preview-btn">معاينة شكل التطبيق</button>
+        </div>
+        <div class="preview-shell" id="sc-preview-shell" hidden>
+          <div class="preview-phone" id="sc-preview-phone">
+            <div class="preview-empty">حمّل تفاصيل تشغيل فيه أسئلة مطبّعة أو نفّذ «توليد معاينة» ثم اضغط «معاينة شكل التطبيق».</div>
+          </div>
+          <div class="row" style="margin-top: 0.65rem; justify-content: center">
+            <button type="button" class="btn btn-secondary" id="sc-preview-prev">السابق</button>
+            <button type="button" class="btn btn-secondary" id="sc-preview-next">التالي</button>
+            <button type="button" class="btn btn-secondary" id="sc-preview-close">إغلاق المعاينة</button>
+          </div>
         </div>
         <p class="subtitle" id="sc-pending-note" style="display: none"></p>
 
@@ -348,6 +462,19 @@
         var selectedSubKey = null;
         var lastPresetsItems = [];
         var pendingRunId = null;
+        var lastPreviewQuestions = [];
+        var scPreviewItems = [];
+        var scPreviewIndex = 0;
+        var BUSY_IDS = [
+          "sc-generate-preview",
+          "sc-commit",
+          "sc-draft-prompt",
+          "sc-save-prompt",
+          "sc-save-auto",
+          "sc-load-templates",
+          "sc-draft-template-load",
+          "sc-draft-template-save",
+        ];
 
         function secret() {
           return String(document.getElementById("sc-secret").value || "").trim();
@@ -359,6 +486,42 @@
         }
         function hdr() {
           return { headers: { "X-Admin-Secret": secret(), "Content-Type": "application/json" } };
+        }
+
+        function setBusy(on) {
+          BUSY_IDS.forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) el.disabled = !!on;
+          });
+          var line = document.getElementById("sc-loading-line");
+          if (line) line.className = "loading-line" + (on ? " on" : "");
+        }
+
+        function formatDraftUsageLine(data) {
+          var el = document.getElementById("sc-last-usage");
+          if (!el) return;
+          if (!data) {
+            el.textContent = "";
+            return;
+          }
+          var parts = [];
+          if (data.usage) {
+            var u = data.usage;
+            parts.push(
+              "آخر استدعاء (مسودة): دخل " +
+                (u.inputTokens != null ? u.inputTokens : "—") +
+                " / خرج " +
+                (u.outputTokens != null ? u.outputTokens : "—"),
+            );
+          }
+          if (data.estimatedCostUsd != null && Number.isFinite(Number(data.estimatedCostUsd))) {
+            parts.push("تقدير التكلفة ≈ $" + Number(data.estimatedCostUsd).toFixed(6) + " USD");
+          }
+          if (data.pricingTier === "pricing_unknown_model") {
+            parts.push("النموذج غير مدرج في جدول الأسعار اليدوي.");
+          }
+          if (data.pricingDisclaimer) parts.push(data.pricingDisclaimer);
+          el.textContent = parts.join(" — ");
         }
 
         function presetLabel(p) {
@@ -388,6 +551,7 @@
             msg("أدخل مفتاح الإدارة.", false);
             return;
           }
+          setBusy(true);
           try {
             var res = await fetch("/api/admin/simple-content/prompt-templates", hdr());
             var data = await res.json();
@@ -400,6 +564,8 @@
             msg("تم تحميل القوالب.", true);
           } catch (e) {
             msg("تعذر تحميل القوالب.", false);
+          } finally {
+            setBusy(false);
           }
         });
 
@@ -468,6 +634,102 @@
             .replace(/"/g, "&quot;");
         }
 
+        async function loadDraftTemplateFromApi(silent) {
+          if (!secret()) return;
+          try {
+            var res = await fetch("/api/admin/simple-content/draft-template", hdr());
+            var data = await res.json();
+            if (!res.ok || !data.ok) throw new Error("draft_tpl");
+            document.getElementById("sc-draft-template-sys").value = data.system || "";
+            document.getElementById("sc-draft-template-user").value = data.userTemplate || "";
+            document.getElementById("sc-draft-template-help").textContent = data.placeholdersHelp || "";
+            if (!silent) msg("تم تحميل قالب المسودة.", true);
+          } catch (e) {
+            msg("تعذر تحميل قالب المسودة.", false);
+          }
+        }
+
+        function toPreviewItem(item, idx) {
+          if (!item || typeof item !== "object") return { error: "عنصر " + (idx + 1) + ": ليس كائناً." };
+          var prompt = String(item.prompt || "").trim();
+          var options = item.options;
+          var correctIndex = item.correctIndex;
+          var studyBody = String(item.studyBody != null ? item.studyBody : "").trim() || "—";
+          var difficulty = String(item.difficulty || "medium").trim().toLowerCase();
+          if (!["easy", "medium", "hard"].includes(difficulty)) difficulty = "medium";
+          if (!prompt) return { error: "عنصر " + (idx + 1) + ": prompt مفقود." };
+          if (!Array.isArray(options) || (options.length !== 2 && options.length !== 4)) {
+            return { error: "عنصر " + (idx + 1) + ": options يجب أن تكون 2 أو 4 عناصر." };
+          }
+          var normalizedOptions = options.map(function (o) {
+            return String(o || "").trim();
+          });
+          if (normalizedOptions.some(function (o) {
+            return !o;
+          }))
+            return { error: "عنصر " + (idx + 1) + ": خيار فارغ." };
+          if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= normalizedOptions.length) {
+            return { error: "عنصر " + (idx + 1) + ": correctIndex غير صالح." };
+          }
+          return {
+            prompt: prompt,
+            options: normalizedOptions,
+            correctIndex: correctIndex,
+            studyBody: studyBody,
+            difficulty: difficulty,
+          };
+        }
+
+        function buildPreviewItemsFromQuestions(arr) {
+          var out = [];
+          for (var i = 0; i < arr.length; i++) {
+            var r = toPreviewItem(arr[i], i);
+            if (r.error) return { error: r.error, items: [] };
+            out.push(r);
+          }
+          return { error: null, items: out };
+        }
+
+        function renderPhonePreview() {
+          var phone = document.getElementById("sc-preview-phone");
+          var prevB = document.getElementById("sc-preview-prev");
+          var nextB = document.getElementById("sc-preview-next");
+          if (!scPreviewItems.length) {
+            phone.innerHTML = '<div class="preview-empty">لا توجد أسئلة للمعاينة.</div>';
+            prevB.disabled = true;
+            nextB.disabled = true;
+            return;
+          }
+          var item = scPreviewItems[scPreviewIndex];
+          var optionsHtml = item.options
+            .map(function (opt, i) {
+              var c = "preview-option" + (i === item.correctIndex ? " correct" : "");
+              return '<div class="' + c + '">' + escapeHtml(opt) + "</div>";
+            })
+            .join("");
+          var optionsClass = item.options.length === 2 ? "preview-options two-options" : "preview-options";
+          phone.innerHTML =
+            '<div class="preview-meta"><span>السؤال ' +
+            (scPreviewIndex + 1) +
+            " / " +
+            scPreviewItems.length +
+            '</span><span>' +
+            escapeHtml(item.difficulty) +
+            "</span></div>" +
+            '<div class="preview-prompt">' +
+            escapeHtml(item.prompt) +
+            "</div>" +
+            '<div class="' +
+            optionsClass +
+            '">' +
+            optionsHtml +
+            '</div><div class="preview-study"><b>بطاقة المذاكرة:</b><div style="margin-top:0.45rem">' +
+            escapeHtml(item.studyBody) +
+            "</div></div>";
+          prevB.disabled = scPreviewIndex <= 0;
+          nextB.disabled = scPreviewIndex >= scPreviewItems.length - 1;
+        }
+
         function fillPresets(items) {
           lastPresetsItems = items || [];
           ["sc-preset", "sc-auto-preset", "sc-draft-preset"].forEach(function (selId) {
@@ -507,8 +769,29 @@
             return;
           }
           var r = data.run;
-          document.getElementById("sc-run-meta").textContent =
-            "#" + r.id + " | " + r.status + " | " + r.triggerKind + " | إدراج " + r.insertedCount;
+          lastPreviewQuestions = Array.isArray(r.normalizedQuestions) ? r.normalizedQuestions : [];
+          var meta =
+            "#" +
+            r.id +
+            " | " +
+            r.status +
+            " | " +
+            r.triggerKind +
+            " | إدراج " +
+            r.insertedCount;
+          if (r.usageInputTokens != null || r.usageOutputTokens != null || r.usageTotalTokens != null) {
+            meta +=
+              " | توكنز: دخل " +
+              (r.usageInputTokens != null ? r.usageInputTokens : "—") +
+              " / خرج " +
+              (r.usageOutputTokens != null ? r.usageOutputTokens : "—") +
+              " / إجمالي " +
+              (r.usageTotalTokens != null ? r.usageTotalTokens : "—");
+          }
+          if (r.estimatedCostUsd != null && Number.isFinite(Number(r.estimatedCostUsd))) {
+            meta += " | تقدير التكلفة ≈ $" + Number(r.estimatedCostUsd).toFixed(6) + " USD";
+          }
+          document.getElementById("sc-run-meta").textContent = meta;
           document.getElementById("sc-run-request").textContent = r.requestPrompt || "—";
           document.getElementById("sc-run-response").textContent = r.modelResponse || "—";
           try {
@@ -566,6 +849,10 @@
           document.getElementById("sc-work").style.display = "block";
           document.getElementById("sc-work-title").textContent = "مساحة العمل — " + subName;
           document.getElementById("sc-ctx-line").textContent = mainName + " ← " + subName + " (" + subKey + ")";
+          lastPreviewQuestions = [];
+          scPreviewItems = [];
+          scPreviewIndex = 0;
+          document.getElementById("sc-preview-shell").hidden = true;
           setPendingRun(null, 0);
           document.getElementById("sc-run-request").textContent = "";
           document.getElementById("sc-run-response").textContent = "";
@@ -616,6 +903,7 @@
                 ctx.mainCategoryName + " ← " + ctx.subcategoryName + " (" + subKey + ")";
             }
             msg("جاهز.", true);
+            await loadDraftTemplateFromApi(true);
           } catch (e) {
             msg("تعذر تحميل بيانات الفرع.", false);
           }
@@ -652,57 +940,74 @@
 
         document.getElementById("sc-save-prompt").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
-          var enc = encodeURIComponent(selectedSubKey);
-          var body = JSON.stringify({ promptBody: document.getElementById("sc-prompt").value });
-          var res = await fetch("/api/admin/simple-content/prompt/" + enc, { method: "PUT", headers: hdr().headers, body: body });
-          var data = await res.json();
-          msg(res.ok && data.ok ? "تم حفظ البرومبت." : "فشل الحفظ.", res.ok && data.ok);
+          setBusy(true);
+          try {
+            var enc = encodeURIComponent(selectedSubKey);
+            var body = JSON.stringify({ promptBody: document.getElementById("sc-prompt").value });
+            var res = await fetch("/api/admin/simple-content/prompt/" + enc, { method: "PUT", headers: hdr().headers, body: body });
+            var data = await res.json();
+            msg(res.ok && data.ok ? "تم حفظ البرومبت." : "فشل الحفظ.", res.ok && data.ok);
+          } finally {
+            setBusy(false);
+          }
         });
 
         document.getElementById("sc-draft-prompt").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
-          msg("جاري اقتراح برومبت…", true);
-          var draftPid = Number(document.getElementById("sc-draft-preset").value);
-          var body = { subcategoryKey: selectedSubKey };
-          if (Number.isFinite(draftPid) && draftPid > 0) body.presetId = draftPid;
-          var res = await fetch("/api/admin/simple-content/prompt/generate-draft", {
-            method: "POST",
-            headers: hdr().headers,
-            body: JSON.stringify(body),
-          });
-          var data = await res.json();
-          if (res.ok && data.ok && data.draft) {
-            document.getElementById("sc-prompt").value = data.draft;
-            msg("تم توليد مسودة — راجعها ثم احفظ.", true);
-          } else {
-            msg(data.reason || "فشل الاقتراح.", false);
+          msg("جاري الاتصال بالنموذج لاقتراح مسودة…", true);
+          setBusy(true);
+          try {
+            var draftPid = Number(document.getElementById("sc-draft-preset").value);
+            var body = { subcategoryKey: selectedSubKey };
+            if (Number.isFinite(draftPid) && draftPid > 0) body.presetId = draftPid;
+            var res = await fetch("/api/admin/simple-content/prompt/generate-draft", {
+              method: "POST",
+              headers: hdr().headers,
+              body: JSON.stringify(body),
+            });
+            var data = await res.json();
+            if (res.ok && data.ok && data.draft) {
+              document.getElementById("sc-prompt").value = data.draft;
+              formatDraftUsageLine(data);
+              msg("تم توليد مسودة — راجعها ثم احفظ.", true);
+            } else {
+              formatDraftUsageLine(null);
+              msg(data.reason || "فشل الاقتراح.", false);
+            }
+          } finally {
+            setBusy(false);
           }
         });
 
         document.getElementById("sc-generate-preview").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
           msg("جاري توليد المعاينة…", true);
-          var body = JSON.stringify({
-            subcategoryKey: selectedSubKey,
-            batchSize: Number(document.getElementById("sc-batch").value) || 10,
-            difficultyMode: document.getElementById("sc-diff").value,
-            presetId: Number(document.getElementById("sc-preset").value),
-          });
-          var res = await fetch("/api/admin/simple-content/generate-preview", {
-            method: "POST",
-            headers: hdr().headers,
-            body: body,
-          });
-          var data = await res.json();
-          if (res.ok && data.ok && data.runId) {
-            msg("تمت المعاينة — راجع التفاصيل ثم عمّد.", true);
-            await loadRunDetail(data.runId);
-            var enc = encodeURIComponent(selectedSubKey);
-            var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
-            var rj = await rr.json();
-            if (rr.ok && rj.ok) renderRuns(rj.items || []);
-          } else {
-            msg(data.reason || "فشل التوليد.", false);
+          setBusy(true);
+          try {
+            var body = JSON.stringify({
+              subcategoryKey: selectedSubKey,
+              batchSize: Number(document.getElementById("sc-batch").value) || 10,
+              difficultyMode: document.getElementById("sc-diff").value,
+              presetId: Number(document.getElementById("sc-preset").value),
+            });
+            var res = await fetch("/api/admin/simple-content/generate-preview", {
+              method: "POST",
+              headers: hdr().headers,
+              body: body,
+            });
+            var data = await res.json();
+            if (res.ok && data.ok && data.runId) {
+              msg("تمت المعاينة — راجع التفاصيل ثم عمّد.", true);
+              await loadRunDetail(data.runId);
+              var enc = encodeURIComponent(selectedSubKey);
+              var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
+              var rj = await rr.json();
+              if (rr.ok && rj.ok) renderRuns(rj.items || []);
+            } else {
+              msg(data.reason || "فشل التوليد.", false);
+            }
+          } finally {
+            setBusy(false);
           }
         });
 
@@ -710,42 +1015,112 @@
           if (!secret() || pendingRunId == null) return;
           var rid = pendingRunId;
           msg("جاري تعميد الإدراج…", true);
-          var res = await fetch("/api/admin/simple-content/runs/" + rid + "/commit", {
-            method: "POST",
-            headers: hdr().headers,
-            body: "{}",
-          });
-          var data = await res.json();
-          if (res.ok && data.ok) {
-            msg("تم الإدراج: " + data.inserted + " سؤال.", true);
-            setPendingRun(null, 0);
-            var enc = encodeURIComponent(selectedSubKey);
-            var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
-            var rj = await rr.json();
-            if (rr.ok && rj.ok) renderRuns(rj.items || []);
-            await refreshQuestionsList();
-            await loadRunDetail(rid);
-          } else {
-            msg(data.reason || data.error || "فشل التعميد.", false);
+          setBusy(true);
+          try {
+            var res = await fetch("/api/admin/simple-content/runs/" + rid + "/commit", {
+              method: "POST",
+              headers: hdr().headers,
+              body: "{}",
+            });
+            var data = await res.json();
+            if (res.ok && data.ok) {
+              msg("تم الإدراج: " + data.inserted + " سؤال.", true);
+              setPendingRun(null, 0);
+              var enc = encodeURIComponent(selectedSubKey);
+              var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
+              var rj = await rr.json();
+              if (rr.ok && rj.ok) renderRuns(rj.items || []);
+              await refreshQuestionsList();
+              await loadRunDetail(rid);
+            } else {
+              msg(data.reason || data.error || "فشل التعميد.", false);
+            }
+          } finally {
+            setBusy(false);
           }
         });
 
         document.getElementById("sc-save-auto").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
-          var enc = encodeURIComponent(selectedSubKey);
-          var pid = Number(document.getElementById("sc-auto-preset").value);
-          var body = JSON.stringify({
-            enabled: document.getElementById("sc-auto-en").checked,
-            intervalMinutes: Number(document.getElementById("sc-auto-min").value) || 60,
-            modelPresetId: Number.isFinite(pid) ? pid : null,
-          });
-          var res = await fetch("/api/admin/simple-content/automation/" + enc, {
-            method: "PUT",
-            headers: hdr().headers,
-            body: body,
-          });
-          var data = await res.json();
-          msg(res.ok && data.ok ? "تم حفظ الجدولة." : "فشل حفظ الجدولة.", res.ok && data.ok);
+          setBusy(true);
+          try {
+            var enc = encodeURIComponent(selectedSubKey);
+            var pid = Number(document.getElementById("sc-auto-preset").value);
+            var body = JSON.stringify({
+              enabled: document.getElementById("sc-auto-en").checked,
+              intervalMinutes: Number(document.getElementById("sc-auto-min").value) || 60,
+              modelPresetId: Number.isFinite(pid) ? pid : null,
+            });
+            var res = await fetch("/api/admin/simple-content/automation/" + enc, {
+              method: "PUT",
+              headers: hdr().headers,
+              body: body,
+            });
+            var data = await res.json();
+            msg(res.ok && data.ok ? "تم حفظ الجدولة." : "فشل حفظ الجدولة.", res.ok && data.ok);
+          } finally {
+            setBusy(false);
+          }
+        });
+
+        document.getElementById("sc-draft-template-load").addEventListener("click", async function () {
+          if (!secret()) return;
+          setBusy(true);
+          try {
+            await loadDraftTemplateFromApi(false);
+          } finally {
+            setBusy(false);
+          }
+        });
+
+        document.getElementById("sc-draft-template-save").addEventListener("click", async function () {
+          if (!secret()) return;
+          setBusy(true);
+          try {
+            var body = JSON.stringify({
+              system: document.getElementById("sc-draft-template-sys").value,
+              userTemplate: document.getElementById("sc-draft-template-user").value,
+            });
+            var res = await fetch("/api/admin/simple-content/draft-template", {
+              method: "PUT",
+              headers: hdr().headers,
+              body: body,
+            });
+            var data = await res.json();
+            msg(res.ok && data.ok ? "تم حفظ قالب المسودة." : "فشل حفظ القالب.", res.ok && data.ok);
+          } finally {
+            setBusy(false);
+          }
+        });
+
+        document.getElementById("sc-phone-preview-btn").addEventListener("click", function () {
+          var built = buildPreviewItemsFromQuestions(lastPreviewQuestions);
+          if (built.error) {
+            msg(built.error, false);
+            return;
+          }
+          scPreviewItems = built.items;
+          scPreviewIndex = 0;
+          document.getElementById("sc-preview-shell").hidden = false;
+          renderPhonePreview();
+        });
+
+        document.getElementById("sc-preview-prev").addEventListener("click", function () {
+          if (scPreviewIndex > 0) {
+            scPreviewIndex--;
+            renderPhonePreview();
+          }
+        });
+
+        document.getElementById("sc-preview-next").addEventListener("click", function () {
+          if (scPreviewIndex < scPreviewItems.length - 1) {
+            scPreviewIndex++;
+            renderPhonePreview();
+          }
+        });
+
+        document.getElementById("sc-preview-close").addEventListener("click", function () {
+          document.getElementById("sc-preview-shell").hidden = true;
         });
       })();
     </script>

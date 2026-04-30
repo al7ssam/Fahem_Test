@@ -45,11 +45,13 @@ import {
   getAutomation,
   getPromptBody,
   getRunById,
+  getSimpleContentDraftTemplateForAdmin,
   getSubcategoryContextForAdmin,
   listActivePresets,
   listRuns,
   runSimpleContentGenerate,
   runSimpleContentGeneratePreview,
+  saveSimpleContentDraftTemplate,
   upsertAutomation,
   upsertPromptBody,
 } from "../services/simpleContent/service";
@@ -211,6 +213,11 @@ const simpleContentGenerateSchema = z.object({
 });
 
 const simpleContentGeneratePreviewSchema = simpleContentGenerateSchema;
+
+const simpleContentDraftTemplatePutSchema = z.object({
+  system: z.string().max(200_000),
+  userTemplate: z.string().max(200_000),
+});
 
 const simpleContentAutomationPutSchema = z.object({
   enabled: z.boolean(),
@@ -1392,8 +1399,8 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
     try {
-      const draft = await generatePromptDraft(parsed.data.subcategoryKey, parsed.data.presetId);
-      res.json({ ok: true, draft });
+      const result = await generatePromptDraft(parsed.data.subcategoryKey, parsed.data.presetId);
+      res.json({ ok: true, ...result });
     } catch (error) {
       res.status(500).json({
         ok: false,
@@ -1497,6 +1504,34 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true, templates: getAdminPromptTemplatesPayload() });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/draft-template", async (_req: Request, res: Response) => {
+    if (!verifyAdmin(_req, res)) return;
+    try {
+      const payload = await getSimpleContentDraftTemplateForAdmin();
+      res.json({ ok: true, ...payload });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.put("/api/admin/simple-content/draft-template", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = simpleContentDraftTemplatePutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      await saveSimpleContentDraftTemplate({
+        system: parsed.data.system,
+        userTemplate: parsed.data.userTemplate,
+      });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "write_failed" });
     }
   });
 

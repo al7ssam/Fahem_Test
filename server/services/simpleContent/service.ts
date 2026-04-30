@@ -2,25 +2,37 @@ import { extractJsonArray, normalizeFactoryQuestionsLenient } from "../aiFactory
 import type { FactoryDifficulty, FactoryQuestion } from "../aiFactory/types";
 import { readSubcategoryEditorContext } from "./context";
 import {
+  applyDraftUserTemplatePlaceholders,
   buildDraftPromptSystemMessage,
-  buildDraftPromptUserMessage,
+  buildDraftPromptUserMessageTemplate,
+  getAdminPromptTemplatesPayload,
+  SIMPLE_CONTENT_DRAFT_PLACEHOLDERS_HELP,
   SIMPLE_QUESTION_JSON_CONTRACT,
 } from "./promptContract";
 import {
+  APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM,
+  APP_KEY_SIMPLE_CONTENT_DRAFT_USER,
   bumpAutomationNextRun,
   createRun,
   finalizeSimpleContentRun,
+  getAppSettingValue,
   getPresetById,
   getPromptBody,
   getRunById,
   listActivePresets,
   listDueAutomations,
   listRuns,
+  upsertAppSettingValue,
   upsertPromptBody,
 } from "./repository";
 import { insertSimpleContentQuestions } from "./insertQuestions";
 import { resolveSimpleContentProvider } from "./llm/registry";
 import type { SimpleContentPreset } from "./types";
+import type { LLMTokenUsage } from "./llm/types";
+import { estimateGeminiCallCostUsd, GEMINI_PRICING_DOC_URL } from "./geminiPricing";
+
+const PRICING_DISCLAIMER_AR =
+  "تقدير تقريبي بناءً على أسعار المنشورات الرسمية لـ Google (طبقة Standard)؛ الفاتورة الفعلية من مزود الخدمة.";
 
 function chooseDifficulty(mode: "mix" | "easy" | "medium" | "hard", index: number): "easy" | "medium" | "hard" {
   if (mode === "easy" || mode === "medium" || mode === "hard") return mode;
@@ -44,6 +56,33 @@ function buildUserPromptBlock(input: {
   ].join("\n");
 }
 
+function packUsageForFinalize(
+  preset: SimpleContentPreset,
+  usage: LLMTokenUsage | null | undefined,
+): {
+  usageInputTokens: number | null;
+  usageOutputTokens: number | null;
+  usageTotalTokens: number | null;
+  estimatedCostUsd: number | null;
+} {
+  if (!usage) {
+    return { usageInputTokens: null, usageOutputTokens: null, usageTotalTokens: null, estimatedCostUsd: null };
+  }
+  const inT = usage.inputTokens;
+  const outT = usage.outputTokens;
+  const tot = usage.totalTokens;
+  if (preset.provider !== "gemini") {
+    return { usageInputTokens: inT, usageOutputTokens: outT, usageTotalTokens: tot, estimatedCostUsd: null };
+  }
+  const { usd } = estimateGeminiCallCostUsd(preset.modelId, inT, outT);
+  return {
+    usageInputTokens: inT,
+    usageOutputTokens: outT,
+    usageTotalTokens: tot,
+    estimatedCostUsd: usd,
+  };
+}
+
 async function resolvePresetForDraft(presetId?: number): Promise<SimpleContentPreset> {
   if (presetId != null) {
     const p = await getPresetById(presetId);
@@ -60,15 +99,66 @@ async function resolvePresetForDraft(presetId?: number): Promise<SimpleContentPr
   return gem;
 }
 
-async function llmNormalizeToFinalQuestions(input: {
-  subcategoryKey: string;
-  batchSize: number;
-  difficultyMode: FactoryDifficulty;
-  preset: SimpleContentPreset;
-  userPrompt: string;
-}): Promise<{ modelText: string; finishReason: string | null; finalQuestions: FactoryQuestion[] }> {
+async function loadEffectiveDraftPromptParts(ctx: {
+  mainCategoryName: string;
+  subcategoryName: string;
+  internalDescription: string;
+}): Promise<{ system: string; userFilled: string }> {
+  const [sysDb, userDb] = await Promise.all([
+    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM),
+    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_USER),
+  ]);
+  const system = String(sysDb ?? "").trim() ? String(sysDb) : buildDraftPromptSystemMessage();
+  const userTpl = String(userDb ?? "").trim() ? String(userDb) : buildDraftPromptUserMessageTemplate();
+  const userFilled = applyDraftUserTemplatePlaceholders(userTpl, ctx);
+  return { system, userFilled };
+}
+
+export async function getSimpleContentDraftTemplateForAdmin(): Promise<{
+  system: string;
+  userTemplate: string;
+  defaultsFromCode: { system: string; userTemplate: string };
+  placeholdersHelp: string;
+  pricingDocUrl: string;
+}> {
+  const [sysDb, userDb] = await Promise.all([
+    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM),
+    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_USER),
+  ]);
+  const defaults = getAdminPromptTemplatesPayload();
+  return {
+    system: String(sysDb ?? "").trim() ? String(sysDb) : defaults.draftSystemMessage,
+    userTemplate: String(userDb ?? "").trim() ? String(userDb) : defaults.draftUserMessageTemplate,
+    defaultsFromCode: {
+      system: defaults.draftSystemMessage,
+      userTemplate: defaults.draftUserMessageTemplate,
+    },
+    placeholdersHelp: SIMPLE_CONTENT_DRAFT_PLACEHOLDERS_HELP,
+    pricingDocUrl: GEMINI_PRICING_DOC_URL,
+  };
+}
+
+export async function saveSimpleContentDraftTemplate(input: { system: string; userTemplate: string }): Promise<void> {
+  await upsertAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM, input.system);
+  await upsertAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_USER, input.userTemplate);
+}
+
+type LlmSnap = { usage: LLMTokenUsage | null; modelText: string | null };
+
+async function llmNormalizeToFinalQuestions(
+  input: {
+    subcategoryKey: string;
+    batchSize: number;
+    difficultyMode: FactoryDifficulty;
+    preset: SimpleContentPreset;
+    userPrompt: string;
+  },
+  snap: LlmSnap,
+): Promise<{ modelText: string; finishReason: string | null; finalQuestions: FactoryQuestion[] }> {
   const provider = resolveSimpleContentProvider(input.preset);
   const out = await provider.complete({ prompt: input.userPrompt }, input.preset);
+  snap.usage = out.usage ?? null;
+  snap.modelText = out.text;
   if (out.finishReason === "MAX_TOKENS") {
     throw new Error("layer_output_truncated_max_tokens:layer=simple_content");
   }
@@ -103,24 +193,50 @@ export async function getSubcategoryContextForAdmin(subcategoryKey: string) {
   return readSubcategoryEditorContext(subcategoryKey);
 }
 
-export async function generatePromptDraft(subcategoryKey: string, presetId?: number): Promise<string> {
+export async function generatePromptDraft(
+  subcategoryKey: string,
+  presetId?: number,
+): Promise<{
+  draft: string;
+  usage: LLMTokenUsage | null;
+  estimatedCostUsd: number | null;
+  pricingTier: string;
+  pricingDocUrl: string;
+  pricingDisclaimer: string;
+}> {
   const ctx = await readSubcategoryEditorContext(subcategoryKey);
   const preset = await resolvePresetForDraft(presetId);
+  const { system, userFilled } = await loadEffectiveDraftPromptParts({
+    mainCategoryName: ctx.mainCategoryName,
+    subcategoryName: ctx.subcategoryName,
+    internalDescription: ctx.internalDescription,
+  });
   const provider = resolveSimpleContentProvider(preset);
-  const text = [
-    buildDraftPromptSystemMessage(),
-    "",
-    buildDraftPromptUserMessage({
-      mainCategoryName: ctx.mainCategoryName,
-      subcategoryName: ctx.subcategoryName,
-      internalDescription: ctx.internalDescription,
-    }),
-  ].join("\n");
+  const text = [system, "", userFilled].join("\n");
   const out = await provider.complete({ prompt: text }, preset);
   if (out.finishReason === "MAX_TOKENS") {
     throw new Error("layer_output_truncated_max_tokens:layer=simple_content_draft");
   }
-  return out.text.trim();
+  const usage = out.usage ?? null;
+  let costUsd: number | null = null;
+  let tier: string;
+  if (preset.provider !== "gemini") {
+    tier = "non_gemini";
+  } else if (!usage) {
+    tier = "no_usage_metadata";
+  } else {
+    const est = estimateGeminiCallCostUsd(preset.modelId, usage.inputTokens, usage.outputTokens);
+    costUsd = est.usd;
+    tier = est.pricingTier;
+  }
+  return {
+    draft: out.text.trim(),
+    usage,
+    estimatedCostUsd: costUsd,
+    pricingTier: tier,
+    pricingDocUrl: GEMINI_PRICING_DOC_URL,
+    pricingDisclaimer: PRICING_DISCLAIMER_AR,
+  };
 }
 
 /** Scheduled or legacy API: LLM + insert immediately, full audit row. */
@@ -150,16 +266,19 @@ export async function runSimpleContentGenerate(input: {
     triggerKind: input.triggerKind,
     preset,
   });
-  let modelText: string | null = null;
+  const snap: LlmSnap = { usage: null, modelText: null };
   try {
-    const { modelText: mt, finalQuestions } = await llmNormalizeToFinalQuestions({
-      subcategoryKey: input.subcategoryKey,
-      batchSize: input.batchSize,
-      difficultyMode: input.difficultyMode,
-      preset,
-      userPrompt,
-    });
-    modelText = mt;
+    const { modelText: mt, finalQuestions } = await llmNormalizeToFinalQuestions(
+      {
+        subcategoryKey: input.subcategoryKey,
+        batchSize: input.batchSize,
+        difficultyMode: input.difficultyMode,
+        preset,
+        userPrompt,
+      },
+      snap,
+    );
+    const usagePack = packUsageForFinalize(preset, snap.usage);
     const questionIds = await insertSimpleContentQuestions(finalQuestions);
     await finalizeSimpleContentRun(runId, {
       status: "succeeded",
@@ -171,20 +290,23 @@ export async function runSimpleContentGenerate(input: {
         inserted: questionIds.length,
       },
       requestPrompt: userPrompt,
-      modelResponse: modelText,
+      modelResponse: mt,
       normalizedQuestions: null,
+      ...usagePack,
     });
     return { runId, inserted: questionIds.length };
   } catch (error) {
     const msg = error instanceof Error ? error.message : "unknown_error";
+    const usagePack = packUsageForFinalize(preset, snap.usage);
     await finalizeSimpleContentRun(runId, {
       status: "failed",
       insertedCount: 0,
       error: msg,
       previewJson: null,
       requestPrompt: userPrompt,
-      modelResponse: modelText,
+      modelResponse: snap.modelText,
       normalizedQuestions: null,
+      ...usagePack,
     });
     throw error;
   }
@@ -216,16 +338,19 @@ export async function runSimpleContentGeneratePreview(input: {
     triggerKind: "manual",
     preset,
   });
-  let modelText: string | null = null;
+  const snap: LlmSnap = { usage: null, modelText: null };
   try {
-    const { modelText: mt, finalQuestions } = await llmNormalizeToFinalQuestions({
-      subcategoryKey: input.subcategoryKey,
-      batchSize: input.batchSize,
-      difficultyMode: input.difficultyMode,
-      preset,
-      userPrompt,
-    });
-    modelText = mt;
+    const { modelText: mt, finalQuestions } = await llmNormalizeToFinalQuestions(
+      {
+        subcategoryKey: input.subcategoryKey,
+        batchSize: input.batchSize,
+        difficultyMode: input.difficultyMode,
+        preset,
+        userPrompt,
+      },
+      snap,
+    );
+    const usagePack = packUsageForFinalize(preset, snap.usage);
     await finalizeSimpleContentRun(runId, {
       status: "pending_review",
       insertedCount: 0,
@@ -235,20 +360,23 @@ export async function runSimpleContentGeneratePreview(input: {
         questionCount: finalQuestions.length,
       },
       requestPrompt: userPrompt,
-      modelResponse: modelText,
+      modelResponse: mt,
       normalizedQuestions: finalQuestions,
+      ...usagePack,
     });
     return { runId, questionCount: finalQuestions.length };
   } catch (error) {
     const msg = error instanceof Error ? error.message : "unknown_error";
+    const usagePack = packUsageForFinalize(preset, snap.usage);
     await finalizeSimpleContentRun(runId, {
       status: "failed",
       insertedCount: 0,
       error: msg,
       previewJson: null,
       requestPrompt: userPrompt,
-      modelResponse: modelText,
+      modelResponse: snap.modelText,
       normalizedQuestions: null,
+      ...usagePack,
     });
     throw error;
   }
@@ -277,6 +405,10 @@ export async function commitSimpleContentRun(runId: number): Promise<{ inserted:
     requestPrompt: run.requestPrompt,
     modelResponse: run.modelResponse,
     normalizedQuestions: null,
+    usageInputTokens: run.usageInputTokens,
+    usageOutputTokens: run.usageOutputTokens,
+    usageTotalTokens: run.usageTotalTokens,
+    estimatedCostUsd: run.estimatedCostUsd,
   });
   return { inserted: questionIds.length, questionIds };
 }

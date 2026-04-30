@@ -17,6 +17,11 @@ export const geminiSimpleProvider: SimpleContentLLMProvider = {
       text: r.text,
       rawResponseText: r.rawResponseText,
       finishReason: r.finishReason ?? extractGeminiFinishReason(r.rawResponseText),
+      usage: {
+        inputTokens: r.usageMetadata.inputTokens,
+        outputTokens: r.usageMetadata.outputTokens,
+        totalTokens: r.usageMetadata.totalTokens,
+      },
     };
   },
 };

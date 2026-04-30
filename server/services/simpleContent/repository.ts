@@ -1,6 +1,9 @@
 import { getPool } from "../../db/pool";
 import type { SimpleContentAutomation, SimpleContentPreset } from "./types";
 
+export const APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM = "simple_content_draft_system_template";
+export const APP_KEY_SIMPLE_CONTENT_DRAFT_USER = "simple_content_draft_user_template";
+
 function mapPreset(row: {
   id: number;
   provider: string;
@@ -163,6 +166,10 @@ export async function finalizeSimpleContentRun(
     requestPrompt: string | null;
     modelResponse: string | null;
     normalizedQuestions: unknown | null;
+    usageInputTokens: number | null;
+    usageOutputTokens: number | null;
+    usageTotalTokens: number | null;
+    estimatedCostUsd: number | null;
   },
 ): Promise<void> {
   const pool = getPool();
@@ -175,6 +182,10 @@ export async function finalizeSimpleContentRun(
        request_prompt = $6,
        model_response = $7,
        normalized_questions = $8::jsonb,
+       usage_input_tokens = $9,
+       usage_output_tokens = $10,
+       usage_total_tokens = $11,
+       estimated_cost_usd = $12,
        finished_at = NOW()
      WHERE id = $1`,
     [
@@ -186,7 +197,28 @@ export async function finalizeSimpleContentRun(
       data.requestPrompt,
       data.modelResponse,
       data.normalizedQuestions != null ? JSON.stringify(data.normalizedQuestions) : null,
+      data.usageInputTokens,
+      data.usageOutputTokens,
+      data.usageTotalTokens,
+      data.estimatedCostUsd,
     ],
+  );
+}
+
+export async function getAppSettingValue(key: string): Promise<string | null> {
+  const pool = getPool();
+  const r = await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = $1 LIMIT 1`, [key]);
+  const v = r.rows[0]?.value;
+  if (v == null || !String(v).trim()) return null;
+  return String(v);
+}
+
+export async function upsertAppSettingValue(key: string, value: string): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [key, value],
   );
 }
 
@@ -204,6 +236,10 @@ export type SimpleContentRunDetail = {
   requestPrompt: string | null;
   modelResponse: string | null;
   normalizedQuestions: unknown | null;
+  usageInputTokens: number | null;
+  usageOutputTokens: number | null;
+  usageTotalTokens: number | null;
+  estimatedCostUsd: number | null;
   createdAt: string;
   finishedAt: string | null;
 };
@@ -224,11 +260,17 @@ export async function getRunById(runId: number): Promise<SimpleContentRunDetail 
     request_prompt: string | null;
     model_response: string | null;
     normalized_questions: unknown | null;
+    usage_input_tokens: number | null;
+    usage_output_tokens: number | null;
+    usage_total_tokens: number | null;
+    estimated_cost_usd: string | null;
     created_at: Date;
     finished_at: Date | null;
   }>(
     `SELECT id::text, subcategory_key, trigger_kind, status, provider, model_id, preset_id,
             inserted_count::text, error, preview_json, request_prompt, model_response, normalized_questions,
+            usage_input_tokens, usage_output_tokens, usage_total_tokens,
+            estimated_cost_usd::text,
             created_at, finished_at
      FROM simple_content_runs WHERE id = $1 LIMIT 1`,
     [runId],
@@ -236,6 +278,9 @@ export async function getRunById(runId: number): Promise<SimpleContentRunDetail 
   const row = r.rows[0];
   if (!row) return null;
   const st = row.status as SimpleContentRunStatus;
+  const costRaw = row.estimated_cost_usd;
+  const estimatedCostUsd =
+    costRaw != null && costRaw !== "" && Number.isFinite(Number(costRaw)) ? Number(costRaw) : null;
   return {
     id: Number(row.id),
     subcategoryKey: row.subcategory_key,
@@ -250,6 +295,10 @@ export async function getRunById(runId: number): Promise<SimpleContentRunDetail 
     requestPrompt: row.request_prompt,
     modelResponse: row.model_response,
     normalizedQuestions: row.normalized_questions,
+    usageInputTokens: row.usage_input_tokens,
+    usageOutputTokens: row.usage_output_tokens,
+    usageTotalTokens: row.usage_total_tokens,
+    estimatedCostUsd,
     createdAt: row.created_at.toISOString(),
     finishedAt: row.finished_at?.toISOString() ?? null,
   };

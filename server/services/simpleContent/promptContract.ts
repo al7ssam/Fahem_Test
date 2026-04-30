@@ -28,6 +28,29 @@ export function buildDraftPromptUserMessage(input: {
   ].join("\n");
 }
 
+/** Default user-side draft template with explicit placeholders for DB override. */
+export function buildDraftPromptUserMessageTemplate(): string {
+  return buildDraftPromptUserMessage({
+    mainCategoryName: "{{mainCategoryName}}",
+    subcategoryName: "{{subcategoryName}}",
+    internalDescription: "{{internalDescription}}",
+  });
+}
+
+export function applyDraftUserTemplatePlaceholders(
+  template: string,
+  ctx: { mainCategoryName: string; subcategoryName: string; internalDescription: string },
+): string {
+  const desc = ctx.internalDescription || "—";
+  return String(template)
+    .replaceAll("{{mainCategoryName}}", ctx.mainCategoryName)
+    .replaceAll("{{subcategoryName}}", ctx.subcategoryName)
+    .replaceAll("{{internalDescription}}", desc);
+}
+
+export const SIMPLE_CONTENT_DRAFT_PLACEHOLDERS_HELP =
+  "في قالب رسالة المستخدم: {{mainCategoryName}} و {{subcategoryName}} و {{internalDescription}} (يُستبدل الوصف الفارغ بـ —).";
+
 /** Static strings for admin transparency (no secrets). */
 export function getAdminPromptTemplatesPayload(): {
   draftSystemMessage: string;
@@ -36,11 +59,7 @@ export function getAdminPromptTemplatesPayload(): {
 } {
   return {
     draftSystemMessage: buildDraftPromptSystemMessage(),
-    draftUserMessageTemplate: buildDraftPromptUserMessage({
-      mainCategoryName: "{{mainCategoryName}}",
-      subcategoryName: "{{subcategoryName}}",
-      internalDescription: "{{internalDescription}}",
-    }),
+    draftUserMessageTemplate: buildDraftPromptUserMessageTemplate(),
     questionJsonContract: SIMPLE_QUESTION_JSON_CONTRACT,
   };
 }
