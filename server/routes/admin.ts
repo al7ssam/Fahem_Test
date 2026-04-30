@@ -313,6 +313,10 @@ const bulkDeleteSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(500),
 });
 
+const questionsBatchGetSchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(100),
+});
+
 function timingSafeEqualString(a: string, b: string): boolean {
   try {
     const bufA = Buffer.from(a, "utf8");
@@ -355,6 +359,10 @@ function adminSimpleContentTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-simple-content.html");
 }
 
+function adminCategoriesTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-categories.html");
+}
+
 async function countQuestions(): Promise<number | null> {
   try {
     const pool = getPool();
@@ -387,6 +395,12 @@ function readAdminUsageAnalyticsHtml(questionCount: number | null): string {
 
 function readAdminSimpleContentHtml(questionCount: number | null): string {
   const raw = fs.readFileSync(adminSimpleContentTemplatePath(), "utf8");
+  const display = questionCount === null ? "—" : String(questionCount);
+  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+}
+
+function readAdminCategoriesHtml(questionCount: number | null): string {
+  const raw = fs.readFileSync(adminCategoriesTemplatePath(), "utf8");
   const display = questionCount === null ? "—" : String(questionCount);
   return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
 }
@@ -579,6 +593,134 @@ async function countAffectedForSubDelete(
   return { questions: Number(q.rows[0]?.c ?? 0) };
 }
 
+async function getCategoriesCoverageSummary(
+  pool: ReturnType<typeof getPool>,
+  minPerDifficulty: number,
+): Promise<{
+  totals: { mainCategories: number; subcategories: number; questions: number };
+  bySubcategory: Array<{
+    subcategoryId: number;
+    subcategoryKey: string;
+    subcategoryName: string;
+    mainCategoryId: number;
+    mainCategoryKey: string;
+    mainCategoryName: string;
+    totalQuestions: number;
+    easyCount: number;
+    mediumCount: number;
+    hardCount: number;
+    unknownCount: number;
+    missing: Array<{ difficulty: "easy" | "medium" | "hard"; count: number; missingBy: number }>;
+  }>;
+  gaps: Array<{
+    subcategoryId: number;
+    subcategoryKey: string;
+    subcategoryName: string;
+    mainCategoryId: number;
+    mainCategoryKey: string;
+    mainCategoryName: string;
+    totalQuestions: number;
+    easyCount: number;
+    mediumCount: number;
+    hardCount: number;
+    unknownCount: number;
+    missing: Array<{ difficulty: "easy" | "medium" | "hard"; count: number; missingBy: number }>;
+  }>;
+}> {
+  const totalR = await pool.query<{ main_categories: string; subcategories: string; questions: string }>(
+    `SELECT
+       (SELECT COUNT(*)::text FROM question_main_categories) AS main_categories,
+       (SELECT COUNT(*)::text FROM question_subcategories) AS subcategories,
+       (SELECT COUNT(*)::text FROM questions) AS questions`,
+  );
+
+  const bySub = await pool.query<{
+    subcategory_id: number;
+    subcategory_key: string;
+    subcategory_name: string;
+    main_category_id: number;
+    main_category_key: string;
+    main_category_name: string;
+    total_questions: string;
+    easy_count: string;
+    medium_count: string;
+    hard_count: string;
+    unknown_count: string;
+  }>(
+    `SELECT
+       sc.id AS subcategory_id,
+       sc.subcategory_key,
+       sc.name_ar AS subcategory_name,
+       mc.id AS main_category_id,
+       mc.main_key AS main_category_key,
+       mc.name_ar AS main_category_name,
+       COALESCE(COUNT(q.id), 0)::text AS total_questions,
+       COALESCE(COUNT(*) FILTER (WHERE q.difficulty = 'easy'), 0)::text AS easy_count,
+       COALESCE(COUNT(*) FILTER (WHERE q.difficulty = 'medium'), 0)::text AS medium_count,
+       COALESCE(COUNT(*) FILTER (WHERE q.difficulty = 'hard'), 0)::text AS hard_count,
+       COALESCE(COUNT(*) FILTER (
+         WHERE q.id IS NOT NULL AND (
+           q.difficulty IS NULL OR q.difficulty NOT IN ('easy', 'medium', 'hard')
+         )
+       ), 0)::text AS unknown_count
+     FROM question_subcategories sc
+     JOIN question_main_categories mc ON mc.id = sc.main_category_id
+     LEFT JOIN questions q ON q.subcategory_key = sc.subcategory_key
+     GROUP BY sc.id, sc.subcategory_key, sc.name_ar, mc.id, mc.main_key, mc.name_ar
+     ORDER BY mc.sort_order ASC, mc.id ASC, sc.sort_order ASC, sc.id ASC`,
+  );
+
+  const list = bySub.rows.map((row) => {
+    const easyCount = Number(row.easy_count ?? 0);
+    const mediumCount = Number(row.medium_count ?? 0);
+    const hardCount = Number(row.hard_count ?? 0);
+    const unknownCount = Number(row.unknown_count ?? 0);
+    const missing: Array<{ difficulty: "easy" | "medium" | "hard"; count: number; missingBy: number }> = [];
+    const pushMissing = (difficulty: "easy" | "medium" | "hard", count: number) => {
+      if (count < minPerDifficulty) {
+        missing.push({
+          difficulty,
+          count,
+          missingBy: Math.max(0, minPerDifficulty - count),
+        });
+      }
+    };
+    pushMissing("easy", easyCount);
+    pushMissing("medium", mediumCount);
+    pushMissing("hard", hardCount);
+    return {
+      subcategoryId: row.subcategory_id,
+      subcategoryKey: row.subcategory_key,
+      subcategoryName: row.subcategory_name,
+      mainCategoryId: row.main_category_id,
+      mainCategoryKey: row.main_category_key,
+      mainCategoryName: row.main_category_name,
+      totalQuestions: Number(row.total_questions ?? 0),
+      easyCount,
+      mediumCount,
+      hardCount,
+      unknownCount,
+      missing,
+    };
+  });
+
+  return {
+    totals: {
+      mainCategories: Number(totalR.rows[0]?.main_categories ?? 0),
+      subcategories: Number(totalR.rows[0]?.subcategories ?? 0),
+      questions: Number(totalR.rows[0]?.questions ?? 0),
+    },
+    bySubcategory: list,
+    gaps: list.filter((row) => row.missing.length > 0),
+  };
+}
+
+const categoriesCoverageCache = new Map<
+  number,
+  { cachedAt: number; data: Awaited<ReturnType<typeof getCategoriesCoverageSummary>> }
+>();
+const CATEGORIES_COVERAGE_CACHE_TTL_MS = 10_000;
+
 export function registerAdminRoutes(app: Express): void {
   app.get("/api/categories", async (_req: Request, res: Response) => {
     try {
@@ -661,6 +803,16 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminSimpleContentHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة المسار البسيط لتوليد المحتوى.");
+    }
+  });
+
+  app.get("/admin/categories", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminCategoriesHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة إدارة التصنيفات.");
     }
   });
 
@@ -1961,6 +2113,31 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/admin/categories/coverage", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const minRaw = Number(req.query.minPerDifficulty);
+    const minPerDifficulty = Math.max(1, Math.min(500, Number.isFinite(minRaw) ? minRaw : 30));
+    try {
+      const now = Date.now();
+      const cached = categoriesCoverageCache.get(minPerDifficulty);
+      let summary: Awaited<ReturnType<typeof getCategoriesCoverageSummary>>;
+      if (cached && now - cached.cachedAt <= CATEGORIES_COVERAGE_CACHE_TTL_MS) {
+        summary = cached.data;
+      } else {
+        const pool = getPool();
+        summary = await getCategoriesCoverageSummary(pool, minPerDifficulty);
+        categoriesCoverageCache.set(minPerDifficulty, { cachedAt: now, data: summary });
+      }
+      res.json({
+        ok: true,
+        minPerDifficulty,
+        ...summary,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
   app.post("/api/admin/categories/main", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
     const parsed = mainCategorySchema.safeParse(req.body);
@@ -2267,6 +2444,12 @@ export function registerAdminRoutes(app: Express): void {
       typeof req.query.mainCategoryKey === "string" ? req.query.mainCategoryKey.trim() : "";
     const subcategoryKey =
       typeof req.query.subcategoryKey === "string" ? req.query.subcategoryKey.trim() : "";
+    const difficultyRaw =
+      typeof req.query.difficulty === "string" ? req.query.difficulty.trim().toLowerCase() : "";
+    const difficulty =
+      difficultyRaw === "easy" || difficultyRaw === "medium" || difficultyRaw === "hard"
+        ? difficultyRaw
+        : "";
     try {
       const pool = getPool();
       const params: unknown[] = [];
@@ -2285,6 +2468,10 @@ export function registerAdminRoutes(app: Express): void {
         params.push(mainCategoryKey);
         whereParts.push(`mc.main_key = $${params.length}`);
       }
+      if (difficulty) {
+        params.push(difficulty);
+        whereParts.push(`q.difficulty = $${params.length}`);
+      }
       const where = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
       params.push(limit, offset);
       const limIdx = params.length - 1;
@@ -2293,6 +2480,7 @@ export function registerAdminRoutes(app: Express): void {
         SELECT q.id,
                LEFT(q.prompt, 160) AS prompt_preview,
                (q.study_body IS NOT NULL AND btrim(q.study_body) <> '') AS has_study,
+               COALESCE(q.difficulty, '') AS difficulty,
                COALESCE(mc.name_ar, '') AS main_name_ar,
                COALESCE(sc.name_ar, '') AS sub_name_ar,
                COALESCE(q.subcategory_key, '') AS subcategory_key
@@ -2307,6 +2495,7 @@ export function registerAdminRoutes(app: Express): void {
         id: number;
         prompt_preview: string;
         has_study: boolean;
+        difficulty: string;
         main_name_ar: string;
         sub_name_ar: string;
         subcategory_key: string;
@@ -2327,6 +2516,7 @@ export function registerAdminRoutes(app: Express): void {
           id: row.id,
           promptPreview: row.prompt_preview,
           hasStudyCards: row.has_study,
+          difficulty: row.difficulty || null,
           mainCategoryName: row.main_name_ar,
           subcategoryName: row.sub_name_ar,
           subcategoryKey: row.subcategory_key,
@@ -2337,6 +2527,56 @@ export function registerAdminRoutes(app: Express): void {
       });
     } catch {
       res.status(500).json({ ok: false, error: "list_failed" });
+    }
+  });
+
+  app.post("/api/admin/questions/batch", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = questionsBatchGetSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const ids = parsed.data.ids;
+    try {
+      const pool = getPool();
+      const r = await pool.query<{
+        id: number;
+        prompt: string;
+        options: unknown;
+        correct_index: number;
+        difficulty: string | null;
+        study_body: string | null;
+        subcategory_key: string;
+      }>(
+        `SELECT id, prompt, options, correct_index, difficulty, study_body, subcategory_key
+         FROM questions
+         WHERE id = ANY($1::int[])`,
+        [ids],
+      );
+      const byId = new Map(
+        r.rows.map((row) => {
+          const options = Array.isArray(row.options)
+            ? (row.options as string[])
+            : (JSON.parse(String(row.options)) as string[]);
+          return [
+            row.id,
+            {
+              id: row.id,
+              prompt: row.prompt,
+              options,
+              correctIndex: row.correct_index,
+              difficulty: row.difficulty,
+              studyBody: row.study_body ?? "",
+              subcategoryKey: row.subcategory_key,
+            },
+          ];
+        }),
+      );
+      const items = ids.map((id) => byId.get(id)).filter(Boolean);
+      res.json({ ok: true, items });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
 

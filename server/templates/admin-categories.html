@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>إدارة التصنيفات | فاهم</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root { --bg-from:#020309; --bg-mid:#090d1f; --bg-to:#121529; --card:rgba(10,13,28,.85); --border:rgba(223,187,106,.2); --text:#f8f4ea; --muted:#b7ac90; --amber:#e8be66; --ok:#34d399; --danger:#f87171; }
+      * { box-sizing:border-box; } body { margin:0; min-height:100vh; font-family:"Tajawal",system-ui,sans-serif; background:linear-gradient(to bottom,var(--bg-from),var(--bg-mid),var(--bg-to)); color:var(--text); }
+      .wrap { max-width:82rem; margin:0 auto; padding:1.1rem 1rem 2rem; } .subtitle { color:var(--muted); margin:.2rem 0 .7rem; }
+      .topbar { position:sticky; top:.5rem; z-index:25; display:flex; flex-wrap:wrap; gap:.55rem; align-items:end; padding:.7rem; background:var(--card); border:1px solid var(--border); border-radius:.9rem; margin-bottom:.8rem; }
+      .topbar label { display:block; color:var(--muted); font-size:.82rem; margin-bottom:.2rem; }
+      input,select,textarea { background:rgba(0,0,0,.25); border:1px solid var(--border); color:var(--text); border-radius:.55rem; padding:.45rem .55rem; font-family:inherit; }
+      .btn { border:none; border-radius:.55rem; padding:.5rem .85rem; font-weight:700; cursor:pointer; font-family:inherit; background:linear-gradient(to left,#e8be66,#a8792f); color:#120b02; }
+      .btn-secondary { background:rgba(255,255,255,.1); color:var(--text); border:1px solid var(--border); } .btn-danger { background:rgba(248,113,113,.14); color:#fecaca; border:1px solid rgba(248,113,113,.45); }
+      .btn:disabled { opacity:.5; cursor:not-allowed; } .msg { min-height:1.2rem; flex-basis:100%; font-size:.88rem; } .ok { color:var(--ok); } .err { color:#fca5a5; }
+      .card { margin-top:.65rem; padding:.7rem; background:var(--card); border:1px solid var(--border); border-radius:.9rem; }
+      .row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; } .split { display:grid; grid-template-columns:1.2fr 1fr; gap:.7rem; }
+      .icon-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(135px,1fr)); gap:.5rem; }
+      .icon-card { background:rgba(0,0,0,.2); border:1px solid var(--border); border-radius:.8rem; padding:.55rem; text-align:center; }
+      .icon-card.active { border-color:var(--amber); } .nm { font-weight:700; } .muted { color:var(--muted); font-size:.82rem; }
+      .chip { display:inline-block; border:1px solid var(--border); border-radius:999px; padding:.1rem .45rem; font-size:.76rem; margin:.08rem; } .chip.warn { color:#fcd34d; border-color:rgba(252,211,77,.45); }
+      .stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:.5rem; } .stat { border:1px solid var(--border); border-radius:.75rem; padding:.5rem .65rem; background:rgba(0,0,0,.2); }
+      .stat .k { color:var(--muted); font-size:.8rem; } .stat .v { color:var(--amber); font-weight:800; font-size:1.15rem; }
+      .list { border:1px solid var(--border); border-radius:.75rem; max-height:250px; overflow:auto; } .list-item { padding:.45rem .55rem; border-bottom:1px solid rgba(223,187,106,.1); } .list-item:last-child { border-bottom:none; }
+      .questions { border:1px solid var(--border); border-radius:.75rem; max-height:300px; overflow:auto; } .q-row { padding:.5rem .55rem; border-bottom:1px solid rgba(223,187,106,.1); } .q-row:last-child { border-bottom:none; }
+      .preview { border:1px solid var(--border); border-radius:.8rem; padding:.6rem; margin-top:.55rem; } .preview-phone { border:1px solid var(--border); border-radius:.8rem; padding:.65rem; min-height:210px; background:rgba(0,0,0,.2); }
+      .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:80; } .modal-bg.show { display:flex; }
+      .modal { width:min(680px,95vw); max-height:88vh; overflow:auto; background:var(--card); border:1px solid var(--border); border-radius:.9rem; padding:.75rem; }
+      @media (max-width:980px) { .split { grid-template-columns:1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1 style="margin:0;color:var(--amber)">إدارة التصنيفات</h1>
+      <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong></p>
+
+      <div class="topbar">
+        <div>
+          <label for="sec">مفتاح الإدارة</label>
+          <input id="sec" type="password" autocomplete="off" placeholder="X-Admin-Secret" />
+        </div>
+        <button class="btn" id="load-btn" type="button">تحميل البيانات</button>
+        <button class="btn btn-secondary" id="go-admin" type="button">لوحة الإدارة الرئيسية</button>
+        <button class="btn btn-secondary" id="go-bank" type="button">فتح بنك الأسئلة</button>
+        <div class="msg" id="msg" aria-live="polite"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between">
+          <strong>لوحة المؤشرات</strong>
+          <div class="row">
+            <label class="muted">حد النقص/صعوبة</label>
+            <input id="min-gap" type="number" min="1" max="500" value="30" style="width:90px" />
+            <button class="btn btn-secondary" id="refresh-cov" type="button">تحديث المؤشرات</button>
+          </div>
+        </div>
+        <div class="stats-grid" id="stats"></div>
+      </div>
+
+      <div class="split">
+        <div class="card">
+          <div class="row" style="justify-content:space-between">
+            <strong>التصنيفات الرئيسية</strong>
+            <button class="btn btn-secondary" id="new-main" type="button">إضافة رئيسي</button>
+          </div>
+          <div class="row" style="margin:.5rem 0">
+            <input id="q-search" type="search" placeholder="بحث..." />
+            <select id="active-filter">
+              <option value="">الحالة: الكل</option>
+              <option value="true">مفعّل</option>
+              <option value="false">معطّل</option>
+            </select>
+            <button class="btn btn-secondary" id="apply-filter" type="button">تطبيق</button>
+          </div>
+          <div class="icon-grid" id="main-grid"></div>
+        </div>
+        <div class="card">
+          <div class="muted" id="crumb">اختر تصنيفًا رئيسيًا</div>
+          <div class="row" style="justify-content:space-between; margin:.35rem 0">
+            <strong>التصنيفات الفرعية</strong>
+            <div class="row">
+              <button class="btn btn-secondary" id="multi-mode" type="button">تحديد متعدد</button>
+              <button class="btn btn-secondary" id="bulk-activate" type="button">تفعيل المحدد</button>
+              <button class="btn btn-secondary" id="bulk-deactivate" type="button">تعطيل المحدد</button>
+              <button class="btn btn-danger" id="bulk-delete" type="button">حذف المحدد</button>
+              <button class="btn btn-secondary" id="new-sub" type="button">إضافة فرعي</button>
+            </div>
+          </div>
+          <div class="icon-grid" id="sub-grid"></div>
+        </div>
+      </div>
+
+      <div class="split">
+        <div class="card">
+          <strong>تنبيهات الفجوات</strong>
+          <div class="list" id="gaps"></div>
+        </div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between">
+            <strong>أسئلة الفرع</strong>
+            <button class="btn btn-secondary" id="preview-open" type="button">معاينة</button>
+          </div>
+          <div class="row" style="margin:.45rem 0">
+            <select id="q-difficulty">
+              <option value="">الصعوبة: الكل</option>
+              <option value="easy">سهل</option>
+              <option value="medium">متوسط</option>
+              <option value="hard">صعب</option>
+            </select>
+            <button class="btn btn-secondary" id="q-load" type="button">تحميل</button>
+            <button class="btn btn-secondary" id="q-prev" type="button">السابق</button>
+            <button class="btn btn-secondary" id="q-next" type="button">التالي</button>
+            <span class="muted" id="q-page"></span>
+          </div>
+          <div class="questions" id="q-list"></div>
+          <div class="preview" id="preview-shell" hidden>
+            <div class="preview-phone" id="preview-phone"><div class="muted" style="margin-top:1.8rem;text-align:center">حمّل الأسئلة أولًا ثم افتح المعاينة.</div></div>
+            <div class="row" style="justify-content:center; margin-top:.45rem">
+              <button class="btn btn-secondary" id="pv-prev" type="button">السابق</button>
+              <button class="btn btn-secondary" id="pv-next" type="button">التالي</button>
+              <button class="btn btn-secondary" id="pv-close" type="button">إغلاق</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-bg" id="modal-bg">
+      <div class="modal">
+        <h3 id="modal-title" style="margin:0 0 .45rem"></h3>
+        <div class="row">
+          <div style="flex:1; min-width:220px">
+            <label>الاسم</label>
+            <input id="m-name" type="text" style="width:100%" />
+          </div>
+          <div style="width:110px">
+            <label>الأيقونة</label>
+            <input id="m-icon" type="text" style="width:100%" />
+          </div>
+          <div style="width:120px">
+            <label>الترتيب</label>
+            <input id="m-sort" type="number" min="0" style="width:100%" />
+          </div>
+        </div>
+        <div class="row" id="sub-extra" style="display:none; margin-top:.45rem">
+          <div id="m-desc-wrap" style="flex:1">
+            <label>الوصف الداخلي</label>
+            <textarea id="m-desc" rows="4" style="width:100%"></textarea>
+          </div>
+          <div id="m-key-wrap" style="width:165px">
+            <label id="m-key-label">مفتاح الفرعي</label>
+            <input id="m-key" type="text" style="width:100%" />
+          </div>
+        </div>
+        <div class="row" style="margin-top:.55rem">
+          <button class="btn" id="m-save" type="button">حفظ</button>
+          <button class="btn btn-secondary" id="m-close" type="button">إلغاء</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (() => {
+        const S = { categories: [], cov: {}, selectedMain: null, selectedSub: null, selectedSubIds: {}, multiMode: false, questions: [], total: 0, offset: 0, limit: 20, preview: [], pidx: 0, modal: null };
+        const $ = (id) => document.getElementById(id);
+        const msg = (t, ok) => { $("msg").textContent = t || ""; $("msg").className = "msg " + (ok ? "ok" : "err"); };
+        let pendingRequests = 0;
+        function setBusy(on) {
+          document.querySelectorAll("button").forEach((b) => {
+            if (b.id === "m-close") return;
+            b.disabled = !!on;
+          });
+        }
+        const sec = () => String($("sec").value || "").trim();
+        const hdr = () => ({ "X-Admin-Secret": sec(), "Content-Type": "application/json" });
+        const esc = (s) => String(s || "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+        async function api(url, method = "GET", body) {
+          pendingRequests += 1;
+          setBusy(true);
+          try {
+            const r = await fetch(url, { method, headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok || !j.ok) {
+              const err = String(j.error || "request_failed");
+              if (err === "forbidden") throw new Error("صلاحية غير صحيحة (X-Admin-Secret).");
+              if (err === "invalid_body") throw new Error("بيانات غير صالحة.");
+              if (err === "not_found") throw new Error("العنصر غير موجود.");
+              throw new Error(err);
+            }
+            return j;
+          } finally {
+            pendingRequests = Math.max(0, pendingRequests - 1);
+            if (pendingRequests === 0) setBusy(false);
+          }
+        }
+        function renderStats(summary) {
+          const el = $("stats");
+          if (!summary) return (el.innerHTML = "");
+          const rows = [["التصنيفات الرئيسية", summary.totals.mainCategories], ["التصنيفات الفرعية", summary.totals.subcategories], ["إجمالي الأسئلة", summary.totals.questions], ["فروع بها فجوات", (summary.gaps || []).length]];
+          el.innerHTML = rows.map((r) => `<div class="stat"><div class="k">${r[0]}</div><div class="v">${r[1]}</div></div>`).join("");
+        }
+        function renderGaps(gaps) {
+          const el = $("gaps");
+          if (!gaps || !gaps.length) return (el.innerHTML = `<div class="list-item muted">لا توجد فجوات وفق الحد الحالي.</div>`);
+          el.innerHTML = gaps.map((g) => `<div class="list-item"><b>${esc(g.mainCategoryName)} › ${esc(g.subcategoryName)}</b><div class="muted">${esc(g.subcategoryKey)}</div><div>${(g.missing || []).map((m) => `<span class="chip warn">${m.difficulty}: ${m.count} (ناقص ${m.missingBy})</span>`).join(" ")}</div></div>`).join("");
+        }
+        async function loadCoverage() {
+          const min = Number($("min-gap").value || 30);
+          const j = await api(`/api/admin/categories/coverage?minPerDifficulty=${encodeURIComponent(String(min))}`);
+          S.cov = {};
+          (j.bySubcategory || []).forEach((x) => (S.cov[x.subcategoryKey] = x));
+          renderStats(j); renderGaps(j.gaps || []);
+        }
+        function filteredMains() {
+          const q = String($("q-search").value || "").trim().toLowerCase();
+          const af = String($("active-filter").value || "").trim();
+          let rows = S.categories.slice();
+          if (af) rows = rows.filter((m) => String(!!m.isActive) === af);
+          if (!q) return rows;
+          return rows.filter((m) => (String(m.nameAr || "").toLowerCase().includes(q) || String(m.mainKey || "").toLowerCase().includes(q) || (m.subcategories || []).some((s) => String(s.nameAr || "").toLowerCase().includes(q) || String(s.subcategoryKey || "").toLowerCase().includes(q))));
+        }
+        function renderMains() {
+          const mains = filteredMains();
+          $("main-grid").innerHTML = mains.length ? mains.map((m) => `<div class="icon-card ${S.selectedMain && S.selectedMain.id === m.id ? "active" : ""}"><button style="all:unset;cursor:pointer;display:block;width:100%" data-main="${m.id}" type="button"><div style="font-size:1.4rem">${esc(m.icon || "📚")}</div><div class="nm">${esc(m.nameAr)}</div><div class="muted">${esc(m.mainKey)}</div><div><span class="chip">${m.isActive ? "مفعّل" : "معطّل"}</span></div></button><div class="row" style="justify-content:center;margin-top:.35rem"><button class="btn btn-secondary" data-main-act="edit" data-main-id="${m.id}" type="button">تعديل</button><button class="btn btn-secondary" data-main-act="toggle" data-main-id="${m.id}" type="button">${m.isActive ? "تعطيل" : "تفعيل"}</button><button class="btn btn-secondary" data-main-act="up" data-main-id="${m.id}" type="button">↑</button><button class="btn btn-secondary" data-main-act="down" data-main-id="${m.id}" type="button">↓</button><button class="btn btn-danger" data-main-act="del" data-main-id="${m.id}" type="button">حذف</button></div></div>`).join("") : `<div class="muted">لا توجد نتائج.</div>`;
+          document.querySelectorAll("[data-main]").forEach((b) => b.addEventListener("click", () => { const id = Number(b.getAttribute("data-main")); S.selectedMain = mains.find((m) => m.id === id) || null; S.selectedSub = null; S.selectedSubIds = {}; renderMains(); renderSubs(); renderQuestions(); }));
+          document.querySelectorAll("[data-main-act]").forEach((b) => b.addEventListener("click", async () => {
+            const id = Number(b.getAttribute("data-main-id"));
+            const act = String(b.getAttribute("data-main-act"));
+            const m = mains.find((x) => x.id === id);
+            if (!m) return;
+            try {
+              if (act === "edit") return openMainEdit(m);
+              if (act === "toggle") { await api(`/api/admin/categories/main/${id}`, "PATCH", { isActive: !m.isActive }); return loadCategories(); }
+              if (act === "up") { await api("/api/admin/categories/reorder", "PATCH", { target: "main", items: [{ id, sortOrder: Math.max(0, Number(m.sortOrder || 0) - 10) }] }); return loadCategories(); }
+              if (act === "down") { await api("/api/admin/categories/reorder", "PATCH", { target: "main", items: [{ id, sortOrder: Number(m.sortOrder || 0) + 10 }] }); return loadCategories(); }
+              if (act === "del") {
+                const p = await api(`/api/admin/categories/main/${id}?dryRun=true`, "DELETE");
+                const a = p.affectedCounts || {};
+                if (!confirm(`سيتم حذف الرئيسي وكل ما تحته. الفرعيات: ${a.subcategories || 0}، الأسئلة: ${a.questions || 0}. متابعة؟`)) return;
+                await api(`/api/admin/categories/main/${id}`, "DELETE");
+                return reloadAll();
+              }
+            } catch { msg("تعذر تنفيذ إجراء الرئيسي.", false); }
+          }));
+        }
+        function subActions(s) {
+          return `<button class="btn btn-secondary" data-act="view" data-sub="${s.id}" type="button">الأسئلة</button><button class="btn btn-secondary" data-act="edit" data-sub="${s.id}" type="button">تعديل</button><button class="btn btn-secondary" data-act="toggle" data-sub="${s.id}" type="button">${s.isActive ? "تعطيل" : "تفعيل"}</button><button class="btn btn-secondary" data-act="up" data-sub="${s.id}" type="button">↑</button><button class="btn btn-secondary" data-act="down" data-sub="${s.id}" type="button">↓</button><button class="btn btn-danger" data-act="del" data-sub="${s.id}" type="button">حذف</button>`;
+        }
+        function renderSubs() {
+          const grid = $("sub-grid");
+          if (!S.selectedMain) { $("crumb").textContent = "اختر تصنيفًا رئيسيًا"; grid.innerHTML = `<div class="muted">لا يوجد تحديد.</div>`; return; }
+          $("crumb").textContent = `التصنيفات الرئيسية › ${S.selectedMain.nameAr} › الفرعية`;
+          const subs = S.selectedMain.subcategories || [];
+          grid.innerHTML = subs.length ? subs.map((s) => {
+            const c = S.cov[s.subcategoryKey] || { totalQuestions: 0, easyCount: 0, mediumCount: 0, hardCount: 0, missing: [] };
+            return `<div class="icon-card ${S.selectedSub && S.selectedSub.id === s.id ? "active" : ""}"><div class="row" style="justify-content:space-between">${S.multiMode ? `<input data-sel="${s.id}" type="checkbox" ${S.selectedSubIds[s.id] ? "checked" : ""} />` : ""}<span class="chip">${s.isActive ? "مفعّل" : "معطّل"}</span></div><div style="font-size:1.3rem">${esc(s.icon || "📘")}</div><div class="nm">${esc(s.nameAr)}</div><div class="muted">${esc(s.subcategoryKey)}</div><div><span class="chip">إجمالي: ${c.totalQuestions}</span><span class="chip">سهل: ${c.easyCount}</span><span class="chip">متوسط: ${c.mediumCount}</span><span class="chip">صعب: ${c.hardCount}</span>${(c.missing || []).length ? `<span class="chip warn">فجوات: ${(c.missing || []).length}</span>` : ""}</div><div class="row" style="justify-content:center">${subActions(s)}</div></div>`;
+          }).join("") : `<div class="muted">لا توجد تصنيفات فرعية.</div>`;
+          document.querySelectorAll("[data-sel]").forEach((x) => x.addEventListener("change", () => { const id = Number(x.getAttribute("data-sel")); if (x.checked) S.selectedSubIds[id] = true; else delete S.selectedSubIds[id]; }));
+          document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => handleSubAction(String(b.getAttribute("data-act")), Number(b.getAttribute("data-sub")))));
+        }
+        async function loadCategories() {
+          const q = String($("q-search").value || "").trim();
+          const af = String($("active-filter").value || "").trim();
+          let url = `/api/admin/categories?q=${encodeURIComponent(q)}`;
+          if (af) url += `&isActive=${encodeURIComponent(af)}`;
+          const j = await api(url);
+          S.categories = j.categories || [];
+          if (S.selectedMain) S.selectedMain = S.categories.find((m) => m.id === S.selectedMain.id) || null;
+          if (S.selectedMain && S.selectedSub) S.selectedSub = (S.selectedMain.subcategories || []).find((s) => s.id === S.selectedSub.id) || null;
+          renderMains(); renderSubs();
+        }
+        async function reloadAll() {
+          if (!sec()) return msg("أدخل مفتاح الإدارة.", false);
+          msg("جاري التحميل...", true);
+          const parts = await Promise.allSettled([loadCategories(), loadCoverage()]);
+          const failed = parts.filter((p) => p.status === "rejected").length;
+          if (failed > 0) msg("تم التحميل جزئيًا؛ تعذر تحميل بعض البيانات.", false);
+          else msg("تم التحميل.", true);
+          if (S.selectedSub) {
+            try {
+              await loadQuestions();
+            } catch {
+              msg("تم تحميل التصنيفات لكن تعذر تحميل الأسئلة.", false);
+            }
+          }
+        }
+        async function reorderSub(id, sortOrder) { await api("/api/admin/categories/reorder", "PATCH", { target: "sub", items: [{ id, sortOrder }] }); await loadCategories(); }
+        async function patchSub(id, body) { await api(`/api/admin/categories/sub/${id}`, "PATCH", body); await loadCategories(); }
+        async function deleteSub(s) { const p = await api(`/api/admin/categories/sub/${s.id}?dryRun=true`, "DELETE"); const qn = (p.affectedCounts || {}).questions || 0; if (!confirm(`سيتم حذف الفرعي وكل الأسئلة المرتبطة (${qn}). متابعة؟`)) return; await api(`/api/admin/categories/sub/${s.id}`, "DELETE"); await reloadAll(); }
+        async function handleSubAction(act, id) {
+          const s = (S.selectedMain && (S.selectedMain.subcategories || []).find((x) => x.id === id)) || null;
+          if (!s) return;
+          try {
+            if (act === "view") { S.selectedSub = s; S.offset = 0; await loadQuestions(); renderSubs(); return; }
+            if (act === "edit") return openSubModal(s);
+            if (act === "toggle") return await patchSub(id, { isActive: !s.isActive });
+            if (act === "up") return await reorderSub(id, Math.max(0, Number(s.sortOrder || 0) - 10));
+            if (act === "down") return await reorderSub(id, Number(s.sortOrder || 0) + 10);
+            if (act === "del") return await deleteSub(s);
+          } catch { msg("تعذر تنفيذ العملية.", false); }
+        }
+        function openModal(title) { $("modal-title").textContent = title; $("modal-bg").classList.add("show"); }
+        function closeModal() { $("modal-bg").classList.remove("show"); S.modal = null; }
+        function openSubModal(s) { S.modal = { kind: "sub-edit", id: s.id }; $("sub-extra").style.display = "flex"; $("m-desc-wrap").style.display = "block"; $("m-key-wrap").style.display = "block"; $("m-key-label").textContent = "مفتاح الفرعي"; $("m-name").value = s.nameAr || ""; $("m-icon").value = s.icon || "📘"; $("m-sort").value = String(s.sortOrder || 0); $("m-desc").value = s.internalDescription || ""; $("m-key").value = s.subcategoryKey || ""; $("m-key").readOnly = false; openModal("تعديل تصنيف فرعي"); }
+        function openMainCreate() { S.modal = { kind: "main-create" }; $("sub-extra").style.display = "flex"; $("m-desc-wrap").style.display = "none"; $("m-key-wrap").style.display = "block"; $("m-key-label").textContent = "مفتاح الرئيسي"; $("m-name").value = ""; $("m-icon").value = "📚"; $("m-sort").value = "0"; $("m-key").value = ""; $("m-key").readOnly = false; openModal("إضافة تصنيف رئيسي"); }
+        function openMainEdit(m) { S.modal = { kind: "main-edit", id: m.id, mainKey: m.mainKey }; $("sub-extra").style.display = "flex"; $("m-desc-wrap").style.display = "none"; $("m-key-wrap").style.display = "block"; $("m-key-label").textContent = "مفتاح الرئيسي"; $("m-name").value = m.nameAr || ""; $("m-icon").value = m.icon || "📚"; $("m-sort").value = String(m.sortOrder || 0); $("m-key").value = m.mainKey || ""; $("m-key").readOnly = false; openModal("تعديل تصنيف رئيسي"); }
+        function openSubCreate() { if (!S.selectedMain) return msg("اختر رئيسيًا أولًا.", false); S.modal = { kind: "sub-create", mainId: S.selectedMain.id }; $("sub-extra").style.display = "flex"; $("m-desc-wrap").style.display = "block"; $("m-key-wrap").style.display = "block"; $("m-key-label").textContent = "مفتاح الفرعي"; $("m-name").value = ""; $("m-icon").value = "📘"; $("m-sort").value = "0"; $("m-desc").value = ""; $("m-key").value = ""; $("m-key").readOnly = false; openModal("إضافة تصنيف فرعي"); }
+        async function saveModal() {
+          if (!S.modal) return;
+          const nameAr = String($("m-name").value || "").trim();
+          const icon = String($("m-icon").value || "").trim();
+          const sortOrder = Number($("m-sort").value || 0);
+          if (!nameAr) return msg("الاسم مطلوب.", false);
+          try {
+            if (S.modal.kind === "sub-edit") await api(`/api/admin/categories/sub/${S.modal.id}`, "PATCH", { nameAr, icon: icon || "📘", sortOrder, internalDescription: String($("m-desc").value || ""), subcategoryKey: String($("m-key").value || "").trim() });
+            if (S.modal.kind === "main-edit") await api(`/api/admin/categories/main/${S.modal.id}`, "PATCH", { mainKey: String($("m-key").value || "").trim() || S.modal.mainKey, nameAr, icon: icon || "📚", sortOrder });
+            if (S.modal.kind === "main-create") { const mainKey = String($("m-key").value || "").trim(); if (!mainKey) return msg("مفتاح الرئيسي مطلوب.", false); await api("/api/admin/categories/main", "POST", { mainKey, nameAr, icon: icon || "📚", sortOrder }); }
+            if (S.modal.kind === "sub-create") { const subcategoryKey = String($("m-key").value || "").trim(); if (!subcategoryKey) return msg("مفتاح الفرعي مطلوب.", false); await api("/api/admin/categories/sub", "POST", { mainCategoryId: S.modal.mainId, subcategoryKey, nameAr, icon: icon || "📘", sortOrder, internalDescription: String($("m-desc").value || "") }); }
+            closeModal(); await reloadAll();
+          } catch { msg("تعذر الحفظ.", false); }
+        }
+        async function bulk(action) {
+          const ids = Object.keys(S.selectedSubIds).map((x) => Number(x)).filter(Boolean);
+          if (!ids.length) return msg("حدد فروعًا أولًا.", false);
+          try {
+            if (action === "delete") { const p = await api("/api/admin/categories/bulk", "POST", { target: "sub", action: "delete", ids, dryRun: true }); const qn = (p.affectedCounts || {}).questions || 0; if (!confirm(`سيتم حذف ${ids.length} فرعي و${qn} سؤال. متابعة؟`)) return; }
+            await api("/api/admin/categories/bulk", "POST", { target: "sub", action, ids }); S.selectedSubIds = {}; await reloadAll();
+          } catch { msg("تعذر تنفيذ العملية الجماعية.", false); }
+        }
+        async function loadQuestions() {
+          if (!S.selectedSub) return renderQuestions();
+          let url = `/api/admin/questions?subcategoryKey=${encodeURIComponent(S.selectedSub.subcategoryKey)}&limit=${S.limit}&offset=${S.offset}`;
+          const d = String($("q-difficulty").value || "").trim();
+          if (d) url += `&difficulty=${encodeURIComponent(d)}`;
+          const j = await api(url);
+          S.questions = j.items || [];
+          S.total = Number(j.total || 0);
+          S.preview = [];
+          renderQuestions();
+        }
+        function renderQuestions() {
+          if (!S.selectedSub) { $("q-list").innerHTML = `<div class="q-row muted">اختر فرعيًا لعرض الأسئلة.</div>`; $("q-page").textContent = ""; return; }
+          const from = S.total ? S.offset + 1 : 0; const to = Math.min(S.total, S.offset + S.limit); $("q-page").textContent = `المعروض ${from}–${to} من ${S.total}`;
+          if (!S.questions.length) return $("q-list").innerHTML = `<div class="q-row muted">لا توجد أسئلة في الصفحة الحالية.</div>`;
+          $("q-list").innerHTML = S.questions.map((q) => `<div class="q-row"><div class="row" style="justify-content:space-between"><b>#${q.id}</b><span class="chip">${q.difficulty || "—"}</span></div><div>${esc(q.promptPreview || "")}</div><div class="row" style="margin-top:.35rem"><select data-qdiff="${q.id}"><option value="easy">سهل</option><option value="medium">متوسط</option><option value="hard">صعب</option></select><button class="btn btn-secondary" data-qsave="${q.id}" type="button">حفظ الصعوبة</button></div></div>`).join("");
+          document.querySelectorAll("[data-qdiff]").forEach((x) => { const id = Number(x.getAttribute("data-qdiff")); const row = S.questions.find((q) => q.id === id); if (row && row.difficulty) x.value = row.difficulty; });
+          document.querySelectorAll("[data-qsave]").forEach((b) => b.addEventListener("click", async () => { const id = Number(b.getAttribute("data-qsave")); const sel = document.querySelector(`[data-qdiff='${id}']`); if (!sel) return; try { await api(`/api/admin/questions/${id}`, "PATCH", { difficulty: sel.value }); msg("تم تحديث الصعوبة.", true); await loadQuestions(); await loadCoverage(); renderSubs(); } catch { msg("تعذر تحديث الصعوبة.", false); } }));
+        }
+        async function buildPreview() {
+          const ids = S.questions.map((q) => Number(q.id)).filter(Boolean);
+          if (!ids.length) return [];
+          const j = await api("/api/admin/questions/batch", "POST", { ids });
+          return Array.isArray(j.items) ? j.items : [];
+        }
+        function renderPreview() {
+          if (!S.preview.length) return $("preview-phone").innerHTML = `<div class="muted" style="margin-top:1.8rem;text-align:center">لا توجد بيانات للمعاينة.</div>`;
+          if (S.pidx < 0) S.pidx = 0; if (S.pidx >= S.preview.length) S.pidx = S.preview.length - 1;
+          const q = S.preview[S.pidx];
+          const opts = (q.options || []).map((o, i) => `<div style="border:1px solid var(--border);border-radius:.55rem;padding:.3rem .5rem;margin-top:.2rem;${i===q.correctIndex ? "border-color:rgba(52,211,153,.6);color:#86efac;" : ""}">${esc(o)}</div>`).join("");
+          $("preview-phone").innerHTML = `<div class="muted">السؤال ${S.pidx + 1} / ${S.preview.length} | ${esc(q.difficulty || "—")}</div><div style="margin-top:.35rem"><b>${esc(q.prompt || "")}</b></div><div style="margin-top:.4rem">${opts}</div><div class="muted" style="margin-top:.4rem"><b>بطاقة المذاكرة:</b><br/>${esc(q.studyBody || "—")}</div>`;
+        }
+        $("load-btn").addEventListener("click", () => void reloadAll());
+        $("refresh-cov").addEventListener("click", () => void loadCoverage().then(renderSubs).catch(() => msg("تعذر تحديث المؤشرات.", false)));
+        $("go-admin").addEventListener("click", () => (location.href = "/admin"));
+        $("go-bank").addEventListener("click", () => { if (!S.selectedSub) return (location.href = "/admin"); location.href = `/admin?subcategoryKey=${encodeURIComponent(S.selectedSub.subcategoryKey)}`; });
+        $("apply-filter").addEventListener("click", () => void loadCategories().catch(() => msg("تعذر تحميل التصنيفات.", false)));
+        $("q-search").addEventListener("input", () => renderMains());
+        $("active-filter").addEventListener("change", () => void loadCategories().catch(() => msg("تعذر تحميل التصنيفات.", false)));
+        $("new-main").addEventListener("click", openMainCreate); $("new-sub").addEventListener("click", openSubCreate);
+        $("multi-mode").addEventListener("click", () => { S.multiMode = !S.multiMode; S.selectedSubIds = {}; renderSubs(); msg(S.multiMode ? "تم تفعيل التحديد المتعدد." : "تم إيقاف التحديد المتعدد.", true); });
+        $("bulk-activate").addEventListener("click", () => void bulk("activate")); $("bulk-deactivate").addEventListener("click", () => void bulk("deactivate")); $("bulk-delete").addEventListener("click", () => void bulk("delete"));
+        $("q-load").addEventListener("click", () => { S.offset = 0; void loadQuestions().catch(() => msg("تعذر تحميل الأسئلة.", false)); });
+        $("q-prev").addEventListener("click", () => { if (S.offset <= 0) return; S.offset = Math.max(0, S.offset - S.limit); void loadQuestions().catch(() => msg("تعذر تحميل الأسئلة.", false)); });
+        $("q-next").addEventListener("click", () => { if (S.offset + S.limit >= S.total) return; S.offset += S.limit; void loadQuestions().catch(() => msg("تعذر تحميل الأسئلة.", false)); });
+        $("preview-open").addEventListener("click", async () => { if (!S.selectedSub) return msg("اختر فرعيًا أولًا.", false); S.preview = await buildPreview(); S.pidx = 0; $("preview-shell").hidden = false; renderPreview(); });
+        $("pv-prev").addEventListener("click", () => { S.pidx--; renderPreview(); }); $("pv-next").addEventListener("click", () => { S.pidx++; renderPreview(); }); $("pv-close").addEventListener("click", () => ($("preview-shell").hidden = true));
+        $("m-save").addEventListener("click", () => void saveModal()); $("m-close").addEventListener("click", closeModal); $("modal-bg").addEventListener("click", (e) => { if (e.target.id === "modal-bg") closeModal(); });
+        msg("أدخل مفتاح الإدارة ثم اضغط تحميل البيانات.", true);
+      })();
+    </script>
+  </body>
+</html>
