@@ -1740,6 +1740,7 @@ export function registerAdminRoutes(app: Express): void {
         reason,
         errorKind,
         errorKindHint: simpleContentErrorKindHintAr(errorKind),
+        runCreated: runId != null,
         ...(runId != null ? { runId } : {}),
       });
     }
@@ -1795,10 +1796,14 @@ export function registerAdminRoutes(app: Express): void {
     const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 20));
     const tk = String(req.query.triggerKind ?? "").trim();
     const st = String(req.query.status ?? "").trim();
+    const mid = String(req.query.modelId ?? "").trim();
+    const provRaw = String(req.query.provider ?? "").trim().toLowerCase();
     const triggerKind = tk === "manual" || tk === "scheduled" ? tk : undefined;
     const status = st.length > 0 ? st : undefined;
+    const modelId = mid.length > 0 ? mid : undefined;
+    const provider = provRaw === "gemini" || provRaw === "openai" ? provRaw : undefined;
     try {
-      const items = await listRuns(subcategoryKey, limit, { triggerKind, status });
+      const items = await listRuns(subcategoryKey, limit, { triggerKind, status, modelId, provider });
       res.json({ ok: true, items });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });

@@ -321,6 +321,8 @@ type RunRow = {
 export type ListRunsOptions = {
   triggerKind?: "manual" | "scheduled";
   status?: string;
+  modelId?: string;
+  provider?: "gemini" | "openai";
 };
 
 export async function getRunsUsageSummaryForSubcategory(subcategoryKey: string): Promise<{
@@ -401,6 +403,16 @@ export async function listRuns(
   if (options?.status && String(options.status).trim()) {
     clauses.push(`status = $${p}`);
     params.push(String(options.status).trim());
+    p++;
+  }
+  if (options?.modelId && String(options.modelId).trim()) {
+    clauses.push(`model_id = $${p}`);
+    params.push(String(options.modelId).trim());
+    p++;
+  }
+  if (options?.provider === "gemini" || options?.provider === "openai") {
+    clauses.push(`provider = $${p}`);
+    params.push(options.provider);
     p++;
   }
   const whereSql = clauses.join(" AND ");

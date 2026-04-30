@@ -656,6 +656,12 @@
                   <option value="pending_review">قيد المراجعة</option>
                 </select>
               </label>
+              <label style="font-size: var(--fs-sm)"
+                >النموذج
+                <select id="sc-runs-filter-model" style="margin-inline-start: 0.25rem">
+                  <option value="">الكل</option>
+                </select>
+              </label>
               <button type="button" class="btn btn-secondary" id="sc-runs-apply-filters" style="padding: 0.35rem 0.65rem; font-size: 0.78rem">
                 تطبيق التصفية
               </button>
@@ -955,9 +961,11 @@
           var enc = encodeURIComponent(selectedSubKey);
           var tk = String(document.getElementById("sc-runs-filter-trigger").value || "").trim();
           var st = String(document.getElementById("sc-runs-filter-status").value || "").trim();
+          var modelId = String(document.getElementById("sc-runs-filter-model").value || "").trim();
           var q = "subcategoryKey=" + enc + "&limit=20";
           if (tk === "manual" || tk === "scheduled") q += "&triggerKind=" + encodeURIComponent(tk);
           if (st) q += "&status=" + encodeURIComponent(st);
+          if (modelId) q += "&modelId=" + encodeURIComponent(modelId);
           var rr = await fetch("/api/admin/simple-content/runs?" + q, hdr());
           var rj = await rr.json();
           if (rr.ok && rj.ok) renderRuns(rj.items || []);
@@ -1252,6 +1260,29 @@
             });
             sel.onchange = updatePresetHints;
           });
+          var modelSel = document.getElementById("sc-runs-filter-model");
+          if (modelSel) {
+            var prevModel = String(modelSel.value || "");
+            modelSel.innerHTML = "";
+            var allOpt = document.createElement("option");
+            allOpt.value = "";
+            allOpt.textContent = "الكل";
+            modelSel.appendChild(allOpt);
+            var seen = {};
+            lastPresetsItems.forEach(function (p) {
+              var mk = String(p.modelId || "").trim();
+              if (!mk || seen[mk]) return;
+              seen[mk] = true;
+              var o = document.createElement("option");
+              o.value = mk;
+              o.textContent = mk + " (" + String(p.provider || "—") + ")";
+              modelSel.appendChild(o);
+            });
+            var restore = Array.prototype.some.call(modelSel.options, function (o) {
+              return o.value === prevModel;
+            });
+            if (restore) modelSel.value = prevModel;
+          }
           function applySelectDefault(selId, defId) {
             if (defId == null || !Number.isFinite(defId) || defId < 1) return;
             var sel = document.getElementById(selId);
@@ -1445,6 +1476,7 @@
             b.setAttribute("data-run-id", String(r.id));
             var mid = r.modelId ? String(r.modelId) : "—";
             if (mid.length > 36) mid = mid.slice(0, 34) + "…";
+            var providerTag = r.provider ? "[" + String(r.provider).toUpperCase() + "] " : "";
             var qc = r.questionCount != null && r.questionCount !== "" ? r.questionCount : "—";
             b.textContent =
               r.createdAt +
@@ -1455,6 +1487,7 @@
               " | " +
               r.triggerKind +
               " | نموذج: " +
+              providerTag +
               mid +
               " | أسئلة: " +
               qc +
@@ -1648,7 +1681,12 @@
                 revOk.scrollIntoView({ behavior: "smooth", block: "nearest" });
               }
             } else {
-              msg(userVisibleApiError(data.reason, data.error, data), false);
+              var baseErr = userVisibleApiError(data.reason, data.error, data);
+              var preRunHint =
+                data && data.runCreated === false && (data.runId == null)
+                  ? "\nتنبيه: فشل الطلب قبل إنشاء سجل تشغيل (تحقق من البرومبت أو النموذج المختار)."
+                  : "";
+              msg(baseErr + preRunHint, false);
               setSectionStatus("sc-sec-generate-status", "فشل", false);
               if (data.runId != null) {
                 highlightedRunId = data.runId;
