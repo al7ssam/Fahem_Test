@@ -40,16 +40,20 @@ import { getFactoryInspectionLogs, getFactoryJobErrorTimeline, getFactoryJobLogs
 import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
 import type { FactoryLayer } from "../services/aiFactory/types";
 import {
+  commitSimpleContentRun,
   generatePromptDraft,
   getAutomation,
   getPromptBody,
+  getRunById,
   getSubcategoryContextForAdmin,
   listActivePresets,
   listRuns,
   runSimpleContentGenerate,
+  runSimpleContentGeneratePreview,
   upsertAutomation,
   upsertPromptBody,
 } from "../services/simpleContent/service";
+import { getAdminPromptTemplatesPayload } from "../services/simpleContent/promptContract";
 
 const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
 const questionOptionsSchema = z
@@ -196,6 +200,7 @@ const simpleContentPromptPutSchema = z.object({
 
 const simpleContentDraftSchema = z.object({
   subcategoryKey: simpleContentSubKeySchema,
+  presetId: z.number().int().positive().optional(),
 });
 
 const simpleContentGenerateSchema = z.object({
@@ -204,6 +209,8 @@ const simpleContentGenerateSchema = z.object({
   difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
   presetId: z.number().int().positive(),
 });
+
+const simpleContentGeneratePreviewSchema = simpleContentGenerateSchema;
 
 const simpleContentAutomationPutSchema = z.object({
   enabled: z.boolean(),
@@ -1385,7 +1392,7 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
     try {
-      const draft = await generatePromptDraft(parsed.data.subcategoryKey);
+      const draft = await generatePromptDraft(parsed.data.subcategoryKey, parsed.data.presetId);
       res.json({ ok: true, draft });
     } catch (error) {
       res.status(500).json({
@@ -1418,6 +1425,78 @@ export function registerAdminRoutes(app: Express): void {
         error: "generate_failed",
         reason: error instanceof Error ? error.message : "unknown_error",
       });
+    }
+  });
+
+  app.post("/api/admin/simple-content/generate-preview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = simpleContentGeneratePreviewSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      const result = await runSimpleContentGeneratePreview({
+        subcategoryKey: parsed.data.subcategoryKey,
+        batchSize: parsed.data.batchSize,
+        difficultyMode: parsed.data.difficultyMode,
+        presetId: parsed.data.presetId,
+      });
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "generate_preview_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  });
+
+  app.post("/api/admin/simple-content/runs/:id/commit", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const result = await commitSimpleContentRun(id);
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "unknown_error";
+      if (msg === "simple_content_commit_invalid" || msg === "simple_content_commit_empty") {
+        res.status(400).json({ ok: false, error: msg });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "commit_failed", reason: msg });
+    }
+  });
+
+  app.get("/api/admin/simple-content/runs/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const row = await getRunById(id);
+      if (!row) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true, run: row });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/prompt-templates", async (_req: Request, res: Response) => {
+    if (!verifyAdmin(_req, res)) return;
+    try {
+      res.json({ ok: true, templates: getAdminPromptTemplatesPayload() });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
 

@@ -82,6 +82,10 @@
         background: linear-gradient(to left, #e8be66, #a8792f);
         color: #120b02;
       }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
       .btn-secondary {
         background: rgba(255, 255, 255, 0.1);
         color: var(--text);
@@ -150,6 +154,18 @@
         font-family: inherit;
         font-size: 0.88rem;
       }
+      .mono {
+        font-family: ui-monospace, monospace;
+        font-size: 0.75rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 16rem;
+        overflow: auto;
+        padding: 0.5rem;
+        border-radius: 0.45rem;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid var(--border);
+      }
       .row {
         display: flex;
         flex-wrap: wrap;
@@ -164,6 +180,7 @@
         border: 1px solid var(--border);
         background: rgba(0, 0, 0, 0.25);
         color: var(--text);
+        max-width: 100%;
       }
       .msg {
         margin-top: 0.5rem;
@@ -178,18 +195,44 @@
       .runs {
         font-size: 0.8rem;
         color: var(--muted);
-        max-height: 10rem;
+        max-height: 14rem;
         overflow: auto;
       }
-      .runs div {
-        padding: 0.25rem 0;
+      .run-line {
+        display: block;
+        width: 100%;
+        text-align: right;
+        padding: 0.35rem 0.25rem;
+        margin: 0;
+        border: none;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: inherit;
+      }
+      .run-line:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .q-row {
+        padding: 0.35rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        font-size: 0.82rem;
+      }
+      .q-row button {
+        margin-inline-start: 0.35rem;
+      }
+      .hint {
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin-top: 0.2rem;
       }
     </style>
   </head>
   <body>
     <div class="wrap">
-      <p class="subtitle"><span class="badge">مسار بسيط</span> — ليس المصنع متعدد الطبقات. برومبت واحد ثم توليد دفعة.</p>
+      <p class="subtitle"><span class="badge">مسار بسيط</span> — ليس المصنع متعدد الطبقات. معاينة ثم تعميد للتوليد اليدوي.</p>
       <h1>توليد المحتوى (المسار البسيط)</h1>
       <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong></p>
 
@@ -200,8 +243,19 @@
         </div>
         <button type="button" class="btn btn-secondary" id="sc-back">← لوحة الإدارة</button>
         <button type="button" class="btn" id="sc-load-cats">تحميل التصنيفات</button>
+        <button type="button" class="btn btn-secondary" id="sc-load-templates">عرض قوالب البرومبت</button>
       </div>
       <div class="msg" id="sc-msg"></div>
+      <div class="card" id="sc-templates-wrap" style="display: none">
+        <h2>قوالب النظام (مسودة + عقد JSON للتوليد)</h2>
+        <p class="subtitle">نسخ للمراجعة — لا تُرسل كما هي للنموذج دون استبدال العناصر النائبة.</p>
+        <h3 style="font-size: 0.9rem; color: var(--amber)">مسودة البرومبت — رسالة النظام</h3>
+        <pre class="mono" id="sc-tpl-draft-sys"></pre>
+        <h3 style="font-size: 0.9rem; color: var(--amber)">مسودة البرومبت — قالب رسالة المستخدم</h3>
+        <pre class="mono" id="sc-tpl-draft-user"></pre>
+        <h3 style="font-size: 0.9rem; color: var(--amber)">عقد إخراج أسئلة JSON (يُلحق تلقائياً عند التوليد)</h3>
+        <pre class="mono" id="sc-tpl-json"></pre>
+      </div>
 
       <div class="card" id="sc-step-main-wrap" style="display: none">
         <h2>١ — اختر التصنيف الرئيسي</h2>
@@ -219,6 +273,13 @@
         <label for="sc-prompt">البرومبت المحفوظ لهذا الفرع</label>
         <textarea id="sc-prompt"></textarea>
         <div class="row">
+          <label
+            >نموذج اقتراح المسودة
+            <select id="sc-draft-preset"></select>
+          </label>
+          <div class="hint" id="sc-draft-preset-hint"></div>
+        </div>
+        <div class="row">
           <button type="button" class="btn btn-secondary" id="sc-save-prompt">حفظ البرومبت</button>
           <button type="button" class="btn btn-secondary" id="sc-draft-prompt">اقتراح برومبت بالذكاء الاصطناعي</button>
         </div>
@@ -234,13 +295,33 @@
             </select>
           </label>
           <label
-            >النموذج
+            >نموذج التوليد
             <select id="sc-preset"></select>
           </label>
-          <button type="button" class="btn" id="sc-generate">توليد أسئلة الآن</button>
+          <div class="hint" id="sc-preset-hint" style="flex-basis: 100%"></div>
         </div>
+        <div class="row">
+          <button type="button" class="btn" id="sc-generate-preview">توليد معاينة (لا إدراج)</button>
+          <button type="button" class="btn" id="sc-commit" disabled>تعميد الإدراج</button>
+        </div>
+        <p class="subtitle" id="sc-pending-note" style="display: none"></p>
+
+        <div class="card" style="margin-top: 1rem; background: rgba(0, 0, 0, 0.25)">
+          <h2 style="font-size: 0.95rem">تفاصيل التشغيل / الطلب والرد</h2>
+          <p class="subtitle">اختر سطراً من «آخر التشغيلات» أو نفّذ معاينة لعرض البيانات.</p>
+          <div class="row">
+            <span id="sc-run-meta" class="hint"></span>
+          </div>
+          <h3 style="font-size: 0.85rem; color: var(--muted)">النص المُرسَل للنموذج</h3>
+          <pre class="mono" id="sc-run-request"></pre>
+          <h3 style="font-size: 0.85rem; color: var(--muted)">رد النموذج (نص خام)</h3>
+          <pre class="mono" id="sc-run-response"></pre>
+          <h3 style="font-size: 0.85rem; color: var(--muted)">الأسئلة المطبّعة (JSON)</h3>
+          <pre class="mono" id="sc-run-questions"></pre>
+        </div>
+
         <div class="card" style="margin-top: 1rem; background: rgba(0, 0, 0, 0.2)">
-          <h2 style="font-size: 0.95rem">جدولة تلقائية (اختياري)</h2>
+          <h2 style="font-size: 0.95rem">جدولة تلقائية (إدراج مباشر عند التشغيل)</h2>
           <div class="row">
             <label><input type="checkbox" id="sc-auto-en" /> تفعيل</label>
             <label>كل <input type="number" id="sc-auto-min" min="5" max="10080" value="60" style="width: 4.5rem" /> دقيقة</label>
@@ -248,9 +329,14 @@
               >نموذج الجدولة
               <select id="sc-auto-preset"></select>
             </label>
+            <div class="hint" id="sc-auto-preset-hint" style="flex-basis: 100%"></div>
             <button type="button" class="btn btn-secondary" id="sc-save-auto">حفظ الجدولة</button>
           </div>
         </div>
+
+        <h2 style="margin-top: 1rem; font-size: 0.95rem; color: var(--muted)">أسئلة هذا الفرع في النظام</h2>
+        <div id="sc-questions-list" class="runs"></div>
+
         <h2 style="margin-top: 1rem; font-size: 0.95rem; color: var(--muted)">آخر التشغيلات</h2>
         <div class="runs" id="sc-runs"></div>
       </div>
@@ -260,6 +346,8 @@
         var categories = [];
         var selectedMainId = null;
         var selectedSubKey = null;
+        var lastPresetsItems = [];
+        var pendingRunId = null;
 
         function secret() {
           return String(document.getElementById("sc-secret").value || "").trim();
@@ -273,8 +361,46 @@
           return { headers: { "X-Admin-Secret": secret(), "Content-Type": "application/json" } };
         }
 
+        function presetLabel(p) {
+          return p.labelAr + " — " + p.modelId + " (" + p.provider + ")";
+        }
+
+        function updatePresetHints() {
+          function hintFor(selectId, hintId) {
+            var sid = document.getElementById(selectId).value;
+            var p = lastPresetsItems.find(function (x) {
+              return String(x.id) === sid;
+            });
+            var el = document.getElementById(hintId);
+            el.textContent = p ? "المعرف: " + p.modelId + " | المزود: " + p.provider : "";
+          }
+          hintFor("sc-preset", "sc-preset-hint");
+          hintFor("sc-auto-preset", "sc-auto-preset-hint");
+          hintFor("sc-draft-preset", "sc-draft-preset-hint");
+        }
+
         document.getElementById("sc-back").addEventListener("click", function () {
           window.location.href = "/admin";
+        });
+
+        document.getElementById("sc-load-templates").addEventListener("click", async function () {
+          if (!secret()) {
+            msg("أدخل مفتاح الإدارة.", false);
+            return;
+          }
+          try {
+            var res = await fetch("/api/admin/simple-content/prompt-templates", hdr());
+            var data = await res.json();
+            if (!res.ok || !data.ok) throw new Error("tpl");
+            var t = data.templates || {};
+            document.getElementById("sc-tpl-draft-sys").textContent = t.draftSystemMessage || "";
+            document.getElementById("sc-tpl-draft-user").textContent = t.draftUserMessageTemplate || "";
+            document.getElementById("sc-tpl-json").textContent = t.questionJsonContract || "";
+            document.getElementById("sc-templates-wrap").style.display = "block";
+            msg("تم تحميل القوالب.", true);
+          } catch (e) {
+            msg("تعذر تحميل القوالب.", false);
+          }
         });
 
         document.getElementById("sc-load-cats").addEventListener("click", async function () {
@@ -342,16 +468,117 @@
             .replace(/"/g, "&quot;");
         }
 
+        function fillPresets(items) {
+          lastPresetsItems = items || [];
+          ["sc-preset", "sc-auto-preset", "sc-draft-preset"].forEach(function (selId) {
+            var sel = document.getElementById(selId);
+            sel.innerHTML = "";
+            lastPresetsItems.forEach(function (p) {
+              var o = document.createElement("option");
+              o.value = String(p.id);
+              o.textContent = presetLabel(p);
+              sel.appendChild(o);
+            });
+            sel.onchange = updatePresetHints;
+          });
+          updatePresetHints();
+        }
+
+        function setPendingRun(id, count) {
+          pendingRunId = id;
+          var btn = document.getElementById("sc-commit");
+          btn.disabled = id == null;
+          var note = document.getElementById("sc-pending-note");
+          if (id != null) {
+            note.style.display = "block";
+            note.textContent = "معاينة جاهزة: تشغيل #" + id + " — " + count + " سؤال. راجع التفاصيل ثم اضغط تعميد الإدراج.";
+          } else {
+            note.style.display = "none";
+            note.textContent = "";
+          }
+        }
+
+        async function loadRunDetail(id) {
+          if (!secret() || !id) return;
+          var res = await fetch("/api/admin/simple-content/runs/" + id, hdr());
+          var data = await res.json();
+          if (!res.ok || !data.ok || !data.run) {
+            msg("تعذر تحميل التشغيل.", false);
+            return;
+          }
+          var r = data.run;
+          document.getElementById("sc-run-meta").textContent =
+            "#" + r.id + " | " + r.status + " | " + r.triggerKind + " | إدراج " + r.insertedCount;
+          document.getElementById("sc-run-request").textContent = r.requestPrompt || "—";
+          document.getElementById("sc-run-response").textContent = r.modelResponse || "—";
+          try {
+            document.getElementById("sc-run-questions").textContent =
+              r.normalizedQuestions != null ? JSON.stringify(r.normalizedQuestions, null, 2) : r.previewJson != null ? JSON.stringify(r.previewJson, null, 2) : "—";
+          } catch (e) {
+            document.getElementById("sc-run-questions").textContent = "—";
+          }
+          if (r.status === "pending_review" && r.triggerKind === "manual") {
+            setPendingRun(r.id, Array.isArray(r.normalizedQuestions) ? r.normalizedQuestions.length : 0);
+          } else {
+            setPendingRun(null, 0);
+          }
+        }
+
+        async function refreshQuestionsList() {
+          if (!selectedSubKey || !secret()) return;
+          var enc = encodeURIComponent(selectedSubKey);
+          var res = await fetch("/api/admin/questions?subcategoryKey=" + enc + "&limit=40", hdr());
+          var data = await res.json();
+          var box = document.getElementById("sc-questions-list");
+          box.innerHTML = "";
+          if (!res.ok || !data.ok) {
+            box.textContent = "تعذر تحميل الأسئلة.";
+            return;
+          }
+          var items = data.items || [];
+          if (!items.length) {
+            box.textContent = "لا توجد أسئلة لهذا الفرع بعد.";
+            return;
+          }
+          items.forEach(function (q) {
+            var row = document.createElement("div");
+            row.className = "q-row";
+            row.appendChild(document.createTextNode("#" + q.id + " — " + (q.promptPreview || "")));
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "btn btn-secondary";
+            btn.textContent = "عرض كامل";
+            btn.addEventListener("click", async function () {
+              var r2 = await fetch("/api/admin/questions/" + q.id, hdr());
+              var j2 = await r2.json();
+              if (r2.ok && j2.ok && j2.question) {
+                alert(JSON.stringify(j2.question, null, 2));
+              } else {
+                msg("تعذر تحميل السؤال.", false);
+              }
+            });
+            row.appendChild(btn);
+            box.appendChild(row);
+          });
+        }
+
         async function openWorkspace(subKey, subName, mainName) {
           document.getElementById("sc-work").style.display = "block";
           document.getElementById("sc-work-title").textContent = "مساحة العمل — " + subName;
           document.getElementById("sc-ctx-line").textContent = mainName + " ← " + subName + " (" + subKey + ")";
+          setPendingRun(null, 0);
+          document.getElementById("sc-run-request").textContent = "";
+          document.getElementById("sc-run-response").textContent = "";
+          document.getElementById("sc-run-questions").textContent = "";
+          document.getElementById("sc-run-meta").textContent = "";
           if (!secret()) {
             msg("أدخل مفتاح الإدارة أعلاه لتحميل البرومبت والنماذج والتوليد.", false);
             document.getElementById("sc-prompt").value = "";
             document.getElementById("sc-preset").innerHTML = "";
             document.getElementById("sc-auto-preset").innerHTML = "";
+            document.getElementById("sc-draft-preset").innerHTML = "";
             document.getElementById("sc-runs").innerHTML = "";
+            document.getElementById("sc-questions-list").innerHTML = "";
             return;
           }
           msg("جاري تحميل البرومبت…", true);
@@ -362,7 +589,7 @@
               fetch("/api/admin/simple-content/prompt/" + enc, hdr()),
               fetch("/api/admin/simple-content/presets", hdr()),
               fetch("/api/admin/simple-content/automation/" + enc, hdr()),
-              fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=15", hdr()),
+              fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr()),
             ]);
             var ctx = await ctxRes.json();
             var pr = await prRes.json();
@@ -381,7 +608,9 @@
               document.getElementById("sc-auto-en").checked = false;
               document.getElementById("sc-auto-min").value = "60";
             }
+            updatePresetHints();
             renderRuns(runs.items || []);
+            await refreshQuestionsList();
             if (ctxRes.ok && ctx.ok) {
               document.getElementById("sc-ctx-line").textContent =
                 ctx.mainCategoryName + " ← " + ctx.subcategoryName + " (" + subKey + ")";
@@ -392,23 +621,6 @@
           }
         }
 
-        function fillPresets(items) {
-          var sel = document.getElementById("sc-preset");
-          var sel2 = document.getElementById("sc-auto-preset");
-          sel.innerHTML = "";
-          sel2.innerHTML = "";
-          items.forEach(function (p) {
-            var o = document.createElement("option");
-            o.value = String(p.id);
-            o.textContent = p.labelAr + " (" + p.provider + ")";
-            sel.appendChild(o);
-            var o2 = document.createElement("option");
-            o2.value = String(p.id);
-            o2.textContent = p.labelAr;
-            sel2.appendChild(o2);
-          });
-        }
-
         function renderRuns(items) {
           var box = document.getElementById("sc-runs");
           box.innerHTML = "";
@@ -417,9 +629,13 @@
             return;
           }
           items.forEach(function (r) {
-            var d = document.createElement("div");
-            d.textContent =
+            var b = document.createElement("button");
+            b.type = "button";
+            b.className = "run-line";
+            b.textContent =
               r.createdAt +
+              " | #" +
+              r.id +
               " | " +
               r.status +
               " | " +
@@ -427,7 +643,10 @@
               " | إدراج " +
               r.insertedCount +
               (r.error ? " | " + r.error : "");
-            box.appendChild(d);
+            b.addEventListener("click", function () {
+              void loadRunDetail(r.id);
+            });
+            box.appendChild(b);
           });
         }
 
@@ -443,10 +662,13 @@
         document.getElementById("sc-draft-prompt").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
           msg("جاري اقتراح برومبت…", true);
+          var draftPid = Number(document.getElementById("sc-draft-preset").value);
+          var body = { subcategoryKey: selectedSubKey };
+          if (Number.isFinite(draftPid) && draftPid > 0) body.presetId = draftPid;
           var res = await fetch("/api/admin/simple-content/prompt/generate-draft", {
             method: "POST",
             headers: hdr().headers,
-            body: JSON.stringify({ subcategoryKey: selectedSubKey }),
+            body: JSON.stringify(body),
           });
           var data = await res.json();
           if (res.ok && data.ok && data.draft) {
@@ -457,29 +679,54 @@
           }
         });
 
-        document.getElementById("sc-generate").addEventListener("click", async function () {
+        document.getElementById("sc-generate-preview").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
-          msg("جاري توليد الأسئلة…", true);
+          msg("جاري توليد المعاينة…", true);
           var body = JSON.stringify({
             subcategoryKey: selectedSubKey,
             batchSize: Number(document.getElementById("sc-batch").value) || 10,
             difficultyMode: document.getElementById("sc-diff").value,
             presetId: Number(document.getElementById("sc-preset").value),
           });
-          var res = await fetch("/api/admin/simple-content/generate", {
+          var res = await fetch("/api/admin/simple-content/generate-preview", {
             method: "POST",
             headers: hdr().headers,
             body: body,
           });
           var data = await res.json();
-          if (res.ok && data.ok) {
-            msg("تم الإدراج: " + data.inserted + " سؤال.", true);
+          if (res.ok && data.ok && data.runId) {
+            msg("تمت المعاينة — راجع التفاصيل ثم عمّد.", true);
+            await loadRunDetail(data.runId);
             var enc = encodeURIComponent(selectedSubKey);
-            var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=15", hdr());
+            var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
             var rj = await rr.json();
             if (rr.ok && rj.ok) renderRuns(rj.items || []);
           } else {
             msg(data.reason || "فشل التوليد.", false);
+          }
+        });
+
+        document.getElementById("sc-commit").addEventListener("click", async function () {
+          if (!secret() || pendingRunId == null) return;
+          var rid = pendingRunId;
+          msg("جاري تعميد الإدراج…", true);
+          var res = await fetch("/api/admin/simple-content/runs/" + rid + "/commit", {
+            method: "POST",
+            headers: hdr().headers,
+            body: "{}",
+          });
+          var data = await res.json();
+          if (res.ok && data.ok) {
+            msg("تم الإدراج: " + data.inserted + " سؤال.", true);
+            setPendingRun(null, 0);
+            var enc = encodeURIComponent(selectedSubKey);
+            var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
+            var rj = await rr.json();
+            if (rr.ok && rj.ok) renderRuns(rj.items || []);
+            await refreshQuestionsList();
+            await loadRunDetail(rid);
+          } else {
+            msg(data.reason || data.error || "فشل التعميد.", false);
           }
         });
 

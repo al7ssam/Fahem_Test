@@ -27,3 +27,20 @@ export function buildDraftPromptUserMessage(input: {
     "اكتب برومبتًا احترافيًا بالعربية يوجّه نموذجًا لاحقًا لتوليد أسئلة تعليمية عالية الجودة لهذا الفرع.",
   ].join("\n");
 }
+
+/** Static strings for admin transparency (no secrets). */
+export function getAdminPromptTemplatesPayload(): {
+  draftSystemMessage: string;
+  draftUserMessageTemplate: string;
+  questionJsonContract: string;
+} {
+  return {
+    draftSystemMessage: buildDraftPromptSystemMessage(),
+    draftUserMessageTemplate: buildDraftPromptUserMessage({
+      mainCategoryName: "{{mainCategoryName}}",
+      subcategoryName: "{{subcategoryName}}",
+      internalDescription: "{{internalDescription}}",
+    }),
+    questionJsonContract: SIMPLE_QUESTION_JSON_CONTRACT,
+  };
+}

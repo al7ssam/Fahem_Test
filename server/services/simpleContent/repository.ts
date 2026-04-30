@@ -151,13 +151,18 @@ export async function createRun(input: {
   return Number(r.rows[0]?.id ?? 0);
 }
 
-export async function finishRun(
+export type SimpleContentRunStatus = "running" | "pending_review" | "succeeded" | "failed";
+
+export async function finalizeSimpleContentRun(
   runId: number,
   data: {
-    status: "succeeded" | "failed";
+    status: "succeeded" | "failed" | "pending_review";
     insertedCount: number;
     error: string | null;
     previewJson: unknown | null;
+    requestPrompt: string | null;
+    modelResponse: string | null;
+    normalizedQuestions: unknown | null;
   },
 ): Promise<void> {
   const pool = getPool();
@@ -167,10 +172,87 @@ export async function finishRun(
        inserted_count = $3,
        error = $4,
        preview_json = $5::jsonb,
+       request_prompt = $6,
+       model_response = $7,
+       normalized_questions = $8::jsonb,
        finished_at = NOW()
      WHERE id = $1`,
-    [runId, data.status, data.insertedCount, data.error, data.previewJson ? JSON.stringify(data.previewJson) : null],
+    [
+      runId,
+      data.status,
+      data.insertedCount,
+      data.error,
+      data.previewJson ? JSON.stringify(data.previewJson) : null,
+      data.requestPrompt,
+      data.modelResponse,
+      data.normalizedQuestions != null ? JSON.stringify(data.normalizedQuestions) : null,
+    ],
   );
+}
+
+export type SimpleContentRunDetail = {
+  id: number;
+  subcategoryKey: string;
+  triggerKind: string;
+  status: SimpleContentRunStatus;
+  provider: string | null;
+  modelId: string | null;
+  presetId: number | null;
+  insertedCount: number;
+  error: string | null;
+  previewJson: unknown | null;
+  requestPrompt: string | null;
+  modelResponse: string | null;
+  normalizedQuestions: unknown | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+export async function getRunById(runId: number): Promise<SimpleContentRunDetail | null> {
+  const pool = getPool();
+  const r = await pool.query<{
+    id: string;
+    subcategory_key: string;
+    trigger_kind: string;
+    status: string;
+    provider: string | null;
+    model_id: string | null;
+    preset_id: number | null;
+    inserted_count: string;
+    error: string | null;
+    preview_json: unknown | null;
+    request_prompt: string | null;
+    model_response: string | null;
+    normalized_questions: unknown | null;
+    created_at: Date;
+    finished_at: Date | null;
+  }>(
+    `SELECT id::text, subcategory_key, trigger_kind, status, provider, model_id, preset_id,
+            inserted_count::text, error, preview_json, request_prompt, model_response, normalized_questions,
+            created_at, finished_at
+     FROM simple_content_runs WHERE id = $1 LIMIT 1`,
+    [runId],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  const st = row.status as SimpleContentRunStatus;
+  return {
+    id: Number(row.id),
+    subcategoryKey: row.subcategory_key,
+    triggerKind: row.trigger_kind,
+    status: st,
+    provider: row.provider,
+    modelId: row.model_id,
+    presetId: row.preset_id,
+    insertedCount: Number(row.inserted_count),
+    error: row.error,
+    previewJson: row.preview_json,
+    requestPrompt: row.request_prompt,
+    modelResponse: row.model_response,
+    normalizedQuestions: row.normalized_questions,
+    createdAt: row.created_at.toISOString(),
+    finishedAt: row.finished_at?.toISOString() ?? null,
+  };
 }
 
 type RunRow = {
