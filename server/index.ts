@@ -11,6 +11,7 @@ import {
   performCleanup,
 } from "./services/cleanup";
 import { aiFactoryRuntime } from "./services/aiFactory/runtime";
+import { startSimpleContentScheduler, stopSimpleContentScheduler } from "./services/simpleContent/scheduler";
 
 if (!config.databaseUrl) {
   console.error("DATABASE_URL is required");
@@ -59,6 +60,7 @@ async function startServer(): Promise<void> {
     // detailed log is emitted inside cleanup service
   }
   await aiFactoryRuntime.start();
+  startSimpleContentScheduler();
 
   scheduleCleanupCron();
   httpServer.listen(config.port, () => {
@@ -66,6 +68,11 @@ async function startServer(): Promise<void> {
   });
 
   const shutdown = async () => {
+    try {
+      stopSimpleContentScheduler();
+    } catch {
+      // ignore
+    }
     try {
       await aiFactoryRuntime.stop();
     } catch {

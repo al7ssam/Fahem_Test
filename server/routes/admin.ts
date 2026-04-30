@@ -39,6 +39,17 @@ import { buildFactoryJobEfficiencyReport } from "../services/aiFactory/efficienc
 import { getFactoryInspectionLogs, getFactoryJobErrorTimeline, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
 import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
 import type { FactoryLayer } from "../services/aiFactory/types";
+import {
+  generatePromptDraft,
+  getAutomation,
+  getPromptBody,
+  getSubcategoryContextForAdmin,
+  listActivePresets,
+  listRuns,
+  runSimpleContentGenerate,
+  upsertAutomation,
+  upsertPromptBody,
+} from "../services/simpleContent/service";
 
 const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
 const questionOptionsSchema = z
@@ -177,6 +188,29 @@ const factoryCancelJobSchema = z.object({
   jobId: z.number().int().min(1).optional(),
 });
 
+const simpleContentSubKeySchema = z.string().trim().min(1).max(120);
+
+const simpleContentPromptPutSchema = z.object({
+  promptBody: z.string().max(200_000),
+});
+
+const simpleContentDraftSchema = z.object({
+  subcategoryKey: simpleContentSubKeySchema,
+});
+
+const simpleContentGenerateSchema = z.object({
+  subcategoryKey: simpleContentSubKeySchema,
+  batchSize: z.number().int().min(1).max(50).default(10),
+  difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
+  presetId: z.number().int().positive(),
+});
+
+const simpleContentAutomationPutSchema = z.object({
+  enabled: z.boolean(),
+  intervalMinutes: z.number().int().min(5).max(10080),
+  modelPresetId: z.number().int().positive().nullable(),
+});
+
 const factoryModelPatchSchema = z.object({
   layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
   provider: z.string().trim().min(1).max(50),
@@ -277,6 +311,10 @@ function adminUsageAnalyticsTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-usage-analytics.html");
 }
 
+function adminSimpleContentTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-simple-content.html");
+}
+
 async function countQuestions(): Promise<number | null> {
   try {
     const pool = getPool();
@@ -303,6 +341,12 @@ function readAdminInspectionHtml(questionCount: number | null): string {
 
 function readAdminUsageAnalyticsHtml(questionCount: number | null): string {
   const raw = fs.readFileSync(adminUsageAnalyticsTemplatePath(), "utf8");
+  const display = questionCount === null ? "—" : String(questionCount);
+  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+}
+
+function readAdminSimpleContentHtml(questionCount: number | null): string {
+  const raw = fs.readFileSync(adminSimpleContentTemplatePath(), "utf8");
   const display = questionCount === null ? "—" : String(questionCount);
   return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
 }
@@ -567,6 +611,16 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminUsageAnalyticsHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة تحليلات الاستخدام.");
+    }
+  });
+
+  app.get("/admin/simple-content", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminSimpleContentHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة المسار البسيط لتوليد المحتوى.");
     }
   });
 
@@ -1245,6 +1299,191 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const report = await buildFactoryJobEfficiencyReport(id);
       res.json({ ok: true, report });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/presets", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const items = await listActivePresets();
+      res.json({
+        ok: true,
+        items: items.map((p) => ({
+          id: p.id,
+          provider: p.provider,
+          labelAr: p.labelAr,
+          modelId: p.modelId,
+        })),
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/context/:subcategoryKey", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const subcategoryKey = String(req.params.subcategoryKey ?? "").trim();
+    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
+      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
+      return;
+    }
+    try {
+      const ctx = await getSubcategoryContextForAdmin(subcategoryKey);
+      res.json({ ok: true, subcategoryKey, ...ctx });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "read_failed";
+      if (msg.startsWith("subcategory_not_found")) {
+        res.status(404).json({ ok: false, error: "subcategory_not_found" });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/prompt/:subcategoryKey", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const subcategoryKey = String(req.params.subcategoryKey ?? "").trim();
+    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
+      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
+      return;
+    }
+    try {
+      const promptBody = await getPromptBody(subcategoryKey);
+      res.json({ ok: true, subcategoryKey, promptBody });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.put("/api/admin/simple-content/prompt/:subcategoryKey", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const subcategoryKey = String(req.params.subcategoryKey ?? "").trim();
+    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
+      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
+      return;
+    }
+    const parsed = simpleContentPromptPutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      await upsertPromptBody(subcategoryKey, parsed.data.promptBody);
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "write_failed" });
+    }
+  });
+
+  app.post("/api/admin/simple-content/prompt/generate-draft", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = simpleContentDraftSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      const draft = await generatePromptDraft(parsed.data.subcategoryKey);
+      res.json({ ok: true, draft });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "draft_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  });
+
+  app.post("/api/admin/simple-content/generate", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = simpleContentGenerateSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      const result = await runSimpleContentGenerate({
+        subcategoryKey: parsed.data.subcategoryKey,
+        batchSize: parsed.data.batchSize,
+        difficultyMode: parsed.data.difficultyMode,
+        presetId: parsed.data.presetId,
+        triggerKind: "manual",
+      });
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: "generate_failed",
+        reason: error instanceof Error ? error.message : "unknown_error",
+      });
+    }
+  });
+
+  app.get("/api/admin/simple-content/automation/:subcategoryKey", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const subcategoryKey = String(req.params.subcategoryKey ?? "").trim();
+    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
+      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
+      return;
+    }
+    try {
+      const row = await getAutomation(subcategoryKey);
+      res.json({
+        ok: true,
+        automation: row
+          ? {
+              subcategoryKey: row.subcategoryKey,
+              enabled: row.enabled,
+              intervalMinutes: row.intervalMinutes,
+              modelPresetId: row.modelPresetId,
+              lastRunAt: row.lastRunAt?.toISOString() ?? null,
+              nextRunAt: row.nextRunAt?.toISOString() ?? null,
+            }
+          : null,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.put("/api/admin/simple-content/automation/:subcategoryKey", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const subcategoryKey = String(req.params.subcategoryKey ?? "").trim();
+    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
+      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
+      return;
+    }
+    const parsed = simpleContentAutomationPutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      await upsertAutomation({
+        subcategoryKey,
+        enabled: parsed.data.enabled,
+        intervalMinutes: parsed.data.intervalMinutes,
+        modelPresetId: parsed.data.modelPresetId,
+      });
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "write_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/runs", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const subcategoryKey = String(req.query.subcategoryKey ?? "").trim();
+    if (!simpleContentSubKeySchema.safeParse(subcategoryKey).success) {
+      res.status(400).json({ ok: false, error: "invalid_subcategory_key" });
+      return;
+    }
+    const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 20));
+    try {
+      const items = await listRuns(subcategoryKey, limit);
+      res.json({ ok: true, items });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
     }

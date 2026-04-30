@@ -456,6 +456,24 @@ async function callGemini(config: LayerModelConfig, prompt: string): Promise<Mod
   }
 }
 
+/** Single-turn Gemini call for modules outside the multi-layer factory (e.g. simple content path). */
+export async function runGeminiOneShot(
+  input: { modelName: string; apiKeyEnv: string; temperature: number; maxOutputTokens: number },
+  prompt: string,
+): Promise<ModelCallResult> {
+  const cfg: LayerModelConfig = {
+    layerName: "creator",
+    provider: "gemini",
+    modelName: input.modelName,
+    apiKeyEnv: input.apiKeyEnv,
+    temperature: input.temperature,
+    maxOutputTokens: input.maxOutputTokens,
+    isEnabled: true,
+    reasoningLevel: "none",
+  };
+  return callGemini(cfg, prompt);
+}
+
 function currentApiVersionForConfig(config: LayerModelConfig): "v1" | "v1beta" {
   const normalizedId = normalizeGeminiModelId(config.modelName);
   return selectApiVersion(normalizedId, config.reasoningLevel);

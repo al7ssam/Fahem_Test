@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>المسار البسيط — توليد المحتوى | فاهم</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg-from: #020309;
+        --bg-mid: #090d1f;
+        --bg-to: #121529;
+        --card: rgba(10, 13, 28, 0.85);
+        --border: rgba(223, 187, 106, 0.2);
+        --text: #f8f4ea;
+        --muted: #b7ac90;
+        --amber: #e8be66;
+        --danger: #f87171;
+        --ok: #34d399;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Tajawal", system-ui, sans-serif;
+        background: linear-gradient(to bottom, var(--bg-from), var(--bg-mid), var(--bg-to));
+        color: var(--text);
+        line-height: 1.55;
+      }
+      .wrap {
+        max-width: 72rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 3rem;
+      }
+      h1 {
+        margin: 0 0 0.35rem;
+        font-size: 1.65rem;
+        font-weight: 800;
+        color: var(--amber);
+      }
+      .subtitle {
+        color: var(--muted);
+        margin: 0 0 1rem;
+        font-size: 0.92rem;
+      }
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.65rem;
+        align-items: flex-end;
+        padding: 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        background: var(--card);
+        margin-bottom: 1rem;
+      }
+      .topbar label {
+        display: block;
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin-bottom: 0.2rem;
+      }
+      .topbar input {
+        min-width: 12rem;
+        padding: 0.45rem 0.55rem;
+        border-radius: 0.5rem;
+        border: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.25);
+        color: var(--text);
+      }
+      .btn {
+        border: none;
+        border-radius: 0.55rem;
+        padding: 0.5rem 0.9rem;
+        font-weight: 700;
+        cursor: pointer;
+        font-family: inherit;
+        background: linear-gradient(to left, #e8be66, #a8792f);
+        color: #120b02;
+      }
+      .btn-secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .badge {
+        display: inline-block;
+        padding: 0.2rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        background: rgba(52, 211, 153, 0.15);
+        color: var(--ok);
+        border: 1px solid rgba(52, 211, 153, 0.35);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
+        gap: 0.65rem;
+      }
+      .cat-card {
+        border: 1px solid var(--border);
+        border-radius: 0.85rem;
+        padding: 0.65rem 0.45rem;
+        text-align: center;
+        cursor: pointer;
+        background: rgba(0, 0, 0, 0.18);
+        transition: border-color 0.15s, transform 0.12s;
+      }
+      .cat-card:hover {
+        border-color: var(--amber);
+        transform: translateY(-1px);
+      }
+      .cat-card.active {
+        border-color: var(--amber);
+        box-shadow: 0 0 0 1px rgba(232, 190, 102, 0.35);
+      }
+      .cat-card .ic {
+        font-size: 1.75rem;
+        line-height: 1.2;
+      }
+      .cat-card .nm {
+        font-size: 0.78rem;
+        margin-top: 0.25rem;
+        color: var(--text);
+      }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 1rem;
+        background: var(--card);
+        margin-top: 1rem;
+      }
+      .card h2 {
+        margin: 0 0 0.65rem;
+        font-size: 1.05rem;
+        color: var(--amber);
+      }
+      textarea#sc-prompt {
+        width: 100%;
+        min-height: 14rem;
+        padding: 0.65rem;
+        border-radius: 0.55rem;
+        border: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.28);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 0.88rem;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        align-items: center;
+        margin-top: 0.65rem;
+      }
+      select,
+      input[type="number"] {
+        padding: 0.4rem 0.5rem;
+        border-radius: 0.45rem;
+        border: 1px solid var(--border);
+        background: rgba(0, 0, 0, 0.25);
+        color: var(--text);
+      }
+      .msg {
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+      }
+      .msg.ok {
+        color: var(--ok);
+      }
+      .msg.err {
+        color: var(--danger);
+      }
+      .runs {
+        font-size: 0.8rem;
+        color: var(--muted);
+        max-height: 10rem;
+        overflow: auto;
+      }
+      .runs div {
+        padding: 0.25rem 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <p class="subtitle"><span class="badge">مسار بسيط</span> — ليس المصنع متعدد الطبقات. برومبت واحد ثم توليد دفعة.</p>
+      <h1>توليد المحتوى (المسار البسيط)</h1>
+      <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong></p>
+
+      <div class="topbar">
+        <div>
+          <label for="sc-secret">مفتاح الإدارة</label>
+          <input id="sc-secret" type="password" autocomplete="off" placeholder="X-Admin-Secret" />
+        </div>
+        <button type="button" class="btn btn-secondary" id="sc-back">← لوحة الإدارة</button>
+        <button type="button" class="btn" id="sc-load-cats">تحميل التصنيفات</button>
+      </div>
+      <div class="msg" id="sc-msg"></div>
+
+      <div class="card" id="sc-step-main-wrap" style="display: none">
+        <h2>١ — اختر التصنيف الرئيسي</h2>
+        <div class="grid" id="sc-main-grid"></div>
+      </div>
+
+      <div class="card" id="sc-step-sub-wrap" style="display: none">
+        <h2>٢ — اختر التصنيف الفرعي</h2>
+        <div class="grid" id="sc-sub-grid"></div>
+      </div>
+
+      <div class="card" id="sc-work" style="display: none">
+        <h2 id="sc-work-title">مساحة العمل</h2>
+        <p class="subtitle" id="sc-ctx-line"></p>
+        <label for="sc-prompt">البرومبت المحفوظ لهذا الفرع</label>
+        <textarea id="sc-prompt"></textarea>
+        <div class="row">
+          <button type="button" class="btn btn-secondary" id="sc-save-prompt">حفظ البرومبت</button>
+          <button type="button" class="btn btn-secondary" id="sc-draft-prompt">اقتراح برومبت بالذكاء الاصطناعي</button>
+        </div>
+        <div class="row">
+          <label>حجم الدفعة <input type="number" id="sc-batch" min="1" max="50" value="10" /></label>
+          <label
+            >الصعوبة
+            <select id="sc-diff">
+              <option value="mix">مزيج</option>
+              <option value="easy">سهل</option>
+              <option value="medium">متوسط</option>
+              <option value="hard">صعب</option>
+            </select>
+          </label>
+          <label
+            >النموذج
+            <select id="sc-preset"></select>
+          </label>
+          <button type="button" class="btn" id="sc-generate">توليد أسئلة الآن</button>
+        </div>
+        <div class="card" style="margin-top: 1rem; background: rgba(0, 0, 0, 0.2)">
+          <h2 style="font-size: 0.95rem">جدولة تلقائية (اختياري)</h2>
+          <div class="row">
+            <label><input type="checkbox" id="sc-auto-en" /> تفعيل</label>
+            <label>كل <input type="number" id="sc-auto-min" min="5" max="10080" value="60" style="width: 4.5rem" /> دقيقة</label>
+            <label
+              >نموذج الجدولة
+              <select id="sc-auto-preset"></select>
+            </label>
+            <button type="button" class="btn btn-secondary" id="sc-save-auto">حفظ الجدولة</button>
+          </div>
+        </div>
+        <h2 style="margin-top: 1rem; font-size: 0.95rem; color: var(--muted)">آخر التشغيلات</h2>
+        <div class="runs" id="sc-runs"></div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var categories = [];
+        var selectedMainId = null;
+        var selectedSubKey = null;
+
+        function secret() {
+          return String(document.getElementById("sc-secret").value || "").trim();
+        }
+        function msg(text, ok) {
+          var el = document.getElementById("sc-msg");
+          el.textContent = text || "";
+          el.className = "msg " + (ok ? "ok" : "err");
+        }
+        function hdr() {
+          return { headers: { "X-Admin-Secret": secret(), "Content-Type": "application/json" } };
+        }
+
+        document.getElementById("sc-back").addEventListener("click", function () {
+          window.location.href = "/admin";
+        });
+
+        document.getElementById("sc-load-cats").addEventListener("click", async function () {
+          msg("جاري التحميل…", true);
+          try {
+            var res = await fetch("/api/categories", { cache: "no-store" });
+            var data = await res.json();
+            if (!res.ok || !data.ok) throw new Error("categories_failed");
+            categories = data.categories || [];
+            document.getElementById("sc-step-main-wrap").style.display = "block";
+            renderMains();
+            msg("تم تحميل التصنيفات.", true);
+          } catch (e) {
+            msg("تعذر تحميل التصنيفات.", false);
+          }
+        });
+
+        function renderMains() {
+          var box = document.getElementById("sc-main-grid");
+          box.innerHTML = "";
+          categories.forEach(function (m) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.className = "cat-card" + (selectedMainId === m.id ? " active" : "");
+            b.innerHTML = '<div class="ic">' + (m.icon || "📚") + '</div><div class="nm">' + escapeHtml(m.nameAr) + "</div>";
+            b.addEventListener("click", function () {
+              selectedMainId = m.id;
+              selectedSubKey = null;
+              renderMains();
+              renderSubs(m);
+              document.getElementById("sc-step-sub-wrap").style.display = "block";
+              document.getElementById("sc-work").style.display = "none";
+            });
+            box.appendChild(b);
+          });
+        }
+
+        function renderSubs(main) {
+          var box = document.getElementById("sc-sub-grid");
+          box.innerHTML = "";
+          (main.subcategories || []).forEach(function (s) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.className = "cat-card" + (selectedSubKey === s.subcategoryKey ? " active" : "");
+            b.innerHTML =
+              '<div class="ic">' +
+              (s.icon || "📘") +
+              '</div><div class="nm">' +
+              escapeHtml(s.nameAr) +
+              "</div>";
+            b.addEventListener("click", function () {
+              selectedSubKey = s.subcategoryKey;
+              renderSubs(main);
+              openWorkspace(s.subcategoryKey, s.nameAr, main.nameAr);
+            });
+            box.appendChild(b);
+          });
+        }
+
+        function escapeHtml(s) {
+          return String(s)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        }
+
+        async function openWorkspace(subKey, subName, mainName) {
+          document.getElementById("sc-work").style.display = "block";
+          document.getElementById("sc-work-title").textContent = "مساحة العمل — " + subName;
+          document.getElementById("sc-ctx-line").textContent = mainName + " ← " + subName + " (" + subKey + ")";
+          if (!secret()) {
+            msg("أدخل مفتاح الإدارة أعلاه لتحميل البرومبت والنماذج والتوليد.", false);
+            document.getElementById("sc-prompt").value = "";
+            document.getElementById("sc-preset").innerHTML = "";
+            document.getElementById("sc-auto-preset").innerHTML = "";
+            document.getElementById("sc-runs").innerHTML = "";
+            return;
+          }
+          msg("جاري تحميل البرومبت…", true);
+          try {
+            var enc = encodeURIComponent(subKey);
+            var [ctxRes, prRes, presetsRes, autoRes, runsRes] = await Promise.all([
+              fetch("/api/admin/simple-content/context/" + enc, hdr()),
+              fetch("/api/admin/simple-content/prompt/" + enc, hdr()),
+              fetch("/api/admin/simple-content/presets", hdr()),
+              fetch("/api/admin/simple-content/automation/" + enc, hdr()),
+              fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=15", hdr()),
+            ]);
+            var ctx = await ctxRes.json();
+            var pr = await prRes.json();
+            var presets = await presetsRes.json();
+            var auto = await autoRes.json();
+            var runs = await runsRes.json();
+            if (!prRes.ok || !pr.ok) throw new Error("prompt_load");
+            document.getElementById("sc-prompt").value = pr.promptBody || "";
+            fillPresets(presets.items || []);
+            if (auto.ok && auto.automation) {
+              document.getElementById("sc-auto-en").checked = !!auto.automation.enabled;
+              document.getElementById("sc-auto-min").value = String(auto.automation.intervalMinutes || 60);
+              if (auto.automation.modelPresetId)
+                document.getElementById("sc-auto-preset").value = String(auto.automation.modelPresetId);
+            } else {
+              document.getElementById("sc-auto-en").checked = false;
+              document.getElementById("sc-auto-min").value = "60";
+            }
+            renderRuns(runs.items || []);
+            if (ctxRes.ok && ctx.ok) {
+              document.getElementById("sc-ctx-line").textContent =
+                ctx.mainCategoryName + " ← " + ctx.subcategoryName + " (" + subKey + ")";
+            }
+            msg("جاهز.", true);
+          } catch (e) {
+            msg("تعذر تحميل بيانات الفرع.", false);
+          }
+        }
+
+        function fillPresets(items) {
+          var sel = document.getElementById("sc-preset");
+          var sel2 = document.getElementById("sc-auto-preset");
+          sel.innerHTML = "";
+          sel2.innerHTML = "";
+          items.forEach(function (p) {
+            var o = document.createElement("option");
+            o.value = String(p.id);
+            o.textContent = p.labelAr + " (" + p.provider + ")";
+            sel.appendChild(o);
+            var o2 = document.createElement("option");
+            o2.value = String(p.id);
+            o2.textContent = p.labelAr;
+            sel2.appendChild(o2);
+          });
+        }
+
+        function renderRuns(items) {
+          var box = document.getElementById("sc-runs");
+          box.innerHTML = "";
+          if (!items.length) {
+            box.textContent = "لا توجد تشغيلات بعد.";
+            return;
+          }
+          items.forEach(function (r) {
+            var d = document.createElement("div");
+            d.textContent =
+              r.createdAt +
+              " | " +
+              r.status +
+              " | " +
+              r.triggerKind +
+              " | إدراج " +
+              r.insertedCount +
+              (r.error ? " | " + r.error : "");
+            box.appendChild(d);
+          });
+        }
+
+        document.getElementById("sc-save-prompt").addEventListener("click", async function () {
+          if (!selectedSubKey || !secret()) return;
+          var enc = encodeURIComponent(selectedSubKey);
+          var body = JSON.stringify({ promptBody: document.getElementById("sc-prompt").value });
+          var res = await fetch("/api/admin/simple-content/prompt/" + enc, { method: "PUT", headers: hdr().headers, body: body });
+          var data = await res.json();
+          msg(res.ok && data.ok ? "تم حفظ البرومبت." : "فشل الحفظ.", res.ok && data.ok);
+        });
+
+        document.getElementById("sc-draft-prompt").addEventListener("click", async function () {
+          if (!selectedSubKey || !secret()) return;
+          msg("جاري اقتراح برومبت…", true);
+          var res = await fetch("/api/admin/simple-content/prompt/generate-draft", {
+            method: "POST",
+            headers: hdr().headers,
+            body: JSON.stringify({ subcategoryKey: selectedSubKey }),
+          });
+          var data = await res.json();
+          if (res.ok && data.ok && data.draft) {
+            document.getElementById("sc-prompt").value = data.draft;
+            msg("تم توليد مسودة — راجعها ثم احفظ.", true);
+          } else {
+            msg(data.reason || "فشل الاقتراح.", false);
+          }
+        });
+
+        document.getElementById("sc-generate").addEventListener("click", async function () {
+          if (!selectedSubKey || !secret()) return;
+          msg("جاري توليد الأسئلة…", true);
+          var body = JSON.stringify({
+            subcategoryKey: selectedSubKey,
+            batchSize: Number(document.getElementById("sc-batch").value) || 10,
+            difficultyMode: document.getElementById("sc-diff").value,
+            presetId: Number(document.getElementById("sc-preset").value),
+          });
+          var res = await fetch("/api/admin/simple-content/generate", {
+            method: "POST",
+            headers: hdr().headers,
+            body: body,
+          });
+          var data = await res.json();
+          if (res.ok && data.ok) {
+            msg("تم الإدراج: " + data.inserted + " سؤال.", true);
+            var enc = encodeURIComponent(selectedSubKey);
+            var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=15", hdr());
+            var rj = await rr.json();
+            if (rr.ok && rj.ok) renderRuns(rj.items || []);
+          } else {
+            msg(data.reason || "فشل التوليد.", false);
+          }
+        });
+
+        document.getElementById("sc-save-auto").addEventListener("click", async function () {
+          if (!selectedSubKey || !secret()) return;
+          var enc = encodeURIComponent(selectedSubKey);
+          var pid = Number(document.getElementById("sc-auto-preset").value);
+          var body = JSON.stringify({
+            enabled: document.getElementById("sc-auto-en").checked,
+            intervalMinutes: Number(document.getElementById("sc-auto-min").value) || 60,
+            modelPresetId: Number.isFinite(pid) ? pid : null,
+          });
+          var res = await fetch("/api/admin/simple-content/automation/" + enc, {
+            method: "PUT",
+            headers: hdr().headers,
+            body: body,
+          });
+          var data = await res.json();
+          msg(res.ok && data.ok ? "تم حفظ الجدولة." : "فشل حفظ الجدولة.", res.ok && data.ok);
+        });
+      })();
+    </script>
+  </body>
+</html>
