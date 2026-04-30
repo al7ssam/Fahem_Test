@@ -572,7 +572,7 @@ export async function commitSimpleContentRun(runId: number): Promise<{ inserted:
     },
     requestPrompt: run.requestPrompt,
     modelResponse: run.modelResponse,
-    normalizedQuestions: null,
+    normalizedQuestions: run.normalizedQuestions,
     usageInputTokens: run.usageInputTokens,
     usageCachedInputTokens: run.usageCachedInputTokens,
     usageOutputTokens: run.usageOutputTokens,
