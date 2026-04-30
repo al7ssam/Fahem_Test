@@ -505,11 +505,7 @@
       <div class="msg" id="sc-msg"></div>
       <div class="card" id="sc-templates-wrap" style="display: none">
         <h2>قوالب النظام (قراءة فقط)</h2>
-        <p class="subtitle">مسودة البرومبت وعقد JSON — للاطلاع والنسخ. تعديل قالب المسودة من مساحة العمل.</p>
-        <h3 style="font-size: 0.9rem; color: var(--amber)">مسودة البرومبت — رسالة النظام</h3>
-        <pre class="mono" id="sc-tpl-draft-sys"></pre>
-        <h3 style="font-size: 0.9rem; color: var(--amber)">مسودة البرومبت — قالب رسالة المستخدم</h3>
-        <pre class="mono" id="sc-tpl-draft-user"></pre>
+        <p class="subtitle">عقد JSON للإخراج — للاطلاع والنسخ.</p>
         <h3 style="font-size: 0.9rem; color: var(--amber)">عقد إخراج أسئلة JSON (يُلحق تلقائياً عند التوليد)</h3>
         <pre class="mono" id="sc-tpl-json"></pre>
       </div>
@@ -540,8 +536,6 @@
             <p class="subtitle" id="sc-draft-template-help"></p>
             <label for="sc-draft-template-sys">رسالة النظام لاقتراح البرومبت</label>
             <textarea id="sc-draft-template-sys" class="sc-draft-tpl" rows="5"></textarea>
-            <label for="sc-draft-template-user" style="margin-top: 0.65rem; display: block">قالب رسالة المستخدم (عناصر نائبة للفرع الحالي)</label>
-            <textarea id="sc-draft-template-user" class="sc-draft-tpl user" rows="10"></textarea>
             <div class="row">
               <button type="button" class="btn btn-secondary" id="sc-draft-template-load">تحميل القالب الحالي</button>
               <button type="button" class="btn" id="sc-draft-template-save">حفظ القالب</button>
@@ -583,9 +577,9 @@
           <details class="sc-last-draft-inner" id="sc-last-draft-call-fold">
             <summary>آخر طلب مسودة (تشخيص)</summary>
             <p class="hint" style="margin-top: 0.35rem">يُحدَّث بعد كل محاولة؛ لا يُحفظ في قاعدة البيانات.</p>
-            <h4 style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0 0.2rem">ملخص الطلب</h4>
+            <h4 style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0 0.2rem">الطلب الكامل المرسل للنموذج (خام)</h4>
             <pre class="mono" id="sc-last-draft-req" style="max-height: 8rem"></pre>
-            <h4 style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0 0.2rem">الرد أو رسالة الخطأ</h4>
+            <h4 style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0 0.2rem">الرد الخام أو رسالة الخطأ</h4>
             <pre class="mono" id="sc-last-draft-res" style="max-height: 14rem"></pre>
           </details>
         </details>
@@ -1086,8 +1080,6 @@
             var data = await res.json();
             if (!res.ok || !data.ok) throw new Error("tpl");
             var t = data.templates || {};
-            document.getElementById("sc-tpl-draft-sys").textContent = t.draftSystemMessage || "";
-            document.getElementById("sc-tpl-draft-user").textContent = t.draftUserMessageTemplate || "";
             document.getElementById("sc-tpl-json").textContent = t.questionJsonContract || "";
             document.getElementById("sc-templates-wrap").style.display = "block";
             msg("تم تحميل القوالب.", true);
@@ -1172,8 +1164,7 @@
             var data = await res.json();
             if (!res.ok || !data.ok) throw new Error("draft_tpl");
             document.getElementById("sc-draft-template-sys").value = data.system || "";
-            document.getElementById("sc-draft-template-user").value = data.userTemplate || "";
-            document.getElementById("sc-draft-template-help").textContent = data.placeholdersHelp || "";
+            document.getElementById("sc-draft-template-help").textContent = "يُستخدم هذا النص كرسالة نظام لاقتراح البرومبت.";
             if (!silent) msg("تم تحميل قالب المسودة.", true);
           } catch (e) {
             msg("تعذر تحميل قالب المسودة.", false);
@@ -1714,14 +1705,20 @@
               document.getElementById("sc-prompt").value = data.draft;
               setPromptReadOnly(false);
               formatDraftUsageLine(data);
-              var resBlob = String(data.draft);
-              if (resBlob.length > 12000) resBlob = resBlob.slice(0, 12000) + "\n…(مقطوع للعرض)";
-              document.getElementById("sc-last-draft-res").textContent = resBlob;
+              document.getElementById("sc-last-draft-req").textContent = String(data.requestPrompt || reqLog);
+              document.getElementById("sc-last-draft-res").textContent = String(data.rawResponseText || data.draft || "");
               msg("تم الاقتراح — راجع النص ثم احفظ البرومبت.", true);
               setSectionStatus("sc-sec-draftai-status", "تم", false);
             } else {
               formatDraftUsageLine(null);
+              if (data.requestPrompt) {
+                document.getElementById("sc-last-draft-req").textContent = String(data.requestPrompt);
+              }
+              if (data.rawResponseText) {
+                document.getElementById("sc-last-draft-res").textContent = String(data.rawResponseText);
+              } else {
               document.getElementById("sc-last-draft-res").textContent = userVisibleApiError(data.reason, data.error, data);
+              }
               msg(userVisibleApiError(data.reason, data.error, data), false);
               setSectionStatus("sc-sec-draftai-status", "فشل", false);
             }
@@ -2066,7 +2063,6 @@
           try {
             var body = JSON.stringify({
               system: document.getElementById("sc-draft-template-sys").value,
-              userTemplate: document.getElementById("sc-draft-template-user").value,
             });
             var res = await fetch("/api/admin/simple-content/draft-template", {
               method: "PUT",

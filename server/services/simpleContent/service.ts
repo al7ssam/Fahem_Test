@@ -2,16 +2,12 @@ import { extractJsonArray, normalizeFactoryQuestionsLenient } from "../aiFactory
 import type { FactoryDifficulty, FactoryQuestion } from "../aiFactory/types";
 import { readSubcategoryEditorContext } from "./context";
 import {
-  applyDraftUserTemplatePlaceholders,
   buildDraftPromptSystemMessage,
-  buildDraftPromptUserMessageTemplate,
-  getAdminPromptTemplatesPayload,
-  SIMPLE_CONTENT_DRAFT_PLACEHOLDERS_HELP,
+  buildDraftPromptUserMessage,
   SIMPLE_QUESTION_JSON_CONTRACT,
 } from "./promptContract";
 import {
   APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM,
-  APP_KEY_SIMPLE_CONTENT_DRAFT_USER,
   APP_KEY_SIMPLE_CONTENT_DEFAULT_DRAFT_PRESET_ID,
   APP_KEY_SIMPLE_CONTENT_DEFAULT_GENERATE_PRESET_ID,
   bumpAutomationNextRun,
@@ -32,7 +28,7 @@ import {
 import { insertSimpleContentQuestions } from "./insertQuestions";
 import { resolveSimpleContentProvider } from "./llm/registry";
 import type { SimpleContentPreset } from "./types";
-import type { LLMTokenUsage } from "./llm/types";
+import type { LLMCompletionOutput, LLMTokenUsage } from "./llm/types";
 import { estimateGeminiCallCostUsd, GEMINI_PRICING_DOC_URL } from "./geminiPricing";
 import {
   estimateOpenAiCostWithPricing,
@@ -256,43 +252,30 @@ async function loadEffectiveDraftPromptParts(ctx: {
   subcategoryName: string;
   internalDescription: string;
 }): Promise<{ system: string; userFilled: string }> {
-  const [sysDb, userDb] = await Promise.all([
-    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM),
-    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_USER),
-  ]);
+  const sysDb = await getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM);
   const system = String(sysDb ?? "").trim() ? String(sysDb) : buildDraftPromptSystemMessage();
-  const userTpl = String(userDb ?? "").trim() ? String(userDb) : buildDraftPromptUserMessageTemplate();
-  const userFilled = applyDraftUserTemplatePlaceholders(userTpl, ctx);
+  const userFilled = buildDraftPromptUserMessage(ctx);
   return { system, userFilled };
 }
 
 export async function getSimpleContentDraftTemplateForAdmin(): Promise<{
   system: string;
-  userTemplate: string;
-  defaultsFromCode: { system: string; userTemplate: string };
-  placeholdersHelp: string;
+  defaultsFromCode: { system: string };
   pricingDocUrl: string;
 }> {
-  const [sysDb, userDb] = await Promise.all([
-    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM),
-    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_USER),
-  ]);
-  const defaults = getAdminPromptTemplatesPayload();
+  const sysDb = await getAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM);
+  const defaultSystem = buildDraftPromptSystemMessage();
   return {
-    system: String(sysDb ?? "").trim() ? String(sysDb) : defaults.draftSystemMessage,
-    userTemplate: String(userDb ?? "").trim() ? String(userDb) : defaults.draftUserMessageTemplate,
+    system: String(sysDb ?? "").trim() ? String(sysDb) : defaultSystem,
     defaultsFromCode: {
-      system: defaults.draftSystemMessage,
-      userTemplate: defaults.draftUserMessageTemplate,
+      system: defaultSystem,
     },
-    placeholdersHelp: SIMPLE_CONTENT_DRAFT_PLACEHOLDERS_HELP,
     pricingDocUrl: GEMINI_PRICING_DOC_URL,
   };
 }
 
-export async function saveSimpleContentDraftTemplate(input: { system: string; userTemplate: string }): Promise<void> {
+export async function saveSimpleContentDraftTemplate(input: { system: string }): Promise<void> {
   await upsertAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_SYSTEM, input.system);
-  await upsertAppSettingValue(APP_KEY_SIMPLE_CONTENT_DRAFT_USER, input.userTemplate);
 }
 
 type LlmSnap = { usage: LLMTokenUsage | null; modelText: string | null };
@@ -350,6 +333,8 @@ export async function generatePromptDraft(
   presetId?: number,
 ): Promise<{
   draft: string;
+  requestPrompt: string;
+  rawResponseText: string;
   usage: LLMTokenUsage | null;
   estimatedCostUsd: number | null;
   pricingTier: string;
@@ -364,8 +349,18 @@ export async function generatePromptDraft(
     internalDescription: ctx.internalDescription,
   });
   const provider = resolveSimpleContentProvider(preset);
-  const text = [system, "", userFilled].join("\n");
-  const out = await provider.complete({ prompt: text }, preset);
+  const requestPrompt = [system, "", userFilled].join("\n");
+  let out: LLMCompletionOutput;
+  try {
+    out = await provider.complete({ prompt: requestPrompt }, preset);
+  } catch (error) {
+    const wrapped = error instanceof Error ? error : new Error(String(error));
+    Object.assign(wrapped, {
+      requestPrompt,
+      rawResponseText: null,
+    });
+    throw wrapped;
+  }
   if (out.finishReason === "MAX_TOKENS") {
     throw new Error("layer_output_truncated_max_tokens:layer=simple_content_draft");
   }
@@ -400,6 +395,8 @@ export async function generatePromptDraft(
   }
   return {
     draft: out.text.trim(),
+    requestPrompt,
+    rawResponseText: out.rawResponseText,
     usage,
     estimatedCostUsd: costUsd,
     pricingTier: tier,

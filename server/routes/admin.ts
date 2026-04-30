@@ -236,7 +236,6 @@ const simpleContentGeneratePreviewSchema = simpleContentGenerateSchema;
 
 const simpleContentDraftTemplatePutSchema = z.object({
   system: z.string().max(200_000),
-  userTemplate: z.string().max(200_000),
 });
 
 const simpleContentAutomationPutSchema = z.object({
@@ -1894,12 +1893,22 @@ export function registerAdminRoutes(app: Express): void {
     } catch (error) {
       const reason = error instanceof Error ? error.message : "unknown_error";
       const errorKind = classifySimpleContentError(reason);
+      const requestPrompt =
+        error != null && typeof (error as { requestPrompt?: unknown }).requestPrompt === "string"
+          ? String((error as { requestPrompt: string }).requestPrompt)
+          : null;
+      const rawResponseText =
+        error != null && typeof (error as { rawResponseText?: unknown }).rawResponseText === "string"
+          ? String((error as { rawResponseText: string }).rawResponseText)
+          : null;
       res.status(500).json({
         ok: false,
         error: "draft_failed",
         reason,
         errorKind,
         errorKindHint: simpleContentErrorKindHintAr(errorKind),
+        requestPrompt,
+        rawResponseText,
       });
     }
   });
@@ -2087,7 +2096,6 @@ export function registerAdminRoutes(app: Express): void {
     try {
       await saveSimpleContentDraftTemplate({
         system: parsed.data.system,
-        userTemplate: parsed.data.userTemplate,
       });
       res.json({ ok: true });
     } catch {

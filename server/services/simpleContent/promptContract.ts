@@ -53,13 +53,9 @@ export const SIMPLE_CONTENT_DRAFT_PLACEHOLDERS_HELP =
 
 /** Static strings for admin transparency (no secrets). */
 export function getAdminPromptTemplatesPayload(): {
-  draftSystemMessage: string;
-  draftUserMessageTemplate: string;
   questionJsonContract: string;
 } {
   return {
-    draftSystemMessage: buildDraftPromptSystemMessage(),
-    draftUserMessageTemplate: buildDraftPromptUserMessageTemplate(),
     questionJsonContract: SIMPLE_QUESTION_JSON_CONTRACT,
   };
 }
