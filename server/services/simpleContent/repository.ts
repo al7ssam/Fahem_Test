@@ -313,6 +313,7 @@ type RunRow = {
   created_at: Date;
   provider: string | null;
   model_id: string | null;
+  display_question_count: string | null;
 };
 
 export async function listRuns(
@@ -328,27 +329,48 @@ export async function listRuns(
     createdAt: string;
     provider: string | null;
     modelId: string | null;
+    /** أسئلة في المعاينة من المصفوفة، أو من preview_json، أو inserted_count عند الإدراج */
+    questionCount: number | null;
   }>
 > {
   const pool = getPool();
   const r = await pool.query<RunRow>(
-    `SELECT id::text, status, trigger_kind, inserted_count::text, error, created_at, provider, model_id
+    `SELECT id::text, status, trigger_kind, inserted_count::text, error, created_at, provider, model_id,
+            COALESCE(
+              CASE
+                WHEN normalized_questions IS NOT NULL AND jsonb_typeof(normalized_questions) = 'array'
+                THEN jsonb_array_length(normalized_questions)
+              END,
+              CASE
+                WHEN preview_json IS NOT NULL
+                     AND preview_json ? 'questionCount'
+                     AND (preview_json->>'questionCount') ~ '^[0-9]+$'
+                THEN (preview_json->>'questionCount')::int
+              END,
+              CASE WHEN inserted_count > 0 THEN inserted_count END
+            )::text AS display_question_count
      FROM simple_content_runs
      WHERE subcategory_key = $1
      ORDER BY id DESC
      LIMIT $2`,
     [subcategoryKey, Math.max(1, Math.min(100, limit))],
   );
-  return r.rows.map((row) => ({
-    id: Number(row.id),
-    status: row.status,
-    triggerKind: row.trigger_kind,
-    insertedCount: Number(row.inserted_count),
-    error: row.error,
-    createdAt: row.created_at.toISOString(),
-    provider: row.provider,
-    modelId: row.model_id,
-  }));
+  return r.rows.map((row) => {
+    const qcRaw = row.display_question_count;
+    const questionCount =
+      qcRaw != null && qcRaw !== "" && Number.isFinite(Number(qcRaw)) ? Number(qcRaw) : null;
+    return {
+      id: Number(row.id),
+      status: row.status,
+      triggerKind: row.trigger_kind,
+      insertedCount: Number(row.inserted_count),
+      error: row.error,
+      createdAt: row.created_at.toISOString(),
+      provider: row.provider,
+      modelId: row.model_id,
+      questionCount,
+    };
+  });
 }
 
 export async function listDueAutomations(): Promise<SimpleContentAutomation[]> {

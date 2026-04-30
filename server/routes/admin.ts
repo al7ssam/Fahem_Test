@@ -1451,10 +1451,15 @@ export function registerAdminRoutes(app: Express): void {
       });
       res.json({ ok: true, ...result });
     } catch (error) {
+      const runId =
+        error != null && typeof (error as { runId?: unknown }).runId === "number"
+          ? (error as { runId: number }).runId
+          : undefined;
       res.status(500).json({
         ok: false,
         error: "generate_preview_failed",
         reason: error instanceof Error ? error.message : "unknown_error",
+        ...(runId != null ? { runId } : {}),
       });
     }
   });

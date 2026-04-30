@@ -378,7 +378,9 @@ export async function runSimpleContentGeneratePreview(input: {
       normalizedQuestions: null,
       ...usagePack,
     });
-    throw error;
+    const wrapped = error instanceof Error ? error : new Error(String(error));
+    Object.assign(wrapped, { runId });
+    throw wrapped;
   }
 }
 

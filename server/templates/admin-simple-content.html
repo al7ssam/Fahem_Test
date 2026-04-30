@@ -19,6 +19,11 @@
         --amber: #e8be66;
         --danger: #f87171;
         --ok: #34d399;
+        --fs-body: 0.9rem;
+        --fs-sm: 0.78rem;
+        --fs-title: 1.02rem;
+        --pad-card: 0.75rem 0.85rem;
+        --radius: 0.85rem;
       }
       * {
         box-sizing: border-box;
@@ -27,9 +32,10 @@
         margin: 0;
         min-height: 100vh;
         font-family: "Tajawal", system-ui, sans-serif;
+        font-size: var(--fs-body);
         background: linear-gradient(to bottom, var(--bg-from), var(--bg-mid), var(--bg-to));
         color: var(--text);
-        line-height: 1.55;
+        line-height: 1.52;
       }
       .wrap {
         max-width: 72rem;
@@ -133,10 +139,10 @@
       }
       .card {
         border: 1px solid var(--border);
-        border-radius: 1rem;
-        padding: 1rem;
+        border-radius: var(--radius);
+        padding: var(--pad-card);
         background: var(--card);
-        margin-top: 1rem;
+        margin-top: 0.65rem;
       }
       .card h2 {
         margin: 0 0 0.65rem;
@@ -227,15 +233,6 @@
         font-size: 0.78rem;
         color: var(--muted);
         margin-top: 0.2rem;
-      }
-      .loading-line {
-        font-size: 0.85rem;
-        color: var(--amber);
-        margin-top: 0.35rem;
-        display: none;
-      }
-      .loading-line.on {
-        display: block;
       }
       textarea.sc-draft-tpl {
         width: 100%;
@@ -375,10 +372,116 @@
         border-inline-end: 3px solid var(--amber);
       }
       .sc-top-steps {
-        font-size: 0.78rem;
+        font-size: var(--fs-sm);
         color: var(--muted);
         margin: -0.35rem 0 0.75rem;
         line-height: 1.5;
+      }
+      details.sc-region {
+        margin-top: 0.55rem;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: var(--radius);
+        padding: 0.5rem 0.65rem 0.65rem;
+        overflow: hidden;
+      }
+      details.sc-region > summary {
+        cursor: pointer;
+        list-style: none;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.35rem 0.75rem;
+        font-weight: 800;
+        font-size: var(--fs-title);
+        padding: 0.35rem 0.15rem;
+        color: #f0e6d4;
+      }
+      details.sc-region > summary::-webkit-details-marker {
+        display: none;
+      }
+      details.sc-region[open] > summary {
+        margin-bottom: 0.45rem;
+        padding-bottom: 0.4rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .sc-region-title {
+        flex: 1 1 12rem;
+      }
+      .sc-section-status {
+        font-size: var(--fs-sm);
+        font-weight: 600;
+        color: #a8e6cf;
+        min-height: 1.2em;
+      }
+      .sc-section-status[aria-busy="true"] {
+        color: var(--amber);
+      }
+      details.sc-region--project {
+        background: linear-gradient(135deg, rgba(45, 35, 70, 0.55), rgba(12, 14, 28, 0.92));
+        border-color: rgba(167, 139, 250, 0.25);
+      }
+      details.sc-region--prompt {
+        background: linear-gradient(135deg, rgba(30, 58, 55, 0.45), rgba(10, 14, 26, 0.92));
+        border-color: rgba(52, 211, 153, 0.22);
+      }
+      details.sc-region--draft {
+        background: linear-gradient(135deg, rgba(55, 48, 30, 0.5), rgba(12, 14, 26, 0.92));
+        border-color: rgba(232, 190, 102, 0.28);
+      }
+      details.sc-region--gen {
+        background: linear-gradient(135deg, rgba(40, 35, 65, 0.5), rgba(10, 12, 26, 0.92));
+        border-color: rgba(129, 140, 248, 0.28);
+      }
+      details.sc-region--review {
+        background: linear-gradient(135deg, rgba(55, 40, 40, 0.42), rgba(10, 12, 24, 0.93));
+        border-color: rgba(248, 113, 113, 0.2);
+      }
+      details.sc-region--auto {
+        background: linear-gradient(135deg, rgba(50, 38, 55, 0.45), rgba(10, 12, 24, 0.92));
+        border-color: rgba(248, 113, 113, 0.22);
+      }
+      details.sc-region--questions {
+        background: linear-gradient(135deg, rgba(35, 45, 58, 0.45), rgba(10, 12, 24, 0.92));
+        border-color: rgba(125, 211, 252, 0.2);
+      }
+      details.sc-last-draft-inner {
+        margin-top: 0.5rem;
+        border: 1px dashed rgba(255, 255, 255, 0.12);
+        border-radius: 0.55rem;
+        padding: 0.45rem 0.55rem;
+        background: rgba(0, 0, 0, 0.2);
+      }
+      details.sc-last-draft-inner > summary {
+        cursor: pointer;
+        font-size: var(--fs-sm);
+        font-weight: 700;
+        color: #d4c9a8;
+        list-style: none;
+      }
+      details.sc-last-draft-inner > summary::-webkit-details-marker {
+        display: none;
+      }
+      .sc-run-error-banner {
+        margin: 0.4rem 0 0.55rem;
+        padding: 0.45rem 0.55rem;
+        border-radius: 0.5rem;
+        background: rgba(248, 113, 113, 0.12);
+        border: 1px solid rgba(248, 113, 113, 0.35);
+        color: #fecaca;
+        font-size: var(--fs-sm);
+        font-weight: 600;
+      }
+      #sc-work .sc-step-h {
+        margin-top: 0.55rem;
+      }
+      #sc-work .sc-step-h:first-child {
+        margin-top: 0;
+      }
+      .topbar .sc-section-status {
+        flex-basis: 100%;
+        text-align: right;
+        margin-top: 0.15rem;
       }
     </style>
   </head>
@@ -396,12 +499,12 @@
         <button type="button" class="btn btn-secondary" id="sc-back">← لوحة الإدارة</button>
         <button type="button" class="btn" id="sc-load-cats">تحميل التصنيفات</button>
         <button type="button" class="btn btn-secondary" id="sc-load-templates">عرض قوالب النظام (مرجع فقط)</button>
+        <span class="sc-section-status" id="sc-sec-templates-status" aria-live="polite"></span>
       </div>
       <p class="sc-top-steps">
         ترتيب مقترح: أدخل مفتاح الإدارة ← <strong>تحميل التصنيفات</strong> ← اختر رئيسيًا ثم فرعيًا. زر «قوالب النظام» للاطلاع على النصوص المرجعية دون تعديلها هنا.
       </p>
       <div class="msg" id="sc-msg"></div>
-      <p class="loading-line" id="sc-loading-line">جاري الاتصال بالنموذج… يرجى الانتظار وعدم إغلاق الصفحة.</p>
       <div class="card" id="sc-templates-wrap" style="display: none">
         <h2>قوالب النظام (للمراجعة فقط — لا تُعدّل من هذه الصفحة)</h2>
         <p class="subtitle">مسودة اقتراح البرومبت وعقد JSON للتوليد؛ للاطلاع والنسخ. التعديل الفعلي لقالب المسودة العام من مساحة العمل داخل القسم القابل للطي.</p>
@@ -427,12 +530,14 @@
         <h2 id="sc-work-title">مساحة العمل</h2>
         <p class="subtitle" id="sc-ctx-line"></p>
         <p class="sc-path-hint">
-          <strong>مسار العمل اليومي:</strong> اكتب أو حدّث <em>برومبت هذا الفرع</em> (أو اطلب اقتراحًا بالذكاء) ← <strong>توليد معاينة</strong> ← راجع التشغيل أدناه
-          (معاينة شكل التطبيق أو JSON) ← عند الجاهزية <strong>تعميد الإدراج</strong>. إعدادات المشروع العامة والجدولة التلقائية في أسفل الصفحة أو داخل الأقسام القابلة للطي.
+          <strong>مسار العمل اليومي:</strong> اكتب أو حدّث <em>برومبت هذا الفرع</em> (أو اقتراحًا بالذكاء) ← <strong>توليد معاينة</strong> ← راجع السجل والتفاصيل (JSON أو معاينة التطبيق) ← <strong>تعميد الإدراج</strong>. تقدم كل قسم يظهر بجانب عنوانه أثناء الاتصال بالنموذج.
         </p>
 
-        <details class="sc-fold" id="sc-draft-template-fold">
-          <summary>إعدادات المشروع (تُعدّل نادرًا): قالب اقتراح <em>نص برومبت الفرع</em> عبر الذكاء — ليس برومبت التوليد نفسه</summary>
+        <details class="sc-region sc-region--project" id="sc-draft-template-fold">
+          <summary>
+            <span class="sc-region-title">إعدادات المشروع (نادرًا): قالب اقتراح <em>نص برومبت الفرع</em> بالذكاء</span>
+            <span class="sc-section-status" id="sc-sec-project-status" aria-live="polite"></span>
+          </summary>
           <div class="sc-inner-muted">
             <p class="subtitle" id="sc-draft-template-help"></p>
             <label for="sc-draft-template-sys">رسالة النظام لاقتراح البرومبت</label>
@@ -446,98 +551,127 @@
           </div>
         </details>
 
-        <h3 class="sc-step-h">أ — برومبت هذا الفرع (المحفوظ في النظام)</h3>
-        <p class="sc-step-lead">
-          هذا النص يُرسل إلى نموذج <strong>توليد الأسئلة</strong> مع تعليمات النظام. قالب المشروع أعلاه (إن فتحته) يؤثر فقط على زر «اقتراح برومبت بالذكاء» وليس على شكل JSON الناتج مباشرة.
-        </p>
-        <p class="hint" id="sc-last-usage"></p>
-        <label for="sc-prompt">نص البرومبت المحفوظ لهذا الفرع</label>
-        <textarea id="sc-prompt"></textarea>
+        <details class="sc-region sc-region--prompt" open id="sc-region-prompt">
+          <summary>
+            <span class="sc-region-title">أ — برومبت هذا الفرع (المحفوظ)</span>
+            <span class="sc-section-status" id="sc-sec-prompt-status" aria-live="polite"></span>
+          </summary>
+          <p class="sc-step-lead">
+            يُرسل إلى نموذج <strong>توليد الأسئلة</strong> مع تعليمات النظام. قالب المشروع في القسم أعلاه يخص زر «اقتراح برومبت» فقط.
+          </p>
+          <p class="hint" id="sc-last-usage"></p>
+          <label for="sc-prompt">نص البرومبت المحفوظ لهذا الفرع</label>
+          <textarea id="sc-prompt"></textarea>
+        </details>
 
-        <h3 class="sc-step-h">ب — اقتراح نص البرومبت بالذكاء (اختياري)</h3>
-        <p class="sc-step-lead">يملأ حقل البرومبت أعلاه؛ راجع النتيجة ثم احفظ إن رضيت. النموذج هنا مستقل عن نموذج توليد الأسئلة في المرحلة ج.</p>
-        <div class="row">
-          <label
-            >نموذج لاقتراح نص البرومبت
-            <select id="sc-draft-preset"></select>
-          </label>
-          <div class="hint" id="sc-draft-preset-hint"></div>
-        </div>
-        <div class="row">
-          <button type="button" class="btn btn-secondary" id="sc-save-prompt">حفظ البرومبت في النظام</button>
-          <button type="button" class="btn btn-secondary" id="sc-draft-prompt">اقتراح برومبت بالذكاء الاصطناعي</button>
-        </div>
-
-        <h3 class="sc-step-h">ج — توليد أسئلة (معاينة دون إدراج)</h3>
-        <p class="sc-step-lead">
-          يستخدم <strong>نموذج توليد الأسئلة</strong> أدناه لإخراج JSON وفق عقد النظام. بعد نجاح المعاينة يمكنك «معاينة شكل التطبيق» ثم «تعميد الإدراج».
-        </p>
-        <div class="row">
-          <label>حجم الدفعة <input type="number" id="sc-batch" min="1" max="50" value="10" /></label>
-          <label
-            >الصعوبة
-            <select id="sc-diff">
-              <option value="mix">مزيج</option>
-              <option value="easy">سهل</option>
-              <option value="medium">متوسط</option>
-              <option value="hard">صعب</option>
-            </select>
-          </label>
-          <label
-            >نموذج توليد الأسئلة
-            <select id="sc-preset"></select>
-          </label>
-          <div class="hint" id="sc-preset-hint" style="flex-basis: 100%"></div>
-        </div>
-        <div class="row">
-          <button type="button" class="btn" id="sc-generate-preview">توليد معاينة (لا إدراج)</button>
-          <button type="button" class="btn" id="sc-commit" disabled>تعميد الإدراج</button>
-        </div>
-        <p class="subtitle" id="sc-pending-note" style="display: none"></p>
-
-        <h3 class="sc-step-h">د — التشغيلات والمراجعة</h3>
-        <p class="sc-step-lead">اختر سطرًا من السجل أولًا؛ تظهر التفاصيل والطلب والرد تحته. بعد التحميل يمكنك فتح معاينة شكل التطبيق.</p>
-
-        <div class="card" style="margin-top: 0.5rem; background: rgba(0, 0, 0, 0.22)">
-          <h2 style="font-size: 0.92rem; margin: 0 0 0.35rem">سجل التشغيلات لهذا الفرع</h2>
-          <p class="subtitle" style="margin-bottom: 0.5rem">الأحدث أولًا — اضغط سطرًا لعرض التفاصيل في الكتلة التالية.</p>
-          <div class="runs" id="sc-runs"></div>
-        </div>
-
-        <div class="card" style="margin-top: 0.75rem; background: rgba(0, 0, 0, 0.25)">
-          <h2 style="font-size: 0.92rem; margin: 0 0 0.35rem">تفاصيل التشغيل المختار</h2>
+        <details class="sc-region sc-region--draft" open id="sc-region-draftai">
+          <summary>
+            <span class="sc-region-title">ب — اقتراح نص البرومبت بالذكاء (اختياري)</span>
+            <span class="sc-section-status" id="sc-sec-draftai-status" aria-live="polite"></span>
+          </summary>
+          <p class="sc-step-lead">يملأ حقل البرومبت في القسم «أ». النموذج هنا مستقل عن نموذج توليد الأسئلة في «ج».</p>
           <div class="row">
-            <span id="sc-run-meta" class="hint"></span>
+            <label
+              >نموذج لاقتراح نص البرومبت
+              <select id="sc-draft-preset"></select>
+            </label>
+            <div class="hint" id="sc-draft-preset-hint"></div>
           </div>
-          <h3 style="font-size: 0.85rem; color: var(--muted)">النص المُرسَل للنموذج</h3>
-          <pre class="mono" id="sc-run-request"></pre>
-          <h3 style="font-size: 0.85rem; color: var(--muted)">رد النموذج (نص خام)</h3>
-          <pre class="mono" id="sc-run-response"></pre>
-          <h3 style="font-size: 0.85rem; color: var(--muted)">الأسئلة المطبّعة (JSON)</h3>
-          <pre class="mono" id="sc-run-questions"></pre>
-        </div>
+          <div class="row">
+            <button type="button" class="btn btn-secondary" id="sc-save-prompt">حفظ البرومبت في النظام</button>
+            <button type="button" class="btn btn-secondary" id="sc-draft-prompt">اقتراح برومبت بالذكاء الاصطناعي</button>
+          </div>
+          <details class="sc-last-draft-inner" id="sc-last-draft-call-fold">
+            <summary>آخر استدعاء اقتراح مسودة (طلب / رد أو خطأ — للتشخيص)</summary>
+            <p class="hint" style="margin-top: 0.35rem">يُحدَّث بعد كل محاولة؛ لا يُحفظ في قاعدة البيانات.</p>
+            <h4 style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0 0.2rem">ملخص الطلب</h4>
+            <pre class="mono" id="sc-last-draft-req" style="max-height: 8rem"></pre>
+            <h4 style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0 0.2rem">الرد أو رسالة الخطأ</h4>
+            <pre class="mono" id="sc-last-draft-res" style="max-height: 14rem"></pre>
+          </details>
+        </details>
 
-        <h3 class="sc-step-h" style="margin-top: 0.85rem">معاينة شكل التطبيق (بعد وجود أسئلة مطبّعة)</h3>
-        <p class="sc-step-lead">تعتمد على آخر تشغيل محمّل أو آخر معاينة ناجحة. إن ظهرت رسالة خطأ في المعاينة، جرّب تعديل البرومبت أو إعادة «توليد المعاينة».</p>
-        <div class="row">
-          <button type="button" class="btn btn-secondary" id="sc-phone-preview-btn">فتح معاينة شكل التطبيق</button>
-        </div>
-        <div class="preview-shell" id="sc-preview-shell" hidden>
-          <div class="preview-phone" id="sc-preview-phone">
-            <div class="preview-empty">اختر تشغيلًا من السجل أو نفّذ «توليد معاينة» ثم اضغط «فتح معاينة شكل التطبيق».</div>
+        <details class="sc-region sc-region--gen" open id="sc-region-generate">
+          <summary>
+            <span class="sc-region-title">ج — توليد أسئلة (معاينة دون إدراج)</span>
+            <span class="sc-section-status" id="sc-sec-generate-status" aria-live="polite"></span>
+          </summary>
+          <p class="sc-step-lead">نموذج توليد الأسئلة وJSON العقد. بعد نجاح المعاينة يمكن التعميد أو معاينة شكل التطبيق من قسم «د».</p>
+          <div class="row">
+            <label>حجم الدفعة <input type="number" id="sc-batch" min="1" max="50" value="10" /></label>
+            <label
+              >الصعوبة
+              <select id="sc-diff">
+                <option value="mix">مزيج</option>
+                <option value="easy">سهل</option>
+                <option value="medium">متوسط</option>
+                <option value="hard">صعب</option>
+              </select>
+            </label>
+            <label
+              >نموذج توليد الأسئلة
+              <select id="sc-preset"></select>
+            </label>
+            <div class="hint" id="sc-preset-hint" style="flex-basis: 100%"></div>
           </div>
-          <div class="row" style="margin-top: 0.65rem; justify-content: center">
-            <button type="button" class="btn btn-secondary" id="sc-preview-prev">السابق</button>
-            <button type="button" class="btn btn-secondary" id="sc-preview-next">التالي</button>
-            <button type="button" class="btn btn-secondary" id="sc-preview-close">إغلاق المعاينة</button>
+          <div class="row">
+            <button type="button" class="btn" id="sc-generate-preview">توليد معاينة (لا إدراج)</button>
+            <button type="button" class="btn" id="sc-commit" disabled>تعميد الإدراج</button>
           </div>
-        </div>
+          <p class="subtitle" id="sc-pending-note" style="display: none"></p>
+        </details>
 
-        <details class="sc-fold" id="sc-auto-fold" style="margin-top: 1rem; border-color: rgba(248, 113, 113, 0.28)">
-          <summary>جدولة تلقائية — إدراج مباشر دون تعميد (مسار مختلف عن المعاينة اليدوية)</summary>
+        <details class="sc-region sc-region--review" open id="sc-region-review">
+          <summary>
+            <span class="sc-region-title">د — السجل، التفاصيل، ومعاينة التطبيق</span>
+            <span class="sc-section-status" id="sc-sec-review-status" aria-live="polite"></span>
+          </summary>
+          <p class="sc-step-lead">اختر سطرًا من السجل (يُظهر النموذج وعدد الأسئلة). تُعرض الطلبات والردود أيضًا عند فشل التشغيل.</p>
+
+          <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
+            <h2 style="font-size: 0.88rem; margin: 0 0 0.3rem">سجل التشغيلات</h2>
+            <p class="subtitle" style="margin-bottom: 0.4rem; font-size: var(--fs-sm)">الأحدث أولًا — النموذج وعدد الأسئلة في السطر.</p>
+            <div class="runs" id="sc-runs"></div>
+          </div>
+
+          <div class="card" style="margin-top: 0.5rem; background: rgba(0, 0, 0, 0.28)">
+            <h2 style="font-size: 0.88rem; margin: 0 0 0.3rem">تفاصيل التشغيل المختار</h2>
+            <div class="row">
+              <span id="sc-run-meta" class="hint"></span>
+            </div>
+            <div id="sc-run-error-banner" class="sc-run-error-banner" hidden role="alert"></div>
+            <h3 style="font-size: 0.82rem; color: var(--muted)">النص المُرسَل للنموذج</h3>
+            <pre class="mono" id="sc-run-request"></pre>
+            <h3 style="font-size: 0.82rem; color: var(--muted)">رد النموذج (نص خام)</h3>
+            <pre class="mono" id="sc-run-response"></pre>
+            <h3 style="font-size: 0.82rem; color: var(--muted)">الأسئلة المطبّعة (JSON)</h3>
+            <pre class="mono" id="sc-run-questions"></pre>
+          </div>
+
+          <p class="sc-step-lead" style="margin-top: 0.65rem">معاينة شكل التطبيق (بعد وجود أسئلة مطبّعة في التشغيل المحمّل)</p>
+          <div class="row">
+            <button type="button" class="btn btn-secondary" id="sc-phone-preview-btn">فتح معاينة شكل التطبيق</button>
+          </div>
+          <div class="preview-shell" id="sc-preview-shell" hidden>
+            <div class="preview-phone" id="sc-preview-phone">
+              <div class="preview-empty">اختر تشغيلًا من السجل أو نفّذ «توليد معاينة» ثم اضغط «فتح معاينة شكل التطبيق».</div>
+            </div>
+            <div class="row" style="margin-top: 0.65rem; justify-content: center">
+              <button type="button" class="btn btn-secondary" id="sc-preview-prev">السابق</button>
+              <button type="button" class="btn btn-secondary" id="sc-preview-next">التالي</button>
+              <button type="button" class="btn btn-secondary" id="sc-preview-close">إغلاق المعاينة</button>
+            </div>
+          </div>
+        </details>
+
+        <details class="sc-region sc-region--auto" id="sc-auto-fold">
+          <summary>
+            <span class="sc-region-title">جدولة تلقائية — إدراج مباشر دون تعميد</span>
+            <span class="sc-section-status" id="sc-sec-auto-status" aria-live="polite"></span>
+          </summary>
           <div class="sc-inner-muted">
             <p class="sc-step-lead" style="margin-top: 0">
-              عند التفعيل يُدرج المحتوى تلقائيًا حسب الجدولة؛ لا يمر بخطوة «تعميد الإدراج» أعلاه. راجع النموذج والفاصل الزمني بعناية.
+              عند التفعيل يُدرج المحتوى تلقائيًا؛ لا يمر بخطوة «تعميد الإدراج». راجع النموذج والفاصل بعناية.
             </p>
             <div class="row">
               <label><input type="checkbox" id="sc-auto-en" /> تفعيل الجدولة</label>
@@ -552,8 +686,13 @@
           </div>
         </details>
 
-        <h2 style="margin-top: 1.15rem; font-size: 0.95rem; color: var(--muted)">أسئلة هذا الفرع في النظام</h2>
-        <div id="sc-questions-list" class="runs"></div>
+        <details class="sc-region sc-region--questions" id="sc-region-questions">
+          <summary>
+            <span class="sc-region-title">أسئلة هذا الفرع في النظام</span>
+            <span class="sc-section-status" id="sc-sec-questions-status" aria-live="polite"></span>
+          </summary>
+          <div id="sc-questions-list" class="runs"></div>
+        </details>
       </div>
     </div>
     <script>
@@ -567,16 +706,25 @@
         var scPreviewItems = [];
         var scPreviewIndex = 0;
         var highlightedRunId = null;
-        var BUSY_IDS = [
+        var WORK_ACTION_IDS = [
+          "sc-save-prompt",
+          "sc-draft-prompt",
           "sc-generate-preview",
           "sc-commit",
-          "sc-draft-prompt",
-          "sc-save-prompt",
-          "sc-save-auto",
-          "sc-load-templates",
           "sc-draft-template-load",
           "sc-draft-template-save",
+          "sc-save-auto",
         ];
+        var SECTION = {
+          templates: { status: "sc-sec-templates-status", buttons: ["sc-load-templates"] },
+          project: { status: "sc-sec-project-status", buttons: ["sc-draft-template-load", "sc-draft-template-save"] },
+          prompt: { status: "sc-sec-prompt-status", buttons: ["sc-save-prompt"] },
+          draftAi: { status: "sc-sec-draftai-status", buttons: ["sc-draft-prompt"] },
+          generate: { status: "sc-sec-generate-status", buttons: ["sc-generate-preview"] },
+          review: { status: "sc-sec-review-status", buttons: [] },
+          auto: { status: "sc-sec-auto-status", buttons: ["sc-save-auto"] },
+          questions: { status: "sc-sec-questions-status", buttons: [] },
+        };
 
         function secret() {
           return String(document.getElementById("sc-secret").value || "").trim();
@@ -629,13 +777,34 @@
           return { headers: { "X-Admin-Secret": secret(), "Content-Type": "application/json" } };
         }
 
-        function setBusy(on) {
-          BUSY_IDS.forEach(function (id) {
-            var el = document.getElementById(id);
-            if (el) el.disabled = !!on;
+        function setSectionStatus(statusId, text, busy) {
+          var el = document.getElementById(statusId);
+          if (!el) return;
+          el.textContent = text || "";
+          el.setAttribute("aria-busy", busy ? "true" : "false");
+        }
+
+        function setSectionBusy(sectionKey, on, statusText) {
+          var sec = SECTION[sectionKey];
+          if (!sec) return;
+          (sec.buttons || []).forEach(function (id) {
+            var b = document.getElementById(id);
+            if (b) b.disabled = !!on;
           });
-          var line = document.getElementById("sc-loading-line");
-          if (line) line.className = "loading-line" + (on ? " on" : "");
+          setSectionStatus(sec.status, on ? statusText || "… جاري" : "", !!on);
+        }
+
+        function setWorkActionsDisabled(on) {
+          WORK_ACTION_IDS.forEach(function (id) {
+            var b = document.getElementById(id);
+            if (b) b.disabled = !!on;
+          });
+        }
+
+        /** تعطيل أزرار المسار أثناء تحميل مساحة العمل بالكامل */
+        function setWorkspaceLoading(on) {
+          setWorkActionsDisabled(on);
+          setSectionStatus("sc-sec-review-status", on ? "جاري تحميل بيانات الفرع…" : "", !!on);
         }
 
         function formatDraftUsageLine(data) {
@@ -692,7 +861,7 @@
             msg("أدخل مفتاح الإدارة.", false);
             return;
           }
-          setBusy(true);
+          setSectionBusy("templates", true, "جاري التحميل…");
           try {
             var res = await fetch("/api/admin/simple-content/prompt-templates", hdr());
             var data = await res.json();
@@ -703,10 +872,12 @@
             document.getElementById("sc-tpl-json").textContent = t.questionJsonContract || "";
             document.getElementById("sc-templates-wrap").style.display = "block";
             msg("تم تحميل القوالب.", true);
+            setSectionStatus("sc-sec-templates-status", "تم", false);
           } catch (e) {
             msg("تعذر تحميل القوالب.", false);
+            setSectionStatus("sc-sec-templates-status", "فشل", false);
           } finally {
-            setBusy(false);
+            setSectionBusy("templates", false);
           }
         });
 
@@ -903,10 +1074,12 @@
 
         async function loadRunDetail(id) {
           if (!secret() || !id) return;
+          setSectionStatus("sc-sec-review-status", "جاري تحميل التشغيل…", true);
           var res = await fetch("/api/admin/simple-content/runs/" + id, hdr());
           var data = await res.json();
           if (!res.ok || !data.ok || !data.run) {
             msg("تعذر تحميل التشغيل.", false);
+            setSectionStatus("sc-sec-review-status", "", false);
             return;
           }
           var r = data.run;
@@ -920,6 +1093,7 @@
             r.triggerKind +
             " | إدراج " +
             r.insertedCount;
+          if (r.modelId) meta += " | نموذج: " + r.modelId;
           if (r.usageInputTokens != null || r.usageOutputTokens != null || r.usageTotalTokens != null) {
             meta +=
               " | توكنز: دخل " +
@@ -933,8 +1107,24 @@
             meta += " | تقدير التكلفة ≈ $" + Number(r.estimatedCostUsd).toFixed(6) + " USD";
           }
           document.getElementById("sc-run-meta").textContent = meta;
-          document.getElementById("sc-run-request").textContent = r.requestPrompt || "—";
-          document.getElementById("sc-run-response").textContent = r.modelResponse || "—";
+          var ban = document.getElementById("sc-run-error-banner");
+          if (ban) {
+            if (r.error) {
+              ban.hidden = false;
+              ban.textContent = "خطأ التشغيل: " + r.error;
+            } else {
+              ban.hidden = true;
+              ban.textContent = "";
+            }
+          }
+          var reqText = r.requestPrompt != null && String(r.requestPrompt).trim() !== "" ? r.requestPrompt : "—";
+          document.getElementById("sc-run-request").textContent = reqText;
+          var rawResp = r.modelResponse != null ? String(r.modelResponse).trim() : "";
+          document.getElementById("sc-run-response").textContent =
+            rawResp ||
+            (r.status === "failed"
+              ? "— (لا يوجد نص رد محفوظ — ربما انقطع الطلب قبل اكتمال رد النموذج.)"
+              : "—");
           try {
             document.getElementById("sc-run-questions").textContent =
               r.normalizedQuestions != null ? JSON.stringify(r.normalizedQuestions, null, 2) : r.previewJson != null ? JSON.stringify(r.previewJson, null, 2) : "—";
@@ -948,10 +1138,12 @@
           }
           highlightedRunId = r.id;
           updateRunListHighlight(r.id);
+          setSectionStatus("sc-sec-review-status", "تم التحميل", false);
         }
 
         async function refreshQuestionsList() {
           if (!selectedSubKey || !secret()) return;
+          setSectionStatus("sc-sec-questions-status", "جاري التحميل…", true);
           var enc = encodeURIComponent(selectedSubKey);
           var res = await fetch("/api/admin/questions?subcategoryKey=" + enc + "&limit=40", hdr());
           var data = await res.json();
@@ -959,11 +1151,13 @@
           box.innerHTML = "";
           if (!res.ok || !data.ok) {
             box.textContent = "تعذر تحميل الأسئلة.";
+            setSectionStatus("sc-sec-questions-status", "فشل", false);
             return;
           }
           var items = data.items || [];
           if (!items.length) {
             box.textContent = "لا توجد أسئلة لهذا الفرع بعد.";
+            setSectionStatus("sc-sec-questions-status", "—", false);
             return;
           }
           items.forEach(function (q) {
@@ -986,6 +1180,7 @@
             row.appendChild(btn);
             box.appendChild(row);
           });
+          setSectionStatus("sc-sec-questions-status", "تم (" + items.length + ")", false);
         }
 
         async function openWorkspace(subKey, subName, mainName) {
@@ -1002,6 +1197,11 @@
           document.getElementById("sc-run-response").textContent = "";
           document.getElementById("sc-run-questions").textContent = "";
           document.getElementById("sc-run-meta").textContent = "";
+          var ban0 = document.getElementById("sc-run-error-banner");
+          if (ban0) {
+            ban0.hidden = true;
+            ban0.textContent = "";
+          }
           if (!secret()) {
             msg("أدخل مفتاح الإدارة أعلاه لتحميل البرومبت والنماذج والتوليد.", false);
             document.getElementById("sc-prompt").value = "";
@@ -1013,6 +1213,7 @@
             return;
           }
           msg("جاري تحميل البرومبت…", true);
+          setWorkspaceLoading(true);
           try {
             var enc = encodeURIComponent(subKey);
             var [ctxRes, prRes, presetsRes, autoRes, runsRes] = await Promise.all([
@@ -1050,6 +1251,8 @@
             await loadDraftTemplateFromApi(true);
           } catch (e) {
             msg("تعذر تحميل بيانات الفرع.", false);
+          } finally {
+            setWorkspaceLoading(false);
           }
         }
 
@@ -1066,6 +1269,9 @@
             b.type = "button";
             b.className = "run-line";
             b.setAttribute("data-run-id", String(r.id));
+            var mid = r.modelId ? String(r.modelId) : "—";
+            if (mid.length > 36) mid = mid.slice(0, 34) + "…";
+            var qc = r.questionCount != null && r.questionCount !== "" ? r.questionCount : "—";
             b.textContent =
               r.createdAt +
               " | #" +
@@ -1074,9 +1280,13 @@
               r.status +
               " | " +
               r.triggerKind +
+              " | نموذج: " +
+              mid +
+              " | أسئلة: " +
+              qc +
               " | إدراج " +
               r.insertedCount +
-              (r.error ? " | " + r.error : "");
+              (r.error ? " | ⚠ " + String(r.error).slice(0, 80) + (String(r.error).length > 80 ? "…" : "") : "");
             b.addEventListener("click", function () {
               void loadRunDetail(r.id);
             });
@@ -1087,24 +1297,37 @@
 
         document.getElementById("sc-save-prompt").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
-          setBusy(true);
+          setSectionBusy("prompt", true, "جاري الحفظ…");
           try {
             var enc = encodeURIComponent(selectedSubKey);
             var body = JSON.stringify({ promptBody: document.getElementById("sc-prompt").value });
             var res = await fetch("/api/admin/simple-content/prompt/" + enc, { method: "PUT", headers: hdr().headers, body: body });
             var data = await res.json();
             msg(res.ok && data.ok ? "تم حفظ البرومبت." : "فشل الحفظ.", res.ok && data.ok);
+            setSectionStatus("sc-sec-prompt-status", res.ok && data.ok ? "تم الحفظ" : "فشل", false);
           } finally {
-            setBusy(false);
+            setSectionBusy("prompt", false);
           }
         });
 
         document.getElementById("sc-draft-prompt").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
           msg("جاري الاتصال بالنموذج لاقتراح مسودة…", true);
-          setBusy(true);
+          var draftPid = Number(document.getElementById("sc-draft-preset").value);
+          var preset = lastPresetsItems.find(function (x) {
+            return String(x.id) === String(draftPid);
+          });
+          var reqLog =
+            "POST /api/admin/simple-content/prompt/generate-draft\nsubcategoryKey: " +
+            selectedSubKey +
+            (Number.isFinite(draftPid) && draftPid > 0 ? "\npresetId: " + draftPid : "") +
+            (preset ? "\nنموذج: " + preset.modelId + " (" + preset.provider + ")" : "");
+          document.getElementById("sc-last-draft-req").textContent = reqLog;
+          document.getElementById("sc-last-draft-res").textContent = "…";
+          var fold = document.getElementById("sc-last-draft-call-fold");
+          if (fold) fold.open = true;
+          setSectionBusy("draftAi", true, "جاري الاقتراح…");
           try {
-            var draftPid = Number(document.getElementById("sc-draft-preset").value);
             var body = { subcategoryKey: selectedSubKey };
             if (Number.isFinite(draftPid) && draftPid > 0) body.presetId = draftPid;
             var res = await fetch("/api/admin/simple-content/prompt/generate-draft", {
@@ -1116,20 +1339,30 @@
             if (res.ok && data.ok && data.draft) {
               document.getElementById("sc-prompt").value = data.draft;
               formatDraftUsageLine(data);
+              var resBlob = String(data.draft);
+              if (resBlob.length > 12000) resBlob = resBlob.slice(0, 12000) + "\n…(مقطوع للعرض)";
+              document.getElementById("sc-last-draft-res").textContent = resBlob;
               msg("تم توليد مسودة — راجعها ثم احفظ.", true);
+              setSectionStatus("sc-sec-draftai-status", "تم", false);
             } else {
               formatDraftUsageLine(null);
+              document.getElementById("sc-last-draft-res").textContent = userVisibleApiError(data.reason, data.error);
               msg(userVisibleApiError(data.reason, data.error), false);
+              setSectionStatus("sc-sec-draftai-status", "فشل", false);
             }
+          } catch (e) {
+            document.getElementById("sc-last-draft-res").textContent = e instanceof Error ? e.message : String(e);
+            msg("فشل الاتصال أو تحليل الاستجابة.", false);
+            setSectionStatus("sc-sec-draftai-status", "فشل", false);
           } finally {
-            setBusy(false);
+            setSectionBusy("draftAi", false);
           }
         });
 
         document.getElementById("sc-generate-preview").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
           msg("جاري توليد المعاينة…", true);
-          setBusy(true);
+          setSectionBusy("generate", true, "جاري التوليد…");
           try {
             var body = JSON.stringify({
               subcategoryKey: selectedSubKey,
@@ -1137,12 +1370,24 @@
               difficultyMode: document.getElementById("sc-diff").value,
               presetId: Number(document.getElementById("sc-preset").value),
             });
-            var res = await fetch("/api/admin/simple-content/generate-preview", {
-              method: "POST",
-              headers: hdr().headers,
-              body: body,
-            });
-            var data = await res.json();
+            var res;
+            try {
+              res = await fetch("/api/admin/simple-content/generate-preview", {
+                method: "POST",
+                headers: hdr().headers,
+                body: body,
+              });
+            } catch (netErr) {
+              msg("فشل الشبكة أثناء توليد المعاينة.", false);
+              setSectionStatus("sc-sec-generate-status", "فشل شبكة", false);
+              return;
+            }
+            var data = {};
+            try {
+              data = await res.json();
+            } catch (parseErr) {
+              data = { ok: false, reason: "تعذر قراءة جسم الاستجابة." };
+            }
             if (res.ok && data.ok && data.runId) {
               msg("تمت المعاينة — راجع التفاصيل ثم عمّد.", true);
               await loadRunDetail(data.runId);
@@ -1150,11 +1395,31 @@
               var rr = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr());
               var rj = await rr.json();
               if (rr.ok && rj.ok) renderRuns(rj.items || []);
+              setSectionStatus("sc-sec-generate-status", "تم المعاينة", false);
+              var revOk = document.getElementById("sc-region-review");
+              if (revOk) {
+                revOk.open = true;
+                revOk.scrollIntoView({ behavior: "smooth", block: "nearest" });
+              }
             } else {
               msg(userVisibleApiError(data.reason, data.error), false);
+              setSectionStatus("sc-sec-generate-status", "فشل", false);
+              if (data.runId != null) {
+                highlightedRunId = data.runId;
+                var enc2 = encodeURIComponent(selectedSubKey);
+                var rr2 = await fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc2 + "&limit=20", hdr());
+                var rj2 = await rr2.json();
+                if (rr2.ok && rj2.ok) renderRuns(rj2.items || []);
+                await loadRunDetail(data.runId);
+                var rev = document.getElementById("sc-region-review");
+                if (rev) {
+                  rev.open = true;
+                  rev.scrollIntoView({ behavior: "smooth", block: "nearest" });
+                }
+              }
             }
           } finally {
-            setBusy(false);
+            setSectionBusy("generate", false);
           }
         });
 
@@ -1162,7 +1427,7 @@
           if (!secret() || pendingRunId == null) return;
           var rid = pendingRunId;
           msg("جاري تعميد الإدراج…", true);
-          setBusy(true);
+          setSectionBusy("generate", true, "جاري التعميد…");
           try {
             var res = await fetch("/api/admin/simple-content/runs/" + rid + "/commit", {
               method: "POST",
@@ -1179,17 +1444,19 @@
               if (rr.ok && rj.ok) renderRuns(rj.items || []);
               await refreshQuestionsList();
               await loadRunDetail(rid);
+              setSectionStatus("sc-sec-generate-status", "تم التعميد", false);
             } else {
               msg(userVisibleApiError(data.reason, data.error), false);
+              setSectionStatus("sc-sec-generate-status", "فشل التعميد", false);
             }
           } finally {
-            setBusy(false);
+            setSectionBusy("generate", false);
           }
         });
 
         document.getElementById("sc-save-auto").addEventListener("click", async function () {
           if (!selectedSubKey || !secret()) return;
-          setBusy(true);
+          setSectionBusy("auto", true, "جاري الحفظ…");
           try {
             var enc = encodeURIComponent(selectedSubKey);
             var pid = Number(document.getElementById("sc-auto-preset").value);
@@ -1205,24 +1472,26 @@
             });
             var data = await res.json();
             msg(res.ok && data.ok ? "تم حفظ الجدولة." : "فشل حفظ الجدولة.", res.ok && data.ok);
+            setSectionStatus("sc-sec-auto-status", res.ok && data.ok ? "تم" : "فشل", false);
           } finally {
-            setBusy(false);
+            setSectionBusy("auto", false);
           }
         });
 
         document.getElementById("sc-draft-template-load").addEventListener("click", async function () {
           if (!secret()) return;
-          setBusy(true);
+          setSectionBusy("project", true, "جاري التحميل…");
           try {
             await loadDraftTemplateFromApi(false);
+            setSectionStatus("sc-sec-project-status", "تم التحميل", false);
           } finally {
-            setBusy(false);
+            setSectionBusy("project", false);
           }
         });
 
         document.getElementById("sc-draft-template-save").addEventListener("click", async function () {
           if (!secret()) return;
-          setBusy(true);
+          setSectionBusy("project", true, "جاري الحفظ…");
           try {
             var body = JSON.stringify({
               system: document.getElementById("sc-draft-template-sys").value,
@@ -1235,8 +1504,9 @@
             });
             var data = await res.json();
             msg(res.ok && data.ok ? "تم حفظ قالب المسودة." : "فشل حفظ القالب.", res.ok && data.ok);
+            setSectionStatus("sc-sec-project-status", res.ok && data.ok ? "تم الحفظ" : "فشل", false);
           } finally {
-            setBusy(false);
+            setSectionBusy("project", false);
           }
         });
 
