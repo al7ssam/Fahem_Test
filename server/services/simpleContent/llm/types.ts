@@ -6,6 +6,7 @@ export type LLMCompletionInput = {
 
 export type LLMTokenUsage = {
   inputTokens: number;
+  cachedInputTokens?: number;
   outputTokens: number;
   totalTokens: number;
 };

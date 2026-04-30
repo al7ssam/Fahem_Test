@@ -24,6 +24,7 @@ import {
   listActivePresets,
   listDueAutomations,
   getRunsUsageSummaryForSubcategory,
+  insertSimpleContentPricingAuditLog,
   listRuns,
   upsertAppSettingValue,
   upsertPromptBody,
@@ -33,12 +34,25 @@ import { resolveSimpleContentProvider } from "./llm/registry";
 import type { SimpleContentPreset } from "./types";
 import type { LLMTokenUsage } from "./llm/types";
 import { estimateGeminiCallCostUsd, GEMINI_PRICING_DOC_URL } from "./geminiPricing";
-import { estimateOpenAiCallCostUsd, OPENAI_PRICING_DOC_URL } from "./openaiPricing";
+import {
+  estimateOpenAiCostWithPricing,
+  OPENAI_DEFAULT_PRICING_TABLE,
+  OPENAI_PRICING_DOC_URL,
+  type OpenAiPriceRow,
+} from "./openaiPricing";
 
 const PRICING_DISCLAIMER_AR =
   "تقدير تقريبي بناءً على أسعار المنشورات الرسمية لـ Google (طبقة Standard)؛ الفاتورة الفعلية من مزود الخدمة.";
 const OPENAI_PRICING_DISCLAIMER_AR =
   "تقدير تقريبي بناءً على أسعار OpenAI الرسمية؛ الفاتورة الفعلية من مزود الخدمة.";
+const APP_KEY_SIMPLE_CONTENT_OPENAI_PRICING_V1 = "simple_content_openai_pricing_v1";
+const APP_KEY_SIMPLE_CONTENT_OPENAI_PRICING_FALLBACK_POLICY = "simple_content_openai_pricing_fallback_policy";
+
+type OpenAiPricingFallbackPolicy = "use_default" | "block";
+type OpenAiPricingSettings = {
+  fallbackPolicy: OpenAiPricingFallbackPolicy;
+  models: Record<string, OpenAiPriceRow>;
+};
 
 function getPricingDocUrlByProvider(provider: SimpleContentPreset["provider"]): string {
   return provider === "openai" ? OPENAI_PRICING_DOC_URL : GEMINI_PRICING_DOC_URL;
@@ -88,34 +102,136 @@ export async function buildFinalSimpleContentPromptForAdmin(input: {
   return { prompt };
 }
 
-function packUsageForFinalize(
+function parseOpenAiPricingSettings(raw: string | null): Record<string, OpenAiPriceRow> {
+  if (!raw || !String(raw).trim()) return {};
+  try {
+    const obj = JSON.parse(raw) as Record<
+      string,
+      { inputPer1M?: unknown; cachedInputPer1M?: unknown; outputPer1M?: unknown; note?: unknown }
+    >;
+    const out: Record<string, OpenAiPriceRow> = {};
+    Object.keys(obj || {}).forEach((k) => {
+      const row = obj[k];
+      const inputPer1M = Number(row?.inputPer1M ?? NaN);
+      const cachedInputPer1M = Number(row?.cachedInputPer1M ?? NaN);
+      const outputPer1M = Number(row?.outputPer1M ?? NaN);
+      if (!k.trim() || !Number.isFinite(inputPer1M) || !Number.isFinite(cachedInputPer1M) || !Number.isFinite(outputPer1M)) {
+        return;
+      }
+      out[k] = {
+        inputPer1M: Math.max(0, inputPer1M),
+        cachedInputPer1M: Math.max(0, cachedInputPer1M),
+        outputPer1M: Math.max(0, outputPer1M),
+        note: typeof row?.note === "string" && row.note.trim() ? row.note.trim() : `admin:${k}`,
+      };
+    });
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function getOpenAiPricingSettings(): Promise<OpenAiPricingSettings> {
+  const [pricingRaw, fallbackRaw] = await Promise.all([
+    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_OPENAI_PRICING_V1),
+    getAppSettingValue(APP_KEY_SIMPLE_CONTENT_OPENAI_PRICING_FALLBACK_POLICY),
+  ]);
+  const fallbackPolicy: OpenAiPricingFallbackPolicy =
+    String(fallbackRaw ?? "").trim().toLowerCase() === "block" ? "block" : "use_default";
+  return {
+    fallbackPolicy,
+    models: parseOpenAiPricingSettings(pricingRaw),
+  };
+}
+
+function resolveOpenAiModelPricing(
+  modelId: string,
+  settings: OpenAiPricingSettings,
+): { row: OpenAiPriceRow; source: "admin" | "default" } {
+  const fromAdmin = settings.models[modelId];
+  if (fromAdmin) return { row: fromAdmin, source: "admin" };
+  const fromDefault = OPENAI_DEFAULT_PRICING_TABLE[modelId];
+  if (fromDefault && settings.fallbackPolicy === "use_default") {
+    console.warn(`[simple_content_pricing] missing admin pricing model=${modelId}; fallback=default`);
+    return { row: fromDefault, source: "default" };
+  }
+  throw new Error(`openai_pricing_missing_model:${modelId}`);
+}
+
+async function packUsageForFinalize(
   preset: SimpleContentPreset,
   usage: LLMTokenUsage | null | undefined,
-): {
+): Promise<{
   usageInputTokens: number | null;
+  usageCachedInputTokens: number | null;
   usageOutputTokens: number | null;
   usageTotalTokens: number | null;
   estimatedCostUsd: number | null;
-} {
+  pricingInputPer1M: number | null;
+  pricingCachedInputPer1M: number | null;
+  pricingOutputPer1M: number | null;
+  pricingSource: string | null;
+}> {
   if (!usage) {
-    return { usageInputTokens: null, usageOutputTokens: null, usageTotalTokens: null, estimatedCostUsd: null };
+    return {
+      usageInputTokens: null,
+      usageCachedInputTokens: null,
+      usageOutputTokens: null,
+      usageTotalTokens: null,
+      estimatedCostUsd: null,
+      pricingInputPer1M: null,
+      pricingCachedInputPer1M: null,
+      pricingOutputPer1M: null,
+      pricingSource: null,
+    };
   }
   const inT = usage.inputTokens;
+  const cachedInT = usage.cachedInputTokens ?? 0;
   const outT = usage.outputTokens;
   const tot = usage.totalTokens;
   if (preset.provider !== "gemini") {
     if (preset.provider === "openai") {
-      const { usd } = estimateOpenAiCallCostUsd(preset.modelId, inT, outT);
-      return { usageInputTokens: inT, usageOutputTokens: outT, usageTotalTokens: tot, estimatedCostUsd: usd };
+      const pricingSettings = await getOpenAiPricingSettings();
+      const { row, source } = resolveOpenAiModelPricing(preset.modelId, pricingSettings);
+      const est = estimateOpenAiCostWithPricing(
+        { inputTokens: inT, cachedInputTokens: cachedInT, outputTokens: outT },
+        row,
+      );
+      return {
+        usageInputTokens: inT,
+        usageCachedInputTokens: cachedInT,
+        usageOutputTokens: outT,
+        usageTotalTokens: tot,
+        estimatedCostUsd: est.usd,
+        pricingInputPer1M: row.inputPer1M,
+        pricingCachedInputPer1M: row.cachedInputPer1M,
+        pricingOutputPer1M: row.outputPer1M,
+        pricingSource: source,
+      };
     }
-    return { usageInputTokens: inT, usageOutputTokens: outT, usageTotalTokens: tot, estimatedCostUsd: null };
+    return {
+      usageInputTokens: inT,
+      usageCachedInputTokens: cachedInT,
+      usageOutputTokens: outT,
+      usageTotalTokens: tot,
+      estimatedCostUsd: null,
+      pricingInputPer1M: null,
+      pricingCachedInputPer1M: null,
+      pricingOutputPer1M: null,
+      pricingSource: null,
+    };
   }
   const { usd } = estimateGeminiCallCostUsd(preset.modelId, inT, outT);
   return {
     usageInputTokens: inT,
+    usageCachedInputTokens: null,
     usageOutputTokens: outT,
     usageTotalTokens: tot,
     estimatedCostUsd: usd,
+    pricingInputPer1M: null,
+    pricingCachedInputPer1M: null,
+    pricingOutputPer1M: null,
+    pricingSource: null,
   };
 }
 
@@ -260,9 +376,18 @@ export async function generatePromptDraft(
     if (!usage) {
       tier = "no_usage_metadata";
     } else {
-      const est = estimateOpenAiCallCostUsd(preset.modelId, usage.inputTokens, usage.outputTokens);
+      const pricingSettings = await getOpenAiPricingSettings();
+      const { row, source } = resolveOpenAiModelPricing(preset.modelId, pricingSettings);
+      const est = estimateOpenAiCostWithPricing(
+        {
+          inputTokens: usage.inputTokens,
+          cachedInputTokens: usage.cachedInputTokens ?? 0,
+          outputTokens: usage.outputTokens,
+        },
+        row,
+      );
       costUsd = est.usd;
-      tier = est.pricingTier;
+      tier = `${source}:${est.pricingTier}`;
     }
   } else if (preset.provider !== "gemini") {
     tier = "unknown_provider";
@@ -322,7 +447,7 @@ export async function runSimpleContentGenerate(input: {
       },
       snap,
     );
-    const usagePack = packUsageForFinalize(preset, snap.usage);
+    const usagePack = await packUsageForFinalize(preset, snap.usage);
     const questionIds = await insertSimpleContentQuestions(finalQuestions);
     await finalizeSimpleContentRun(runId, {
       status: "succeeded",
@@ -341,7 +466,7 @@ export async function runSimpleContentGenerate(input: {
     return { runId, inserted: questionIds.length };
   } catch (error) {
     const msg = error instanceof Error ? error.message : "unknown_error";
-    const usagePack = packUsageForFinalize(preset, snap.usage);
+    const usagePack = await packUsageForFinalize(preset, snap.usage);
     await finalizeSimpleContentRun(runId, {
       status: "failed",
       insertedCount: 0,
@@ -394,7 +519,7 @@ export async function runSimpleContentGeneratePreview(input: {
       },
       snap,
     );
-    const usagePack = packUsageForFinalize(preset, snap.usage);
+    const usagePack = await packUsageForFinalize(preset, snap.usage);
     await finalizeSimpleContentRun(runId, {
       status: "pending_review",
       insertedCount: 0,
@@ -411,7 +536,7 @@ export async function runSimpleContentGeneratePreview(input: {
     return { runId, questionCount: finalQuestions.length };
   } catch (error) {
     const msg = error instanceof Error ? error.message : "unknown_error";
-    const usagePack = packUsageForFinalize(preset, snap.usage);
+    const usagePack = await packUsageForFinalize(preset, snap.usage);
     await finalizeSimpleContentRun(runId, {
       status: "failed",
       insertedCount: 0,
@@ -452,9 +577,14 @@ export async function commitSimpleContentRun(runId: number): Promise<{ inserted:
     modelResponse: run.modelResponse,
     normalizedQuestions: null,
     usageInputTokens: run.usageInputTokens,
+    usageCachedInputTokens: run.usageCachedInputTokens,
     usageOutputTokens: run.usageOutputTokens,
     usageTotalTokens: run.usageTotalTokens,
     estimatedCostUsd: run.estimatedCostUsd,
+    pricingInputPer1M: run.pricingInputPer1M,
+    pricingCachedInputPer1M: run.pricingCachedInputPer1M,
+    pricingOutputPer1M: run.pricingOutputPer1M,
+    pricingSource: run.pricingSource,
   });
   return { inserted: questionIds.length, questionIds };
 }
@@ -506,6 +636,35 @@ async function setSimpleContentPresetUiDefaults(input: {
       v == null ? "" : String(v),
     );
   }
+}
+
+async function getOpenAiPricingSettingsForAdmin(): Promise<{
+  fallbackPolicy: OpenAiPricingFallbackPolicy;
+  models: Record<string, OpenAiPriceRow>;
+}> {
+  const settings = await getOpenAiPricingSettings();
+  return {
+    fallbackPolicy: settings.fallbackPolicy,
+    models: settings.models,
+  };
+}
+
+async function saveOpenAiPricingSettingsForAdmin(input: {
+  actor: string;
+  fallbackPolicy: OpenAiPricingFallbackPolicy;
+  models: Record<string, OpenAiPriceRow>;
+}): Promise<void> {
+  const before = await getOpenAiPricingSettings();
+  await upsertAppSettingValue(APP_KEY_SIMPLE_CONTENT_OPENAI_PRICING_V1, JSON.stringify(input.models));
+  await upsertAppSettingValue(APP_KEY_SIMPLE_CONTENT_OPENAI_PRICING_FALLBACK_POLICY, input.fallbackPolicy);
+  await insertSimpleContentPricingAuditLog({
+    actor: input.actor,
+    action: "openai_pricing_update",
+    details: {
+      before,
+      after: { fallbackPolicy: input.fallbackPolicy, models: input.models },
+    },
+  });
 }
 
 /** يمنع تشغيل دورة جديدة قبل انتهاء السابقة (تيك cron كل دقيقة قد يتداخل). */
@@ -592,6 +751,8 @@ export {
   getRunById,
   getRunsUsageSummaryForSubcategory,
   getSimpleContentPresetUiDefaults,
+  getOpenAiPricingSettingsForAdmin,
+  saveOpenAiPricingSettingsForAdmin,
   setSimpleContentPresetUiDefaults,
 };
 export { getAutomation, upsertAutomation } from "./repository";

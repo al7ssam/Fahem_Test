@@ -169,9 +169,14 @@ export async function finalizeSimpleContentRun(
     modelResponse: string | null;
     normalizedQuestions: unknown | null;
     usageInputTokens: number | null;
+    usageCachedInputTokens?: number | null;
     usageOutputTokens: number | null;
     usageTotalTokens: number | null;
     estimatedCostUsd: number | null;
+    pricingInputPer1M?: number | null;
+    pricingCachedInputPer1M?: number | null;
+    pricingOutputPer1M?: number | null;
+    pricingSource?: string | null;
   },
 ): Promise<void> {
   const pool = getPool();
@@ -185,9 +190,14 @@ export async function finalizeSimpleContentRun(
        model_response = $7,
        normalized_questions = $8::jsonb,
        usage_input_tokens = $9,
-       usage_output_tokens = $10,
-       usage_total_tokens = $11,
-       estimated_cost_usd = $12,
+       usage_cached_input_tokens = $10,
+       usage_output_tokens = $11,
+       usage_total_tokens = $12,
+       estimated_cost_usd = $13,
+       pricing_input_per_1m = $14,
+       pricing_cached_input_per_1m = $15,
+       pricing_output_per_1m = $16,
+       pricing_source = $17,
        finished_at = NOW()
      WHERE id = $1`,
     [
@@ -200,9 +210,14 @@ export async function finalizeSimpleContentRun(
       data.modelResponse,
       data.normalizedQuestions != null ? JSON.stringify(data.normalizedQuestions) : null,
       data.usageInputTokens,
+      data.usageCachedInputTokens ?? null,
       data.usageOutputTokens,
       data.usageTotalTokens,
       data.estimatedCostUsd,
+      data.pricingInputPer1M ?? null,
+      data.pricingCachedInputPer1M ?? null,
+      data.pricingOutputPer1M ?? null,
+      data.pricingSource ?? null,
     ],
   );
 }
@@ -239,9 +254,14 @@ export type SimpleContentRunDetail = {
   modelResponse: string | null;
   normalizedQuestions: unknown | null;
   usageInputTokens: number | null;
+  usageCachedInputTokens: number | null;
   usageOutputTokens: number | null;
   usageTotalTokens: number | null;
   estimatedCostUsd: number | null;
+  pricingInputPer1M: number | null;
+  pricingCachedInputPer1M: number | null;
+  pricingOutputPer1M: number | null;
+  pricingSource: string | null;
   createdAt: string;
   finishedAt: string | null;
 };
@@ -263,16 +283,22 @@ export async function getRunById(runId: number): Promise<SimpleContentRunDetail 
     model_response: string | null;
     normalized_questions: unknown | null;
     usage_input_tokens: number | null;
+    usage_cached_input_tokens: number | null;
     usage_output_tokens: number | null;
     usage_total_tokens: number | null;
     estimated_cost_usd: string | null;
+    pricing_input_per_1m: string | null;
+    pricing_cached_input_per_1m: string | null;
+    pricing_output_per_1m: string | null;
+    pricing_source: string | null;
     created_at: Date;
     finished_at: Date | null;
   }>(
     `SELECT id::text, subcategory_key, trigger_kind, status, provider, model_id, preset_id,
             inserted_count::text, error, preview_json, request_prompt, model_response, normalized_questions,
-            usage_input_tokens, usage_output_tokens, usage_total_tokens,
+            usage_input_tokens, usage_cached_input_tokens, usage_output_tokens, usage_total_tokens,
             estimated_cost_usd::text,
+            pricing_input_per_1m::text, pricing_cached_input_per_1m::text, pricing_output_per_1m::text, pricing_source,
             created_at, finished_at
      FROM simple_content_runs WHERE id = $1 LIMIT 1`,
     [runId],
@@ -298,12 +324,39 @@ export async function getRunById(runId: number): Promise<SimpleContentRunDetail 
     modelResponse: row.model_response,
     normalizedQuestions: row.normalized_questions,
     usageInputTokens: row.usage_input_tokens,
+    usageCachedInputTokens: row.usage_cached_input_tokens,
     usageOutputTokens: row.usage_output_tokens,
     usageTotalTokens: row.usage_total_tokens,
     estimatedCostUsd,
+    pricingInputPer1M:
+      row.pricing_input_per_1m != null && Number.isFinite(Number(row.pricing_input_per_1m))
+        ? Number(row.pricing_input_per_1m)
+        : null,
+    pricingCachedInputPer1M:
+      row.pricing_cached_input_per_1m != null && Number.isFinite(Number(row.pricing_cached_input_per_1m))
+        ? Number(row.pricing_cached_input_per_1m)
+        : null,
+    pricingOutputPer1M:
+      row.pricing_output_per_1m != null && Number.isFinite(Number(row.pricing_output_per_1m))
+        ? Number(row.pricing_output_per_1m)
+        : null,
+    pricingSource: row.pricing_source ?? null,
     createdAt: row.created_at.toISOString(),
     finishedAt: row.finished_at?.toISOString() ?? null,
   };
+}
+
+export async function insertSimpleContentPricingAuditLog(input: {
+  actor: string;
+  action: string;
+  details: unknown;
+}): Promise<void> {
+  const pool = getPool();
+  await pool.query(
+    `INSERT INTO simple_content_pricing_audit_logs (actor, action, details_json, created_at)
+     VALUES ($1, $2, $3::jsonb, NOW())`,
+    [input.actor, input.action, JSON.stringify(input.details ?? {})],
+  );
 }
 
 type RunRow = {

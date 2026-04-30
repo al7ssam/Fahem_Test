@@ -51,6 +51,7 @@ import {
   getPromptBody,
   getRunById,
   getRunsUsageSummaryForSubcategory,
+  getOpenAiPricingSettingsForAdmin,
   getSimpleContentDraftTemplateForAdmin,
   getSimpleContentPresetUiDefaults,
   getSimpleContentSchedulerStats,
@@ -60,6 +61,7 @@ import {
   runSimpleContentGenerate,
   runSimpleContentGeneratePreview,
   saveSimpleContentDraftTemplate,
+  saveOpenAiPricingSettingsForAdmin,
   setSimpleContentPresetUiDefaults,
   upsertAutomation,
   upsertPromptBody,
@@ -252,6 +254,19 @@ const simpleContentPresetDefaultsPutSchema = z
     message: "at_least_one_field",
   });
 
+const openAiPricingPutSchema = z.object({
+  fallbackPolicy: z.enum(["use_default", "block"]).default("use_default"),
+  models: z.record(
+    z.string().trim().min(1).max(120),
+    z.object({
+      inputPer1M: z.number().min(0).max(100),
+      cachedInputPer1M: z.number().min(0).max(100),
+      outputPer1M: z.number().min(0).max(100),
+      note: z.string().trim().min(1).max(200).optional(),
+    }),
+  ),
+});
+
 const factoryModelPatchSchema = z.object({
   layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
   provider: z.string().trim().min(1).max(50),
@@ -341,6 +356,21 @@ function verifyAdmin(req: Request, res: Response): boolean {
     res.status(403).json({ ok: false, error: "forbidden" });
     return false;
   }
+  return true;
+}
+
+const pricingUpdateRateLimit = new Map<string, number[]>();
+function checkPricingUpdateRateLimit(key: string): boolean {
+  const now = Date.now();
+  const windowMs = 60_000;
+  const maxHits = 10;
+  const list = (pricingUpdateRateLimit.get(key) ?? []).filter((t) => now - t <= windowMs);
+  if (list.length >= maxHits) {
+    pricingUpdateRateLimit.set(key, list);
+    return false;
+  }
+  list.push(now);
+  pricingUpdateRateLimit.set(key, list);
   return true;
 }
 
@@ -1534,6 +1564,52 @@ export function registerAdminRoutes(app: Express): void {
         return;
       }
       res.status(500).json({ ok: false, error: "write_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/openai-pricing", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const data = await getOpenAiPricingSettingsForAdmin();
+      res.json({ ok: true, ...data });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.put("/api/admin/simple-content/openai-pricing", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const rateKey = String(req.ip || req.header("x-forwarded-for") || "unknown");
+    if (!checkPricingUpdateRateLimit(rateKey)) {
+      res.status(429).json({ ok: false, error: "rate_limited" });
+      return;
+    }
+    const parsed = openAiPricingPutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", details: parsed.error.flatten() });
+      return;
+    }
+    try {
+      const actor = String(req.header("x-admin-secret") ?? "admin").slice(0, 16);
+      await saveOpenAiPricingSettingsForAdmin({
+        actor,
+        fallbackPolicy: parsed.data.fallbackPolicy,
+        models: Object.fromEntries(
+          Object.entries(parsed.data.models).map(([modelId, row]) => [
+            modelId.trim(),
+            {
+              inputPer1M: Number(row.inputPer1M),
+              cachedInputPer1M: Number(row.cachedInputPer1M),
+              outputPer1M: Number(row.outputPer1M),
+              note: row.note?.trim() || `admin:${modelId}`,
+            },
+          ]),
+        ),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "write_failed";
+      res.status(500).json({ ok: false, error: "write_failed", reason });
     }
   });
 

@@ -635,6 +635,25 @@
           </div>
 
           <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
+            <h2 style="font-size: 0.88rem; margin: 0 0 0.35rem">
+              تسعير OpenAI (Billing)
+              <span class="sc-section-status" id="sc-sec-pricing-status" aria-live="polite"></span>
+            </h2>
+            <p class="hint" style="margin: 0 0 0.4rem">تعديل أسعار كل نموذج لكل 1M توكن (input / cached input / output).</p>
+            <div class="row" style="margin-bottom:0.45rem">
+              <label>سياسة fallback
+                <select id="sc-openai-fallback-policy">
+                  <option value="use_default">استخدم الجدول الافتراضي عند غياب النموذج</option>
+                  <option value="block">امنع التشغيل عند غياب النموذج</option>
+                </select>
+              </label>
+              <button type="button" class="btn btn-secondary" id="sc-openai-pricing-load">تحميل الأسعار</button>
+              <button type="button" class="btn btn-secondary" id="sc-openai-pricing-save">حفظ الأسعار</button>
+            </div>
+            <div id="sc-openai-pricing-editor"></div>
+          </div>
+
+          <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
             <h2 style="font-size: 0.88rem; margin: 0 0 0.3rem">سجل التشغيلات</h2>
             <p class="subtitle" style="margin-bottom: 0.4rem; font-size: var(--fs-sm)">
               الأحدث أولًا. زر التعميد أعلاه يخصّ تشغيل معاينة يدوي بحالة «قيد المراجعة» فقط.
@@ -773,6 +792,8 @@
           "sc-commit",
           "sc-draft-template-load",
           "sc-draft-template-save",
+          "sc-openai-pricing-load",
+          "sc-openai-pricing-save",
           "sc-save-auto",
           "sc-runs-cleanup-save",
           "sc-runs-cleanup-preview",
@@ -788,6 +809,7 @@
           draftAi: { status: "sc-sec-draftai-status", buttons: ["sc-draft-prompt", "sc-save-default-draft"] },
           generate: { status: "sc-sec-generate-status", buttons: ["sc-generate-preview", "sc-save-default-generate"] },
           review: { status: "sc-sec-review-status", buttons: [] },
+          pricing: { status: "sc-sec-pricing-status", buttons: ["sc-openai-pricing-load", "sc-openai-pricing-save"] },
           auto: { status: "sc-sec-auto-status", buttons: ["sc-save-auto"] },
           runsCleanup: {
             status: "sc-sec-runs-cleanup-status",
@@ -1299,6 +1321,76 @@
           applySelectDefault("sc-draft-preset", defaultDraftId);
           applySelectDefault("sc-preset", defaultGenId);
           updatePresetHints();
+          renderOpenAiPricingEditor();
+        }
+
+        function renderOpenAiPricingEditor(pricingData) {
+          var box = document.getElementById("sc-openai-pricing-editor");
+          if (!box) return;
+          var fallbackEl = document.getElementById("sc-openai-fallback-policy");
+          var fromApiModels = pricingData && pricingData.models ? pricingData.models : {};
+          if (fallbackEl && pricingData && pricingData.fallbackPolicy) {
+            fallbackEl.value = String(pricingData.fallbackPolicy);
+          }
+          var models = [];
+          lastPresetsItems.forEach(function (p) {
+            if (String(p.provider) !== "openai") return;
+            if (models.indexOf(String(p.modelId)) === -1) models.push(String(p.modelId));
+          });
+          if (!models.length) {
+            box.innerHTML = '<div class="hint">لا توجد نماذج OpenAI مفعّلة في presets.</div>';
+            return;
+          }
+          box.innerHTML = "";
+          models.forEach(function (modelId) {
+            var row = fromApiModels[modelId] || {};
+            var wrap = document.createElement("div");
+            wrap.style.marginBottom = "0.4rem";
+            wrap.innerHTML =
+              '<div class="row" style="gap:0.45rem;align-items:center;flex-wrap:wrap">' +
+              '<span class="hint" style="min-width:14rem"><b>' +
+              escapeHtml(modelId) +
+              "</b></span>" +
+              '<label>Input/1M <input type="number" step="0.000001" min="0" max="100" data-pricing-in="' +
+              escapeHtml(modelId) +
+              '" value="' +
+              (row.inputPer1M != null ? String(row.inputPer1M) : "") +
+              '"/></label>' +
+              '<label>Cached/1M <input type="number" step="0.000001" min="0" max="100" data-pricing-cin="' +
+              escapeHtml(modelId) +
+              '" value="' +
+              (row.cachedInputPer1M != null ? String(row.cachedInputPer1M) : "") +
+              '"/></label>' +
+              '<label>Output/1M <input type="number" step="0.000001" min="0" max="100" data-pricing-out="' +
+              escapeHtml(modelId) +
+              '" value="' +
+              (row.outputPer1M != null ? String(row.outputPer1M) : "") +
+              '"/></label>' +
+              "</div>";
+            box.appendChild(wrap);
+          });
+        }
+
+        function collectOpenAiPricingPayload() {
+          var models = {};
+          document.querySelectorAll("[data-pricing-in]").forEach(function (inp) {
+            var modelId = String(inp.getAttribute("data-pricing-in") || "").trim();
+            var inV = Number(inp.value || 0);
+            var cinEl = document.querySelector('[data-pricing-cin="' + modelId.replace(/"/g, '\\"') + '"]');
+            var outEl = document.querySelector('[data-pricing-out="' + modelId.replace(/"/g, '\\"') + '"]');
+            var cinV = Number((cinEl && cinEl.value) || 0);
+            var outV = Number((outEl && outEl.value) || 0);
+            models[modelId] = {
+              inputPer1M: Number.isFinite(inV) ? inV : 0,
+              cachedInputPer1M: Number.isFinite(cinV) ? cinV : 0,
+              outputPer1M: Number.isFinite(outV) ? outV : 0,
+              note: "admin:" + modelId,
+            };
+          });
+          return {
+            fallbackPolicy: String(document.getElementById("sc-openai-fallback-policy").value || "use_default"),
+            models: models,
+          };
         }
 
         function setPendingRun(id, count) {
@@ -1418,13 +1510,14 @@
           setWorkspaceLoading(true);
           try {
             var enc = encodeURIComponent(subKey);
-            var [ctxRes, prRes, presetsRes, autoRes, runsRes, cleanupSettingsRes] = await Promise.all([
+            var [ctxRes, prRes, presetsRes, autoRes, runsRes, cleanupSettingsRes, openAiPricingRes] = await Promise.all([
               fetch("/api/admin/simple-content/context/" + enc, hdr()),
               fetch("/api/admin/simple-content/prompt/" + enc, hdr()),
               fetch("/api/admin/simple-content/presets", hdr()),
               fetch("/api/admin/simple-content/automation/" + enc, hdr()),
               fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr()),
               fetch("/api/admin/simple-content/runs-cleanup-settings", hdr()),
+              fetch("/api/admin/simple-content/openai-pricing", hdr()),
             ]);
             var ctx = await ctxRes.json();
             var pr = await prRes.json();
@@ -1432,11 +1525,15 @@
             var auto = await autoRes.json();
             var runs = await runsRes.json();
             var cleanupSt = await cleanupSettingsRes.json();
+            var openAiPricing = await openAiPricingRes.json();
             if (cleanupSettingsRes.ok && cleanupSt.ok) applyRunsCleanupSettings(cleanupSt);
             if (!prRes.ok || !pr.ok) throw new Error("prompt_load");
             document.getElementById("sc-prompt").value = pr.promptBody || "";
             setPromptReadOnly(true);
             fillPresets(presets);
+            if (openAiPricingRes.ok && openAiPricing.ok) {
+              renderOpenAiPricingEditor(openAiPricing);
+            }
             if (auto.ok && auto.automation) {
               document.getElementById("sc-auto-en").checked = !!auto.automation.enabled;
               document.getElementById("sc-auto-min").value = String(auto.automation.intervalMinutes || 60);
@@ -1804,6 +1901,52 @@
 
         document.getElementById("sc-runs-apply-filters").addEventListener("click", function () {
           void refreshRunsListForWorkspace();
+        });
+
+        document.getElementById("sc-openai-pricing-load").addEventListener("click", async function () {
+          if (!secret()) return;
+          setSectionBusy("pricing", true, "جاري التحميل…");
+          try {
+            var res = await fetch("/api/admin/simple-content/openai-pricing", hdr());
+            var data = await res.json().catch(function () {
+              return {};
+            });
+            if (!res.ok || !data.ok) {
+              msg("تعذر تحميل تسعير OpenAI.", false);
+              setSectionStatus("sc-sec-pricing-status", "فشل", false);
+              return;
+            }
+            renderOpenAiPricingEditor(data);
+            msg("تم تحميل تسعير OpenAI.", true);
+            setSectionStatus("sc-sec-pricing-status", "تم", false);
+          } finally {
+            setSectionBusy("pricing", false);
+          }
+        });
+
+        document.getElementById("sc-openai-pricing-save").addEventListener("click", async function () {
+          if (!secret()) return;
+          setSectionBusy("pricing", true, "جاري الحفظ…");
+          try {
+            var payload = collectOpenAiPricingPayload();
+            var res = await fetch("/api/admin/simple-content/openai-pricing", {
+              method: "PUT",
+              headers: hdr().headers,
+              body: JSON.stringify(payload),
+            });
+            var data = await res.json().catch(function () {
+              return {};
+            });
+            if (!res.ok || !data.ok) {
+              msg(userVisibleApiError(data.reason, data.error, data), false);
+              setSectionStatus("sc-sec-pricing-status", "فشل", false);
+              return;
+            }
+            msg("تم حفظ تسعير OpenAI.", true);
+            setSectionStatus("sc-sec-pricing-status", "تم", false);
+          } finally {
+            setSectionBusy("pricing", false);
+          }
         });
 
         document.getElementById("sc-runs-cleanup-save").addEventListener("click", async function () {
