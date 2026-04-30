@@ -53,10 +53,14 @@ function mapFinishReason(raw: unknown): string | null {
 function mapOpenAiProviderError(error: unknown): Error {
   if (error instanceof OpenAI.APIError) {
     const status = Number(error.status ?? 0);
+    const msg = String(error.message || "");
     if (status === 401 || status === 403) return new Error("openai_auth_failed");
     if (status === 429) return new Error("openai_rate_limited_429");
     if (status >= 500) return new Error(`openai_server_error_${status}`);
-    return new Error(`openai_http_${status || "unknown"}:${error.message}`);
+    if (status === 400 && /unsupported parameter/i.test(msg) && /temperature/i.test(msg)) {
+      return new Error(`openai_unsupported_temperature:${msg}`);
+    }
+    return new Error(`openai_http_${status || "unknown"}:${msg}`);
   }
   if (error instanceof Error) {
     const msg = String(error.message || "").toLowerCase();
@@ -79,7 +83,6 @@ export const openAiSimpleProvider: SimpleContentLLMProvider = {
       const response = await client.responses.create({
         model: preset.modelId,
         input: input.prompt,
-        temperature: preset.temperature,
         max_output_tokens: preset.maxOutputTokens,
         store: false,
       });
