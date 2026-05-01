@@ -30,13 +30,13 @@
       }
       .muted { color:var(--muted); font-size:.82rem; }
       .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.58); z-index:200; display:flex; align-items:center; justify-content:center; padding:1rem; }
+      .modal-backdrop[hidden] { display:none !important; pointer-events:none; visibility:hidden; }
       .modal-panel { max-width:36rem; width:100%; max-height:92vh; overflow:auto; }
       table { width:100%; border-collapse:collapse; font-size:.88rem; } th,td { padding:.4rem; border-bottom:1px solid var(--border); text-align:right; }
-      .lesson-create-details { margin:.65rem 0; border:1px solid var(--border); border-radius:.9rem; background:rgba(8,12,28,.55); }
-      .lesson-create-details > summary { cursor:pointer; list-style:none; padding:.65rem .9rem; font-weight:800; color:var(--amber); background:rgba(0,0,0,.22); display:flex; justify-content:space-between; align-items:center; gap:.5rem; user-select:none; }
-      .lesson-create-details > summary::-webkit-details-marker { display:none; }
-      .lesson-create-details .lesson-caret { opacity:.75; font-size:.72rem; }
-      .lesson-create-details .lesson-create-details-inner { padding:.75rem .9rem 1rem; border-top:1px solid rgba(223,187,106,.12); }
+      .lesson-create-panel { margin:.65rem 0; border:1px solid var(--border); border-radius:.9rem; background:var(--card); padding:.75rem .9rem 1rem; }
+      .lesson-section-heading { display:block; margin:0 0 .5rem; font-size:1.05rem; font-weight:800; color:var(--amber); }
+      .owned-editor-panel { margin:.75rem 0; padding:.75rem .9rem 1rem; border:1px solid rgba(223,187,106,.35); border-radius:.9rem; background:rgba(14,18,35,.95); }
+      .owned-editor-panel[hidden] { display:none !important; }
       .lesson-adv-wrap { margin-top:.55rem; border:1px dashed rgba(223,187,106,.28); border-radius:.65rem; padding:.4rem .55rem .65rem; background:rgba(0,0,0,.18); }
       .lesson-adv-toggle { width:100%; text-align:right; cursor:pointer; font-size:.86rem; padding:.25rem 0 .4rem; font-weight:700; font-family:inherit; background:none; border:none; color:var(--muted); display:flex; align-items:center; justify-content:space-between; gap:.35rem; }
       .lesson-adv-toggle:focus-visible { outline:2px solid var(--amber); outline-offset:2px; border-radius:.35rem; }
@@ -115,58 +115,90 @@
         <strong>تسلسل الأسئلة والأقسام</strong>
         <p class="muted" style="margin:.35rem 0">أنشئ أسئلة خاصة بهذا الدرس، أو اربط أسئلة من البنك. أعد الترتيب بالأسهم ثم احفظ التسلسل. يمكن ترك حقول الوقت فارغة لاستخدام افتراضيات الدرس.</p>
 
-        <details class="lesson-create-details" id="lesson-create-details" open>
-          <summary>إنشاء سؤال خاص بالدرس <span class="lesson-caret" aria-hidden="true">▼</span></summary>
-          <div class="lesson-create-details-inner">
-            <p class="muted" style="margin:0 0 .5rem;font-size:.82rem">يُخزَّن السؤال ويُربط بهذا الدرس فقط ولا يظهر في بحث البنك العام.</p>
-            <div id="lesson-create-target-slot"></div>
-            <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
-            <textarea id="new-q-prompt" rows="2" placeholder="صياغة السؤال" style="width:100%;margin:.2rem 0"></textarea>
-            <div class="row" style="margin-top:.45rem">
-              <label class="muted">عدد الخيارات</label>
-              <select id="new-q-opt-count">
-                <option value="4" selected>4 خيارات</option>
-                <option value="2">خياران</option>
-              </select>
-            </div>
-            <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
-            <div id="new-q-opts-grid" style="display:grid;gap:.35rem;margin:.25rem 0">
-              <input id="new-q-o0" type="text" placeholder="خيار 1" />
-              <input id="new-q-o1" type="text" placeholder="خيار 2" />
-              <input id="new-q-o2" type="text" placeholder="خيار 3" />
-              <input id="new-q-o3" type="text" placeholder="خيار 4" />
-            </div>
-            <div class="row" style="margin-top:.35rem;align-items:center">
-              <label class="muted">الإجابة الصحيحة</label>
-              <select id="new-q-correct" aria-label="فهرس الإجابة الصحيحة"></select>
-            </div>
-            <div class="lesson-adv-wrap">
-              <button type="button" class="lesson-adv-toggle" id="lesson-adv-toggle" aria-expanded="false" aria-controls="lesson-adv-panel">
-                <span>خيارات متقدمة (صعوبة، مذاكرة، أوقات)</span>
-                <span class="lesson-caret" aria-hidden="true">▼</span>
-              </button>
-              <div class="lesson-adv-inner" id="lesson-adv-panel" hidden>
-                <div class="row" style="margin-top:.35rem">
-                  <label class="muted">الصعوبة</label>
-                  <select id="new-q-diff">
-                    <option value="easy">سهل</option>
-                    <option value="medium" selected>متوسط</option>
-                    <option value="hard">صعب</option>
-                  </select>
-                </div>
-                <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة (اختياري)</label>
-                <textarea id="new-q-study" rows="2" style="width:100%" placeholder="نص البطاقة"></textarea>
-                <div class="row" style="margin-top:.45rem">
-                  <label class="muted">وقت الإجابة (مللي)</label>
-                  <input id="new-q-ans-ms" type="number" min="3000" max="120000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
-                  <label class="muted">وقت بطاقة المذاكرة (مللي)</label>
-                  <input id="new-q-study-ms" type="number" min="2000" max="300000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
-                </div>
+        <section class="lesson-create-panel" id="lesson-create-panel" aria-labelledby="lesson-create-heading">
+          <h2 class="lesson-section-heading" id="lesson-create-heading">إنشاء سؤال خاص بالدرس</h2>
+          <p class="muted" style="margin:0 0 .5rem;font-size:.82rem">يُخزَّن السؤال ويُربط بهذا الدرس فقط ولا يظهر في بحث البنك العام.</p>
+          <div id="lesson-create-target-slot"></div>
+          <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
+          <textarea id="new-q-prompt" rows="2" placeholder="صياغة السؤال" style="width:100%;margin:.2rem 0"></textarea>
+          <div class="row" style="margin-top:.45rem">
+            <label class="muted">عدد الخيارات</label>
+            <select id="new-q-opt-count">
+              <option value="4" selected>4 خيارات</option>
+              <option value="2">خياران</option>
+            </select>
+          </div>
+          <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
+          <div id="new-q-opts-grid" style="display:grid;gap:.35rem;margin:.25rem 0">
+            <input id="new-q-o0" type="text" placeholder="خيار 1" />
+            <input id="new-q-o1" type="text" placeholder="خيار 2" />
+            <input id="new-q-o2" type="text" placeholder="خيار 3" />
+            <input id="new-q-o3" type="text" placeholder="خيار 4" />
+          </div>
+          <div class="row" style="margin-top:.35rem;align-items:center">
+            <label class="muted">الإجابة الصحيحة</label>
+            <select id="new-q-correct" aria-label="فهرس الإجابة الصحيحة"></select>
+          </div>
+          <div class="lesson-adv-wrap">
+            <button type="button" class="lesson-adv-toggle" id="lesson-adv-toggle" aria-expanded="false" aria-controls="lesson-adv-panel">
+              <span>خيارات متقدمة (صعوبة، مذاكرة، أوقات)</span>
+              <span class="lesson-caret" aria-hidden="true">▼</span>
+            </button>
+            <div class="lesson-adv-inner" id="lesson-adv-panel" hidden>
+              <div class="row" style="margin-top:.35rem">
+                <label class="muted">الصعوبة</label>
+                <select id="new-q-diff">
+                  <option value="easy">سهل</option>
+                  <option value="medium" selected>متوسط</option>
+                  <option value="hard">صعب</option>
+                </select>
+              </div>
+              <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة (اختياري)</label>
+              <textarea id="new-q-study" rows="2" style="width:100%" placeholder="نص البطاقة"></textarea>
+              <div class="row" style="margin-top:.45rem">
+                <label class="muted">وقت الإجابة (مللي)</label>
+                <input id="new-q-ans-ms" type="number" min="3000" max="120000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
+                <label class="muted">وقت بطاقة المذاكرة (مللي)</label>
+                <input id="new-q-study-ms" type="number" min="2000" max="300000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
               </div>
             </div>
-            <button type="button" class="btn" id="new-q-submit" style="margin-top:.65rem">إضافة السؤال إلى القسم المحدد</button>
           </div>
-        </details>
+          <button type="button" class="btn" id="new-q-submit" style="margin-top:.65rem">إضافة السؤال إلى القسم المحدد</button>
+        </section>
+
+        <div class="owned-editor-panel" id="owned-editor-panel" hidden role="region" aria-labelledby="owned-editor-title">
+          <strong id="owned-editor-title">تحرير سؤال خاص بالدرس</strong>
+          <p class="muted" style="font-size:.82rem;margin:.35rem 0">التعديل يخص هذا الدرس فقط.</p>
+          <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
+          <textarea id="own-prompt" rows="2" style="width:100%"></textarea>
+          <div class="row" style="margin-top:.45rem">
+            <label class="muted">عدد الخيارات</label>
+            <select id="own-opt-count"><option value="4">4</option><option value="2">2</option></select>
+            <label class="muted">الصعوبة</label>
+            <select id="own-diff">
+              <option value="easy">سهل</option>
+              <option value="medium">متوسط</option>
+              <option value="hard">صعب</option>
+            </select>
+          </div>
+          <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
+          <div style="display:grid;gap:.35rem;margin:.25rem 0">
+            <input id="own-o0" type="text" placeholder="خيار 1" />
+            <input id="own-o1" type="text" placeholder="خيار 2" />
+            <input id="own-o2" type="text" placeholder="خيار 3" />
+            <input id="own-o3" type="text" placeholder="خيار 4" />
+          </div>
+          <div class="row" style="margin-top:.35rem">
+            <label class="muted">الإجابة الصحيحة</label>
+            <select id="own-correct"></select>
+          </div>
+          <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة</label>
+          <textarea id="own-study" rows="2" style="width:100%"></textarea>
+          <div class="row" style="margin-top:.55rem">
+            <button type="button" class="btn" id="own-save">حفظ</button>
+            <button type="button" class="btn btn-secondary" id="own-cancel">إلغاء</button>
+          </div>
+        </div>
 
         <strong style="display:block;margin-top:.5rem">ربط سؤال من البنك</strong>
         <p class="muted" style="margin:.25rem 0;font-size:.82rem">البحث يعرض أسئلة البنك العامة فقط.</p>
@@ -179,42 +211,6 @@
         <div id="items-wrap" style="border:1px solid var(--border);border-radius:.75rem;margin-top:.45rem"></div>
         <div class="row" style="margin-top:.55rem">
           <button class="btn" id="l-save-items" type="button">حفظ التسلسل</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="owned-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="owned-modal-title">
-      <div class="card modal-panel">
-        <strong id="owned-modal-title">تحرير سؤال خاص بالدرس</strong>
-        <p class="muted" style="font-size:.82rem;margin:.35rem 0">التعديل يخص هذا الدرس فقط.</p>
-        <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
-        <textarea id="own-prompt" rows="2" style="width:100%"></textarea>
-        <div class="row" style="margin-top:.45rem">
-          <label class="muted">عدد الخيارات</label>
-          <select id="own-opt-count"><option value="4">4</option><option value="2">2</option></select>
-          <label class="muted">الصعوبة</label>
-          <select id="own-diff">
-            <option value="easy">سهل</option>
-            <option value="medium">متوسط</option>
-            <option value="hard">صعب</option>
-          </select>
-        </div>
-        <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
-        <div style="display:grid;gap:.35rem;margin:.25rem 0">
-          <input id="own-o0" type="text" placeholder="خيار 1" />
-          <input id="own-o1" type="text" placeholder="خيار 2" />
-          <input id="own-o2" type="text" placeholder="خيار 3" />
-          <input id="own-o3" type="text" placeholder="خيار 4" />
-        </div>
-        <div class="row" style="margin-top:.35rem">
-          <label class="muted">الإجابة الصحيحة</label>
-          <select id="own-correct"></select>
-        </div>
-        <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة</label>
-        <textarea id="own-study" rows="2" style="width:100%"></textarea>
-        <div class="row" style="margin-top:.55rem">
-          <button type="button" class="btn" id="own-save">حفظ</button>
-          <button type="button" class="btn btn-secondary" id="own-cancel">إلغاء</button>
         </div>
       </div>
     </div>
@@ -310,22 +306,23 @@
           document.getElementById("own-correct").value = String(ci);
           document.getElementById("own-diff").value = it.difficulty && /^easy|medium|hard$/.test(it.difficulty) ? it.difficulty : "medium";
           document.getElementById("own-study").value = it.studyBody || "";
-          const modal = document.getElementById("owned-modal");
-          if (!modal) return;
+          const panel = document.getElementById("owned-editor-panel");
+          if (!panel) return;
           modalFocusBefore = document.activeElement;
-          modal.hidden = false;
+          panel.hidden = false;
           requestAnimationFrame(function () {
             try {
               const pe = document.getElementById("own-prompt");
               if (pe && typeof pe.focus === "function") pe.focus();
+              panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
             } catch (_) {}
           });
         }
 
         function closeOwnedEditor() {
           editOwnedTarget = null;
-          const modal = document.getElementById("owned-modal");
-          if (modal) modal.hidden = true;
+          const panel = document.getElementById("owned-editor-panel");
+          if (panel) panel.hidden = true;
           if (modalFocusBefore && typeof modalFocusBefore.focus === "function") {
             try {
               modalFocusBefore.focus();
@@ -336,8 +333,8 @@
 
         document.addEventListener("keydown", function (ev) {
           if (ev.key !== "Escape") return;
-          const m = document.getElementById("owned-modal");
-          if (m && !m.hidden) {
+          const panel = document.getElementById("owned-editor-panel");
+          if (panel && !panel.hidden) {
             closeOwnedEditor();
             ev.preventDefault();
           }
@@ -730,9 +727,6 @@
         });
 
         document.getElementById("own-cancel").addEventListener("click", closeOwnedEditor);
-        document.getElementById("owned-modal").addEventListener("click", function (ev) {
-          if (ev.target === ev.currentTarget) closeOwnedEditor();
-        });
         document.getElementById("own-save").addEventListener("click", async () => {
           if (!editOwnedTarget || !selectedLessonId) return;
           const si = editOwnedTarget.si;
