@@ -6,12 +6,38 @@ type GameMode = "direct" | "study_then_quiz";
 type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 type Phase =
   | "name"
+  | "lesson_menu"
+  | "lesson_study"
+  | "lesson_quiz"
+  | "lesson_done"
   | "matchmaking"
   | "private_room_lobby"
   | "countdown"
   | "studying"
   | "playing"
   | "result";
+
+type LessonPlaybackStep = {
+  sortOrder: number;
+  questionId: number;
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+  studyBody: string | null;
+  effectiveAnswerMs: number;
+  effectiveStudyCardMs: number;
+};
+
+type LessonPlaybackPayload = {
+  id: number;
+  title: string;
+  slug: string | null;
+  description: string | null;
+  defaultAnswerMs: number;
+  defaultStudyCardMs: number;
+  category: { id: number; nameAr: string; icon: string } | null;
+  steps: LessonPlaybackStep[];
+};
 type NameFlowStep = "mode" | "main_categories" | "sub_categories" | "difficulty";
 type JoinKind = "public" | "solo" | "private_create" | "private_join";
 
@@ -110,6 +136,34 @@ let studyCards: Array<{
   body: string;
   order: number;
 }> = [];
+
+let lessonBrowseCategories: Array<{
+  id: number;
+  parentId: number | null;
+  nameAr: string;
+  icon: string;
+  sortOrder: number;
+}> = [];
+let lessonBrowseLessons: Array<{
+  id: number;
+  title: string;
+  slug: string | null;
+  description: string | null;
+  sortOrder: number;
+  itemCount: number;
+  category: { id: number; nameAr: string; icon: string } | null;
+}> = [];
+let lessonBrowseFilterCategoryId: number | null = null;
+let lessonBrowseMsg = "";
+let lessonPlayback: LessonPlaybackPayload | null = null;
+let lessonStudyQueue: Array<{ body: string; ms: number }> = [];
+let lessonStudyIdx = 0;
+let lessonStudySegmentEndAt = 0;
+let lessonQuizIdx = 0;
+let lessonQuizCorrect = 0;
+let lessonQuizLocked = false;
+/** يمنع معالجة انتهاء الوقت بعد إجابة اللاعب أو معالجة المؤقت مرتين */
+let lessonQuizRoundResolved = false;
 
 const DEFAULT_RESULT_MESSAGES = {
   winnerTitle: "فزت!",
@@ -558,6 +612,11 @@ function render(): void {
                   <span class="mode-option-title">مذاكرة ثم أسئلة</span>
                   <span class="mode-option-desc">بطاقة مراجعة لكل سؤال ثم كتلة أسئلة في الجولة</span>
                 </button>
+                <button type="button" class="mode-option-btn" data-flow="lessons">
+                  <span class="mode-option-icon" aria-hidden="true">📖</span>
+                  <span class="mode-option-title">دروس منظمة</span>
+                  <span class="mode-option-desc">تسلسل تعليمي مرتب يعيد استخدام أسئلة البنك — بدون تحدٍ عشوائي</span>
+                </button>
                 `
                     : nameFlowStep === "main_categories"
                       ? mainCards
@@ -646,6 +705,23 @@ function render(): void {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
           playerNameDraft = input.value;
+          if (b.dataset.flow === "lessons") {
+            err.textContent = "";
+            lessonBrowseMsg = "جاري تحميل الدروس…";
+            lessonBrowseFilterCategoryId = null;
+            phase = "lesson_menu";
+            render();
+            void fetchLessonBrowse()
+              .then(() => {
+                lessonBrowseMsg = "";
+                render();
+              })
+              .catch(() => {
+                lessonBrowseMsg = "تعذر تحميل الدروس.";
+                render();
+              });
+            return;
+          }
           selectedModeInName =
             b.dataset.mode === "study_then_quiz" ? "study_then_quiz" : "direct";
           modeBtns.forEach((x) => {
@@ -891,6 +967,232 @@ function render(): void {
       render();
       connectSocket(storedName, "direct", null, "mix", "private_join", pendingJoinRoomCode);
     }
+    return;
+  }
+
+  if (phase === "lesson_menu") {
+    const catOptions =
+      `<option value="">كل التصنيفات</option>` +
+      lessonBrowseCategories
+        .map((c) => `<option value="${c.id}">${escapeHtml(c.nameAr)}</option>`)
+        .join("");
+    const filtered =
+      lessonBrowseFilterCategoryId == null
+        ? lessonBrowseLessons
+        : lessonBrowseLessons.filter(
+            (l) => l.category?.id === lessonBrowseFilterCategoryId,
+          );
+    app.append(
+      el(`
+        <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" id="lesson-back-home" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">الرئيسية</button>
+            <h1 class="text-xl font-extrabold text-amber-300">دروس منظمة</h1>
+          </div>
+          <p class="text-slate-300 text-sm text-right m-0">تسلسل تعليمي مرتب — اختر درساً للبدء.</p>
+          <div class="flex flex-wrap gap-2 items-center">
+            <label class="text-slate-400 text-sm">التصنيف</label>
+            <select id="lesson-cat-filter" class="app-input flex-1 min-w-[160px] px-3 py-2 text-right">${catOptions}</select>
+          </div>
+          <p id="lesson-browse-msg" class="text-amber-200 text-sm min-h-[1.25rem] m-0">${escapeHtml(lessonBrowseMsg)}</p>
+          <div id="lesson-list-root" class="flex flex-col gap-2 flex-1 overflow-y-auto pb-4"></div>
+        </div>
+      `),
+    );
+    const sel = app.querySelector<HTMLSelectElement>("#lesson-cat-filter");
+    if (sel) {
+      sel.value =
+        lessonBrowseFilterCategoryId != null ? String(lessonBrowseFilterCategoryId) : "";
+      sel.addEventListener("change", () => {
+        const v = sel.value.trim();
+        lessonBrowseFilterCategoryId = v ? Number(v) : null;
+        render();
+      });
+    }
+    const root = app.querySelector<HTMLDivElement>("#lesson-list-root");
+    if (root) {
+      if (filtered.length === 0) {
+        root.innerHTML =
+          `<p class="text-slate-400 text-center py-8">لا توجد دروس منشورة حالياً.</p>`;
+      } else {
+        filtered.forEach((l) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className =
+            "mode-option-btn text-right w-full flex flex-col items-stretch gap-1 py-3 px-4";
+          const catLabel = l.category
+            ? `${l.category.icon} ${l.category.nameAr}`
+            : "بدون تصنيف";
+          btn.innerHTML = `
+            <span class="mode-option-title">${escapeHtml(l.title)}</span>
+            <span class="mode-option-desc text-slate-400">${escapeHtml(catLabel)} — ${l.itemCount} سؤالاً</span>
+          `;
+          btn.addEventListener("click", () => {
+            void openLessonById(l.id);
+          });
+          root.appendChild(btn);
+        });
+      }
+    }
+    app.querySelector("#lesson-back-home")?.addEventListener("click", () => {
+      lessonBrowseMsg = "";
+      phase = "name";
+      render();
+    });
+    return;
+  }
+
+  if (phase === "lesson_study") {
+    const card = lessonStudyQueue[lessonStudyIdx];
+    const total = lessonStudyQueue.length;
+    app.append(
+      el(`
+        <div class="study-shell min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
+          <div class="flex items-center justify-between">
+            <button type="button" id="lesson-study-exit" class="ui-btn ui-btn--ghost py-2 text-sm">خروج</button>
+            <div id="lesson-seg-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums">—</div>
+          </div>
+          <p class="text-amber-200 text-sm text-right m-0">${escapeHtml(lessonPlayback?.title ?? "")}</p>
+          <p class="text-slate-400 text-xs text-right m-0">بطاقة ${lessonStudyIdx + 1} من ${total}</p>
+          <div class="study-cards-container flex-1">
+            <div class="study-card study-card--0">
+              <p class="study-card__body font-medium whitespace-pre-wrap">${escapeHtml(card?.body ?? "")}</p>
+            </div>
+          </div>
+          <button type="button" id="lesson-study-skip" class="ui-btn ui-btn--primary w-full py-3">التالي</button>
+        </div>
+      `),
+    );
+    const exit = () => {
+      clearTimer();
+      resetLessonState();
+      phase = "lesson_menu";
+      void fetchLessonBrowse()
+        .then(() => {
+          render();
+        })
+        .catch(() => {
+          render();
+        });
+    };
+    app.querySelector("#lesson-study-exit")?.addEventListener("click", exit);
+    app.querySelector("#lesson-study-skip")?.addEventListener("click", () => {
+      clearTimer();
+      lessonStudyIdx++;
+      if (lessonStudyIdx >= lessonStudyQueue.length) {
+        phase = "lesson_quiz";
+        lessonPrepareQuizQuestion(0);
+      } else {
+        lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[lessonStudyIdx].ms;
+      }
+      render();
+    });
+    clearTimer();
+    timerHandle = window.setInterval(() => {
+      const clock = app.querySelector<HTMLDivElement>("#lesson-seg-clock");
+      const left = Math.max(0, lessonStudySegmentEndAt - nowSynced());
+      const sec = Math.max(0, Math.floor((left + 250) / 1000));
+      if (clock) clock.textContent = `${sec}s`;
+      if (left <= 0) {
+        clearTimer();
+        lessonStudyIdx++;
+        if (lessonStudyIdx >= lessonStudyQueue.length) {
+          phase = "lesson_quiz";
+          lessonPrepareQuizQuestion(0);
+        } else {
+          lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[lessonStudyIdx].ms;
+        }
+        render();
+      }
+    }, 200);
+    return;
+  }
+
+  if (phase === "lesson_quiz") {
+    const step = lessonPlayback?.steps[lessonQuizIdx];
+    const totalQ = lessonPlayback?.steps.length ?? 0;
+    app.append(
+      el(`
+        <div class="playing-shell app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" id="lesson-quiz-exit" class="ui-btn ui-btn--ghost py-2 text-sm">خروج</button>
+            <div id="lesson-quiz-clock" class="text-xl font-mono font-bold text-amber-300 tabular-nums">—</div>
+          </div>
+          <p class="text-slate-400 text-xs text-right m-0">سؤال ${lessonQuizIdx + 1} من ${totalQ}</p>
+          <div class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0">
+            <p id="lesson-q-text" class="text-right text-xl font-semibold leading-relaxed min-h-[4rem]"></p>
+            <div id="lesson-opts" class="options-grid grid"></div>
+          </div>
+          <p id="lesson-q-status" class="status-line text-center text-sm min-h-[1.25rem]"></p>
+        </div>
+      `),
+    );
+    const qText = app.querySelector<HTMLParagraphElement>("#lesson-q-text");
+    const opts = app.querySelector<HTMLDivElement>("#lesson-opts");
+    const status = app.querySelector<HTMLParagraphElement>("#lesson-q-status");
+    if (step && qText && opts) {
+      qText.textContent = step.prompt;
+      opts.innerHTML = "";
+      let answered = false;
+      step.options.forEach((label, idx) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "option-btn";
+        b.textContent = label;
+        b.addEventListener("click", () => {
+          if (lessonQuizLocked || answered || lessonQuizRoundResolved) return;
+          answered = true;
+          const ok = idx === step.correctIndex;
+          b.classList.add(ok ? "option-btn--selected" : "option-btn--pressed");
+          opts.querySelectorAll("button").forEach((btn) => {
+            (btn as HTMLButtonElement).disabled = true;
+            btn.classList.add("option-btn--disabled");
+          });
+          if (status) {
+            status.textContent = ok ? "صحيح!" : "غير صحيح.";
+          }
+          advanceLessonQuizAfterResolution(ok);
+        });
+        opts.appendChild(b);
+      });
+    }
+    app.querySelector("#lesson-quiz-exit")?.addEventListener("click", () => {
+      clearTimer();
+      resetLessonState();
+      phase = "lesson_menu";
+      void fetchLessonBrowse()
+        .then(() => render())
+        .catch(() => render());
+    });
+    startLessonQuizTimer();
+    return;
+  }
+
+  if (phase === "lesson_done") {
+    const total = lessonPlayback?.steps.length ?? 0;
+    app.append(
+      el(`
+        <div class="app-screen min-h-screen text-white p-6 flex flex-col items-center justify-center max-w-md mx-auto text-center gap-6">
+          <h2 class="text-2xl font-extrabold text-amber-300">أنهيت الدرس</h2>
+          <p class="text-slate-200 text-lg">${escapeHtml(lessonPlayback?.title ?? "")}</p>
+          <p class="text-emerald-300 text-xl font-bold">النتيجة: ${lessonQuizCorrect} / ${total}</p>
+          <button type="button" id="lesson-done-back" class="ui-btn ui-btn--cta w-full py-3 text-lg">قائمة الدروس</button>
+          <button type="button" id="lesson-done-home" class="ui-btn ui-btn--ghost w-full py-3">الوضع العادي</button>
+        </div>
+      `),
+    );
+    app.querySelector("#lesson-done-back")?.addEventListener("click", () => {
+      resetLessonState();
+      phase = "lesson_menu";
+      void fetchLessonBrowse()
+        .then(() => render())
+        .catch(() => render());
+    });
+    app.querySelector("#lesson-done-home")?.addEventListener("click", () => {
+      resetLessonState();
+      phase = "name";
+      render();
+    });
     return;
   }
 
@@ -1429,6 +1731,123 @@ function renderLeaderboard(): void {
     list.appendChild(item);
   });
   box.appendChild(list);
+}
+
+function resetLessonState(): void {
+  lessonPlayback = null;
+  lessonStudyQueue = [];
+  lessonStudyIdx = 0;
+  lessonStudySegmentEndAt = 0;
+  lessonQuizIdx = 0;
+  lessonQuizCorrect = 0;
+  lessonQuizLocked = false;
+  lessonQuizRoundResolved = false;
+  currentQuestionId = null;
+}
+
+async function fetchLessonBrowse(): Promise<void> {
+  lessonBrowseMsg = "";
+  const [cRes, lRes] = await Promise.all([
+    fetch("/api/lesson-categories", { cache: "no-store" }),
+    fetch("/api/lessons", { cache: "no-store" }),
+  ]);
+  const cJson = (await cRes.json()) as { ok?: boolean; categories?: typeof lessonBrowseCategories };
+  const lJson = (await lRes.json()) as { ok?: boolean; lessons?: typeof lessonBrowseLessons };
+  if (!cRes.ok || !cJson.ok) throw new Error("lesson_categories_failed");
+  if (!lRes.ok || !lJson.ok) throw new Error("lessons_failed");
+  lessonBrowseCategories = cJson.categories ?? [];
+  lessonBrowseLessons = lJson.lessons ?? [];
+}
+
+function beginLessonPlayback(data: LessonPlaybackPayload): void {
+  resetLessonState();
+  lessonPlayback = data;
+  lessonStudyQueue = data.steps
+    .filter((s) => Boolean(s.studyBody?.trim()))
+    .map((s) => ({ body: s.studyBody as string, ms: s.effectiveStudyCardMs }));
+  lessonStudyIdx = 0;
+  if (lessonStudyQueue.length > 0) {
+    phase = "lesson_study";
+    lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[0].ms;
+  } else {
+    phase = "lesson_quiz";
+    lessonPrepareQuizQuestion(0);
+  }
+}
+
+function lessonPrepareQuizQuestion(index: number): void {
+  if (!lessonPlayback) {
+    phase = "lesson_done";
+    return;
+  }
+  if (index >= lessonPlayback.steps.length) {
+    phase = "lesson_done";
+    return;
+  }
+  lessonQuizIdx = index;
+  const step = lessonPlayback.steps[index];
+  currentQuestionId = step.questionId;
+  endsAt = nowSynced() + step.effectiveAnswerMs;
+  lessonQuizLocked = false;
+  lessonQuizRoundResolved = false;
+}
+
+function advanceLessonQuizAfterResolution(wasCorrect: boolean): void {
+  if (lessonQuizRoundResolved) return;
+  lessonQuizRoundResolved = true;
+  lessonQuizLocked = true;
+  if (wasCorrect) lessonQuizCorrect++;
+  clearTimer();
+  window.setTimeout(() => {
+    lessonPrepareQuizQuestion(lessonQuizIdx + 1);
+    render();
+  }, 900);
+}
+
+async function openLessonById(id: number): Promise<void> {
+  lessonBrowseMsg = "جاري تحميل الدرس…";
+  phase = "lesson_menu";
+  render();
+  try {
+    const res = await fetch(`/api/lessons/${id}`, { cache: "no-store" });
+    const data = (await res.json()) as { ok?: boolean; lesson?: LessonPlaybackPayload; error?: string };
+    if (!res.ok || !data.ok || !data.lesson?.steps?.length) {
+      lessonBrowseMsg = "تعذر تحميل الدرس أو لا يوجد محتوى منشور.";
+      render();
+      return;
+    }
+    lessonBrowseMsg = "";
+    beginLessonPlayback(data.lesson);
+    render();
+  } catch {
+    lessonBrowseMsg = "تعذر تحميل الدرس.";
+    render();
+  }
+}
+
+function startLessonQuizTimer(): void {
+  clearTimer();
+  const clock = app.querySelector<HTMLDivElement>("#lesson-quiz-clock");
+  if (!clock) return;
+  timerHandle = window.setInterval(() => {
+    if (phase !== "lesson_quiz") return;
+    const ms = endsAt - nowSynced();
+    if (!lessonQuizRoundResolved && ms <= 0) {
+      const opts = app.querySelector<HTMLDivElement>("#lesson-opts");
+      const status = app.querySelector<HTMLParagraphElement>("#lesson-q-status");
+      opts?.querySelectorAll("button").forEach((btn) => {
+        const htmlBtn = btn as HTMLButtonElement;
+        htmlBtn.disabled = true;
+        htmlBtn.classList.add("option-btn--disabled");
+      });
+      if (status) status.textContent = "انتهى الوقت.";
+      advanceLessonQuizAfterResolution(false);
+      return;
+    }
+    const showMs = Math.max(0, ms);
+    const sec = Math.max(0, Math.floor((showMs + 250) / 1000));
+    clock.textContent = `${sec}s`;
+  }, 200);
 }
 
 function escapeHtml(s: string): string {
@@ -2901,5 +3320,10 @@ if (pendingJoinRoomCode) {
   nameFlowStep = "mode";
   privateEntryAutoJoinTried = false;
 }
-render();
+const lessonIdFromUrl = Number(new URLSearchParams(window.location.search).get("lesson") ?? "");
+if (Number.isInteger(lessonIdFromUrl) && lessonIdFromUrl > 0) {
+  void openLessonById(lessonIdFromUrl);
+} else {
+  render();
+}
 startReleaseVersionWatch();

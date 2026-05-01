@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>إدارة الدروس | فاهم</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root { --bg-from:#020309; --bg-mid:#090d1f; --bg-to:#121529; --card:rgba(10,13,28,.85); --border:rgba(223,187,106,.2); --text:#f8f4ea; --muted:#b7ac90; --amber:#e8be66; --ok:#34d399; --danger:#f87171; }
+      * { box-sizing:border-box; } body { margin:0; min-height:100vh; font-family:"Tajawal",system-ui,sans-serif; background:linear-gradient(to bottom,var(--bg-from),var(--bg-mid),var(--bg-to)); color:var(--text); }
+      .wrap { max-width:90rem; margin:0 auto; padding:1.1rem 1rem 2rem; } .subtitle { color:var(--muted); margin:.2rem 0 .7rem; }
+      .topbar { position:sticky; top:.5rem; z-index:25; display:flex; flex-wrap:wrap; gap:.55rem; align-items:end; padding:.7rem; background:var(--card); border:1px solid var(--border); border-radius:.9rem; margin-bottom:.8rem; }
+      .topbar label { display:block; color:var(--muted); font-size:.82rem; margin-bottom:.2rem; }
+      input,select,textarea { background:rgba(0,0,0,.25); border:1px solid var(--border); color:var(--text); border-radius:.55rem; padding:.45rem .55rem; font-family:inherit; }
+      .btn { border:none; border-radius:.55rem; padding:.5rem .85rem; font-weight:700; cursor:pointer; font-family:inherit; background:linear-gradient(to left,#e8be66,#a8792f); color:#120b02; }
+      .btn-secondary { background:rgba(255,255,255,.1); color:var(--text); border:1px solid var(--border); } .btn-danger { background:rgba(248,113,113,.14); color:#fecaca; border:1px solid rgba(248,113,113,.45); }
+      .btn:disabled { opacity:.5; cursor:not-allowed; } .msg { min-height:1.2rem; flex-basis:100%; font-size:.88rem; } .ok { color:var(--ok); } .err { color:#fca5a5; }
+      .card { margin-top:.65rem; padding:.7rem; background:var(--card); border:1px solid var(--border); border-radius:.9rem; }
+      .row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; } .split { display:grid; grid-template-columns:1fr 1.2fr; gap:.7rem; }
+      .list { border:1px solid var(--border); border-radius:.75rem; max-height:280px; overflow:auto; }
+      .list-item { padding:.45rem .55rem; border-bottom:1px solid rgba(223,187,106,.1); cursor:pointer; }
+      .list-item:hover { background:rgba(255,255,255,.04); } .list-item.active { border-inline-end:3px solid var(--amber); }
+      .item-row { display:grid; grid-template-columns:1fr auto auto auto auto; gap:.35rem; align-items:center; padding:.35rem; border-bottom:1px solid rgba(223,187,106,.08); font-size:.88rem; }
+      .muted { color:var(--muted); font-size:.82rem; }
+      table { width:100%; border-collapse:collapse; font-size:.88rem; } th,td { padding:.4rem; border-bottom:1px solid var(--border); text-align:right; }
+      @media (max-width:1100px) { .split { grid-template-columns:1fr; } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1 style="margin:0;color:var(--amber)">إدارة الدروس</h1>
+      <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong> — الدروس تربط أسئلة موجودة دون نسخها.</p>
+
+      <div class="topbar">
+        <div>
+          <label for="sec">مفتاح الإدارة</label>
+          <input id="sec" type="password" autocomplete="off" placeholder="X-Admin-Secret" />
+        </div>
+        <button class="btn" id="load-all" type="button">تحميل</button>
+        <button class="btn btn-secondary" id="go-admin" type="button">اللوحة الرئيسية</button>
+        <div class="msg" id="msg" aria-live="polite"></div>
+      </div>
+
+      <div class="split">
+        <div class="card">
+          <strong>تصنيفات الدروس</strong>
+          <div class="row" style="margin:.5rem 0">
+            <input id="cat-name" type="text" placeholder="اسم التصنيف" style="flex:1;min-width:120px" />
+            <input id="cat-icon" type="text" placeholder="أيقونة" style="width:70px" value="📖" />
+            <button class="btn btn-secondary" id="cat-add" type="button">إضافة</button>
+          </div>
+          <div class="list" id="cat-list"></div>
+        </div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between">
+            <strong>الدروس</strong>
+            <button class="btn btn-secondary" id="lesson-new" type="button">درس جديد</button>
+          </div>
+          <div class="list" id="lesson-list" style="max-height:320px;margin-top:.5rem"></div>
+        </div>
+      </div>
+
+      <div class="card" id="editor-card" hidden>
+        <strong id="editor-title">تحرير الدرس</strong>
+        <div class="row" style="margin:.6rem 0">
+          <label class="muted">عنوان</label>
+          <input id="l-title" type="text" style="flex:1;min-width:200px" />
+        </div>
+        <div class="row">
+          <label class="muted">slug</label>
+          <input id="l-slug" type="text" placeholder="اختياري للرابط" style="width:200px" />
+          <label class="muted">تصنيف</label>
+          <select id="l-cat"></select>
+          <label><input id="l-pub" type="checkbox" /> منشور</label>
+        </div>
+        <div class="row" style="margin-top:.45rem">
+          <label class="muted">وصف</label>
+          <textarea id="l-desc" rows="2" style="flex:1;min-width:100%"></textarea>
+        </div>
+        <div class="row">
+          <label class="muted">وقت الإجابة الافتراضي (مللي)</label>
+          <input id="l-d-ans" type="number" min="3000" max="120000" step="500" value="15000" style="width:120px" />
+          <label class="muted">مدة بطاقة التعلم الافتراضية (مللي)</label>
+          <input id="l-d-study" type="number" min="2000" max="300000" step="500" value="10000" style="width:120px" />
+          <label class="muted">ترتيب</label>
+          <input id="l-sort" type="number" min="0" value="0" style="width:80px" />
+        </div>
+        <div class="row" style="margin:.55rem 0">
+          <button class="btn" id="l-save-meta" type="button">حفظ بيانات الدرس</button>
+          <button class="btn btn-danger" id="l-del" type="button">حذف الدرس</button>
+          <span class="muted" id="l-id-label"></span>
+        </div>
+
+        <hr style="border-color:var(--border);margin:.75rem 0" />
+
+        <strong>تسلسل الأسئلة</strong>
+        <p class="muted" style="margin:.35rem 0">ابحث في بنك الأسئلة ثم أضف للدرس. استخدم الأزرار لإعادة الترتيب. يمكنك ترك حقول الوقت فارغة لاستخدام افتراضيات الدرس.</p>
+        <div class="row">
+          <input id="q-q" type="search" placeholder="بحث في نص السؤال" style="flex:1;min-width:140px" />
+          <input id="q-sub" type="text" placeholder="subcategory_key" style="width:140px" />
+          <button class="btn btn-secondary" id="q-search" type="button">بحث</button>
+        </div>
+        <div class="list" id="q-results" style="max-height:160px;margin:.45rem 0"></div>
+        <div id="items-wrap" style="border:1px solid var(--border);border-radius:.75rem;margin-top:.45rem"></div>
+        <div class="row" style="margin-top:.55rem">
+          <button class="btn" id="l-save-items" type="button">حفظ التسلسل</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const msg = document.getElementById("msg");
+        const secEl = document.getElementById("sec");
+        function secret() { return (secEl.value || "").trim(); }
+        function setMsg(text, ok) {
+          msg.textContent = text || "";
+          msg.className = "msg " + (ok ? "ok" : "err");
+        }
+        function hdr() {
+          const s = secret();
+          return { "Content-Type": "application/json", "X-Admin-Secret": s };
+        }
+
+        let categories = [];
+        let lessons = [];
+        let selectedLessonId = null;
+        let detail = null;
+        /** @type {{ questionId: number, answerMs: string, studyCardMs: string, preview: string }[]} */
+        let draftItems = [];
+
+        document.getElementById("go-admin").onclick = () => { window.location.href = "/admin"; };
+
+        async function api(path, opts) {
+          const s = secret();
+          if (!s) { setMsg("أدخل مفتاح الإدارة.", false); throw new Error("no_secret"); }
+          const res = await fetch(path, { ...opts, headers: { ...hdr(), ...(opts && opts.headers) } });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data.ok === false) {
+            setMsg(data.message || data.error || "فشل الطلب", false);
+            throw new Error(data.error || "api");
+          }
+          return data;
+        }
+
+        function renderCats() {
+          const el = document.getElementById("cat-list");
+          el.innerHTML = categories.map((c) =>
+            `<div class="list-item" style="cursor:default;display:flex;justify-content:space-between;align-items:center;gap:.5rem">
+              <span><strong>${escapeHtml(c.nameAr)}</strong> ${escapeHtml(c.icon || "")} <span class="muted">#${c.id}</span></span>
+              <button type="button" class="btn btn-danger" style="padding:.25rem .5rem;font-size:.75rem" data-del-cat="${c.id}">حذف</button>
+            </div>`
+          ).join("") || '<div class="muted" style="padding:.5rem">لا تصنيفات</div>';
+          el.querySelectorAll("[data-del-cat]").forEach((b) => {
+            b.addEventListener("click", () => {
+              const id = Number(b.getAttribute("data-del-cat"));
+              if (!confirm("حذف التصنيف #" + id + "؟ (يُرفض إن وُجدت دروس أو فروع فرعية)")) return;
+              void deleteCat(id);
+            });
+          });
+          const sel = document.getElementById("l-cat");
+          sel.innerHTML = '<option value="">— بدون تصنيف —</option>' +
+            categories.map((c) => `<option value="${c.id}">${escapeHtml(c.nameAr)}</option>`).join("");
+        }
+
+        function escapeHtml(s) {
+          return String(s ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+        }
+
+        async function deleteCat(id) {
+          try {
+            await api("/api/admin/lesson-categories/" + id, { method: "DELETE" });
+            setMsg("تم حذف التصنيف.", true);
+            await loadAll();
+          } catch (_) {}
+        }
+
+        function renderLessons() {
+          const el = document.getElementById("lesson-list");
+          el.innerHTML = lessons.map((l) =>
+            `<div class="list-item ${l.id === selectedLessonId ? "active" : ""}" data-id="${l.id}">
+              ${l.isPublished ? "✓" : "○"} <strong>${escapeHtml(l.title)}</strong>
+              <span class="muted">${l.itemCount} سؤال</span>
+            </div>`
+          ).join("") || '<div class="muted" style="padding:.5rem">لا دروس</div>';
+          el.querySelectorAll(".list-item").forEach((row) => {
+            row.addEventListener("click", async () => {
+              selectedLessonId = Number(row.getAttribute("data-id"));
+              renderLessons();
+              await loadDetail(selectedLessonId);
+            });
+          });
+        }
+
+        async function loadAll() {
+          setMsg("جاري التحميل...", true);
+          try {
+            const [c, le] = await Promise.all([
+              api("/api/admin/lesson-categories", { method: "GET" }),
+              api("/api/admin/lessons", { method: "GET" }),
+            ]);
+            categories = c.categories || [];
+            lessons = le.lessons || [];
+            renderCats();
+            renderLessons();
+            setMsg("تم التحميل.", true);
+          } catch (_) {
+            setMsg(msg.textContent || "فشل التحميل", false);
+          }
+        }
+
+        async function loadDetail(id) {
+          try {
+            const d = await api("/api/admin/lessons/" + id, { method: "GET" });
+            detail = d;
+            document.getElementById("editor-card").hidden = false;
+            document.getElementById("l-id-label").textContent = "معرّف #" + id;
+            document.getElementById("l-title").value = d.lesson.title || "";
+            document.getElementById("l-slug").value = d.lesson.slug || "";
+            document.getElementById("l-desc").value = d.lesson.description || "";
+            document.getElementById("l-pub").checked = !!d.lesson.isPublished;
+            document.getElementById("l-d-ans").value = String(d.lesson.defaultAnswerMs);
+            document.getElementById("l-d-study").value = String(d.lesson.defaultStudyCardMs);
+            document.getElementById("l-sort").value = String(d.lesson.sortOrder ?? 0);
+            const cid = d.lesson.lessonCategoryId;
+            document.getElementById("l-cat").value = cid != null ? String(cid) : "";
+            draftItems = (d.items || []).map((it) => ({
+              questionId: it.questionId,
+              answerMs: it.answerMs != null ? String(it.answerMs) : "",
+              studyCardMs: it.studyCardMs != null ? String(it.studyCardMs) : "",
+              preview: it.promptPreview || "",
+            }));
+            renderItems();
+          } catch (_) {}
+        }
+
+        function renderItems() {
+          const wrap = document.getElementById("items-wrap");
+          wrap.innerHTML = draftItems.map((it, idx) =>
+            `<div class="item-row">
+              <span class="muted">${idx + 1}.</span>
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:42vw">${escapeHtml(it.preview)}</span>
+              <input type="number" data-i="${idx}" data-f="answer" placeholder="إجابة ms" style="width:100px" value="${escapeHtml(it.answerMs)}" />
+              <input type="number" data-i="${idx}" data-f="study" placeholder="بطاقة ms" style="width:100px" value="${escapeHtml(it.studyCardMs)}" />
+              <span class="row" style="gap:.2rem">
+                <button type="button" class="btn btn-secondary btn-xs" data-up="${idx}">↑</button>
+                <button type="button" class="btn btn-secondary btn-xs" data-down="${idx}">↓</button>
+                <button type="button" class="btn btn-danger btn-xs" data-rm="${idx}">✕</button>
+              </span>
+            </div>`
+          ).join("") || '<div class="muted" style="padding:.5rem">لا عناصر — أضف أسئلة من البحث.</div>';
+
+          wrap.querySelectorAll("input[data-f]").forEach((inp) => {
+            inp.addEventListener("change", () => {
+              const i = Number(inp.getAttribute("data-i"));
+              const f = inp.getAttribute("data-f");
+              if (f === "answer") draftItems[i].answerMs = inp.value.trim();
+              else draftItems[i].studyCardMs = inp.value.trim();
+            });
+          });
+          wrap.querySelectorAll("[data-up]").forEach((b) => {
+            b.addEventListener("click", () => {
+              const i = Number(b.getAttribute("data-up"));
+              if (i <= 0) return;
+              const t = draftItems[i - 1]; draftItems[i - 1] = draftItems[i]; draftItems[i] = t;
+              renderItems();
+            });
+          });
+          wrap.querySelectorAll("[data-down]").forEach((b) => {
+            b.addEventListener("click", () => {
+              const i = Number(b.getAttribute("data-down"));
+              if (i >= draftItems.length - 1) return;
+              const t = draftItems[i + 1]; draftItems[i + 1] = draftItems[i]; draftItems[i] = t;
+              renderItems();
+            });
+          });
+          wrap.querySelectorAll("[data-rm]").forEach((b) => {
+            b.addEventListener("click", () => {
+              const i = Number(b.getAttribute("data-rm"));
+              draftItems.splice(i, 1);
+              renderItems();
+            });
+          });
+        }
+
+        document.getElementById("load-all").onclick = () => void loadAll();
+
+        document.getElementById("cat-add").onclick = async () => {
+          const nameAr = document.getElementById("cat-name").value.trim();
+          const icon = document.getElementById("cat-icon").value.trim() || "📖";
+          if (!nameAr) return setMsg("أدخل اسم التصنيف.", false);
+          try {
+            await api("/api/admin/lesson-categories", { method: "POST", body: JSON.stringify({ nameAr, icon, sortOrder: 0, isActive: true }) });
+            document.getElementById("cat-name").value = "";
+            setMsg("تم إنشاء التصنيف.", true);
+            await loadAll();
+          } catch (_) {}
+        };
+
+        document.getElementById("lesson-new").onclick = async () => {
+          try {
+            const res = await api("/api/admin/lessons", {
+              method: "POST",
+              body: JSON.stringify({ title: "درس جديد", sortOrder: 0 }),
+            });
+            selectedLessonId = res.id;
+            await loadAll();
+            await loadDetail(res.id);
+            setMsg("تم إنشاء درس جديد.", true);
+          } catch (_) {}
+        };
+
+        document.getElementById("l-save-meta").onclick = async () => {
+          if (!selectedLessonId) return;
+          const lessonCategoryIdRaw = document.getElementById("l-cat").value;
+          const body = {
+            title: document.getElementById("l-title").value.trim(),
+            slug: document.getElementById("l-slug").value.trim() || null,
+            description: document.getElementById("l-desc").value.trim() || null,
+            lessonCategoryId: lessonCategoryIdRaw ? Number(lessonCategoryIdRaw) : null,
+            isPublished: document.getElementById("l-pub").checked,
+            defaultAnswerMs: Number(document.getElementById("l-d-ans").value),
+            defaultStudyCardMs: Number(document.getElementById("l-d-study").value),
+            sortOrder: Number(document.getElementById("l-sort").value),
+          };
+          try {
+            await api("/api/admin/lessons/" + selectedLessonId, { method: "PATCH", body: JSON.stringify(body) });
+            setMsg("تم حفظ بيانات الدرس.", true);
+            await loadAll();
+          } catch (_) {}
+        };
+
+        document.getElementById("l-del").onclick = async () => {
+          if (!selectedLessonId || !confirm("حذف هذا الدرس نهائياً؟")) return;
+          try {
+            await api("/api/admin/lessons/" + selectedLessonId, { method: "DELETE" });
+            selectedLessonId = null;
+            detail = null;
+            document.getElementById("editor-card").hidden = true;
+            setMsg("تم الحذف.", true);
+            await loadAll();
+          } catch (_) {}
+        };
+
+        document.getElementById("q-search").onclick = async () => {
+          const q = document.getElementById("q-q").value.trim();
+          const sub = document.getElementById("q-sub").value.trim();
+          const qs = new URLSearchParams({ limit: "30", offset: "0", q, ...(sub ? { subcategoryKey: sub } : {}) });
+          try {
+            const data = await api("/api/admin/questions?" + qs.toString(), { method: "GET" });
+            const el = document.getElementById("q-results");
+            el.innerHTML = (data.items || []).map((it) =>
+              `<div class="list-item" style="cursor:default;display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">
+                <span><span class="muted">#${it.id}</span> ${escapeHtml(it.promptPreview)}</span>
+                <button type="button" class="btn btn-secondary" style="padding:.2rem .45rem;flex-shrink:0" data-add-q="${it.id}">إضافة</button>
+              </div>`
+            ).join("") || '<div class="muted" style="padding:.5rem">لا نتائج</div>';
+            el.querySelectorAll("[data-add-q]").forEach((b) => {
+              b.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                const id = Number(b.getAttribute("data-add-q"));
+                const row = data.items.find((x) => x.id === id);
+                const preview = row ? String(row.promptPreview || "").slice(0, 180) : "#" + id;
+                if (draftItems.some((x) => x.questionId === id)) {
+                  setMsg("السؤال موجود بالفعل في التسلسل.", false);
+                  return;
+                }
+                draftItems.push({ questionId: id, answerMs: "", studyCardMs: "", preview });
+                renderItems();
+                setMsg("أُضيف للمسودة — احفظ التسلسل.", true);
+              });
+            });
+          } catch (_) {}
+        };
+
+        document.getElementById("l-save-items").onclick = async () => {
+          if (!selectedLessonId) return;
+          const items = draftItems.map((it) => ({
+            questionId: it.questionId,
+            answerMs: it.answerMs.trim() === "" ? null : Number(it.answerMs),
+            studyCardMs: it.studyCardMs.trim() === "" ? null : Number(it.studyCardMs),
+          }));
+          for (const x of items) {
+            if (!Number.isInteger(x.questionId) || x.questionId < 1) {
+              setMsg("معرّف سؤال غير صالح.", false);
+              return;
+            }
+            if (x.answerMs != null && (!Number.isFinite(x.answerMs) || x.answerMs < 3000 || x.answerMs > 120000)) {
+              setMsg("وقت الإجابة يجب بين 3000 و 120000 أو فارغ.", false);
+              return;
+            }
+            if (x.studyCardMs != null && (!Number.isFinite(x.studyCardMs) || x.studyCardMs < 2000 || x.studyCardMs > 300000)) {
+              setMsg("وقت البطاقة يجب بين 2000 و 300000 أو فارغ.", false);
+              return;
+            }
+          }
+          try {
+            await api("/api/admin/lessons/" + selectedLessonId + "/items", { method: "PUT", body: JSON.stringify({ items }) });
+            setMsg("تم حفظ التسلسل.", true);
+            await loadAll();
+            await loadDetail(selectedLessonId);
+          } catch (_) {}
+        };
+      })();
+    </script>
+  </body>
+</html>

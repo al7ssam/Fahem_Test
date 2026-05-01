@@ -5,6 +5,23 @@ import type { Express, Request, Response } from "express";
 import { z } from "zod";
 import { config } from "../config";
 import { getPool } from "../db/pool";
+import {
+  countLessonItems,
+  deleteLesson,
+  deleteLessonCategory,
+  getLessonAdmin,
+  getLessonPlaybackAdmin,
+  getPublishedLessonPlaybackById,
+  getPublishedLessonPlaybackBySlug,
+  insertLesson,
+  insertLessonCategory,
+  listLessonCategories,
+  listLessonsAdmin,
+  listPublishedLessons,
+  replaceLessonItems,
+  updateLesson,
+  updateLessonCategory,
+} from "../db/lessons";
 import { getResultMessages } from "../db/resultCopy";
 import { Match } from "../game/Match";
 import {
@@ -348,6 +365,47 @@ const questionsBatchGetSchema = z.object({
   ids: z.array(z.number().int().positive()).min(1).max(100),
 });
 
+const lessonCategoryPostSchema = z.object({
+  parentId: z.number().int().positive().nullable().optional(),
+  nameAr: z.string().trim().min(1).max(200),
+  icon: z.string().trim().min(1).max(16).optional(),
+  sortOrder: z.number().int().min(0).max(100000).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const lessonCategoryPatchSchema = z.object({
+  parentId: z.number().int().positive().nullable().optional(),
+  nameAr: z.string().trim().min(1).max(200).optional(),
+  icon: z.string().trim().min(1).max(16).optional(),
+  sortOrder: z.number().int().min(0).max(100000).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const lessonPostSchema = z.object({
+  lessonCategoryId: z.number().int().positive().nullable().optional(),
+  title: z.string().trim().min(1).max(300),
+  slug: z.string().trim().min(1).max(160).nullable().optional(),
+  description: z.string().max(8000).nullable().optional(),
+  defaultAnswerMs: z.number().int().min(3000).max(120000).optional(),
+  defaultStudyCardMs: z.number().int().min(2000).max(300000).optional(),
+  isPublished: z.boolean().optional(),
+  sortOrder: z.number().int().min(0).max(100000).optional(),
+});
+
+const lessonPatchSchema = lessonPostSchema.partial();
+
+const lessonItemsPutSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        questionId: z.number().int().positive(),
+        answerMs: z.number().int().min(3000).max(120000).nullable().optional(),
+        studyCardMs: z.number().int().min(2000).max(300000).nullable().optional(),
+      }),
+    )
+    .max(500),
+});
+
 function timingSafeEqualString(a: string, b: string): boolean {
   try {
     const bufA = Buffer.from(a, "utf8");
@@ -449,6 +507,10 @@ function adminCategoriesTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-categories.html");
 }
 
+function adminLessonsTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-lessons.html");
+}
+
 async function countQuestions(): Promise<number | null> {
   try {
     const pool = getPool();
@@ -487,6 +549,12 @@ function readAdminSimpleContentHtml(questionCount: number | null): string {
 
 function readAdminCategoriesHtml(questionCount: number | null): string {
   const raw = fs.readFileSync(adminCategoriesTemplatePath(), "utf8");
+  const display = questionCount === null ? "—" : String(questionCount);
+  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+}
+
+function readAdminLessonsHtml(questionCount: number | null): string {
+  const raw = fs.readFileSync(adminLessonsTemplatePath(), "utf8");
   const display = questionCount === null ? "—" : String(questionCount);
   return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
 }
@@ -899,6 +967,97 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminCategoriesHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة إدارة التصنيفات.");
+    }
+  });
+
+  app.get("/admin/lessons", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminLessonsHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة إدارة الدروس.");
+    }
+  });
+
+  app.get("/api/lesson-categories", async (_req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const rows = await pool.query<{
+        id: number;
+        parent_id: number | null;
+        name_ar: string;
+        icon: string;
+        sort_order: number;
+      }>(
+        `SELECT id, parent_id, name_ar, icon, sort_order
+         FROM lesson_categories
+         WHERE is_active = TRUE
+         ORDER BY parent_id NULLS FIRST, sort_order ASC, id ASC`,
+      );
+      res.json({
+        ok: true,
+        categories: rows.rows.map((r) => ({
+          id: r.id,
+          parentId: r.parent_id,
+          nameAr: r.name_ar,
+          icon: r.icon,
+          sortOrder: r.sort_order,
+        })),
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/lessons", async (req: Request, res: Response) => {
+    try {
+      const raw = req.query.categoryId;
+      const categoryId =
+        typeof raw === "string" && raw.trim() !== "" ? Number(raw) : null;
+      const list = await listPublishedLessons({
+        categoryId: categoryId != null && Number.isInteger(categoryId) && categoryId > 0 ? categoryId : null,
+      });
+      const filtered = list.filter((x) => x.itemCount > 0);
+      res.json({ ok: true, lessons: filtered });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/lessons/by-slug/:slug", async (req: Request, res: Response) => {
+    try {
+      const slug = String(req.params.slug ?? "").trim();
+      if (!slug) {
+        res.status(400).json({ ok: false, error: "invalid_slug" });
+        return;
+      }
+      const lesson = await getPublishedLessonPlaybackBySlug(slug);
+      if (!lesson || lesson.steps.length === 0) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true, lesson });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/lessons/:id", async (req: Request, res: Response) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id) || id < 1) {
+        res.status(400).json({ ok: false, error: "invalid_id" });
+        return;
+      }
+      const lesson = await getPublishedLessonPlaybackById(id);
+      if (!lesson || lesson.steps.length === 0) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true, lesson });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
 
@@ -3058,6 +3217,318 @@ export function registerAdminRoutes(app: Express): void {
       });
     } catch {
       res.status(500).json({ ok: false, error: "insert_failed" });
+    }
+  });
+
+  app.get("/api/admin/lesson-categories", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const categories = await listLessonCategories(getPool());
+      res.json({ ok: true, categories });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.post("/api/admin/lesson-categories", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = lessonCategoryPostSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const d = parsed.data;
+    try {
+      const id = await insertLessonCategory({
+        parentId: d.parentId ?? null,
+        nameAr: d.nameAr,
+        icon: d.icon ?? "📖",
+        sortOrder: d.sortOrder ?? 0,
+        isActive: d.isActive ?? true,
+      });
+      res.status(201).json({ ok: true, id });
+    } catch (e: unknown) {
+      const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
+      if (code === "23503") {
+        res.status(400).json({ ok: false, error: "invalid_parent" });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "insert_failed" });
+    }
+  });
+
+  app.patch("/api/admin/lesson-categories/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const parsed = lessonCategoryPatchSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const d = parsed.data;
+    if (d.parentId === id) {
+      res.status(400).json({ ok: false, error: "invalid_parent_self" });
+      return;
+    }
+    try {
+      const ok = await updateLessonCategory({
+        id,
+        parentId: d.parentId,
+        nameAr: d.nameAr,
+        icon: d.icon,
+        sortOrder: d.sortOrder,
+        isActive: d.isActive,
+      });
+      if (!ok) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.delete("/api/admin/lesson-categories/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const r = await deleteLessonCategory(id);
+      if (!r.ok) {
+        res.status(400).json({
+          ok: false,
+          error: r.reason ?? "delete_blocked",
+        });
+        return;
+      }
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "delete_failed" });
+    }
+  });
+
+  app.get("/api/admin/lessons", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const rawCat = req.query.categoryId;
+    const categoryId =
+      typeof rawCat === "string" && rawCat.trim() !== "" ? Number(rawCat) : undefined;
+    const pubRaw = req.query.published;
+    const publishedOnly = pubRaw === "1" || pubRaw === "true";
+    try {
+      const lessons = await listLessonsAdmin({
+        categoryId:
+          categoryId != null && Number.isInteger(categoryId) && categoryId > 0 ? categoryId : undefined,
+        publishedOnly,
+      });
+      res.json({ ok: true, lessons });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.post("/api/admin/lessons", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = lessonPostSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const d = parsed.data;
+    const isPublished = d.isPublished ?? false;
+    if (isPublished) {
+      res.status(400).json({
+        ok: false,
+        error: "publish_after_items",
+        message: "أضف أسئلة للدرس ثم انشره من التعديل.",
+      });
+      return;
+    }
+    try {
+      const id = await insertLesson({
+        lessonCategoryId: d.lessonCategoryId ?? null,
+        title: d.title,
+        slug: d.slug ?? null,
+        description: d.description ?? null,
+        defaultAnswerMs: d.defaultAnswerMs ?? 15_000,
+        defaultStudyCardMs: d.defaultStudyCardMs ?? 10_000,
+        isPublished: false,
+        sortOrder: d.sortOrder ?? 0,
+      });
+      res.status(201).json({ ok: true, id });
+    } catch (e: unknown) {
+      const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
+      if (code === "23505") {
+        res.status(409).json({ ok: false, error: "slug_taken" });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "insert_failed" });
+    }
+  });
+
+  app.get("/api/admin/lessons/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const detail = await getLessonAdmin(id);
+      if (!detail) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true, ...detail });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/lessons/:id/preview-playback", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const lesson = await getLessonPlaybackAdmin(id);
+      if (!lesson) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true, lesson });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/lessons/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const parsed = lessonPatchSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const d = parsed.data;
+    if (d.isPublished === true) {
+      const n = await countLessonItems(id);
+      if (n < 1) {
+        res.status(400).json({
+          ok: false,
+          error: "lesson_needs_items",
+          message: "لا يمكن نشر درس بدون أسئلة في التسلسل.",
+        });
+        return;
+      }
+    }
+    try {
+      const ok = await updateLesson(id, {
+        lessonCategoryId: d.lessonCategoryId,
+        title: d.title,
+        slug: d.slug,
+        description: d.description,
+        defaultAnswerMs: d.defaultAnswerMs,
+        defaultStudyCardMs: d.defaultStudyCardMs,
+        isPublished: d.isPublished,
+        sortOrder: d.sortOrder,
+      });
+      if (!ok) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
+      if (code === "23505") {
+        res.status(409).json({ ok: false, error: "slug_taken" });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.delete("/api/admin/lessons/:id", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const ok = await deleteLesson(id);
+      if (!ok) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "delete_failed" });
+    }
+  });
+
+  app.put("/api/admin/lessons/:id/items", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const parsed = lessonItemsPutSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    const pool = getPool();
+    const exists = await pool.query<{ c: string }>(`SELECT 1::text AS c FROM lessons WHERE id = $1`, [id]);
+    if (!exists.rows[0]) {
+      res.status(404).json({ ok: false, error: "not_found" });
+      return;
+    }
+    const questionIds = parsed.data.items.map((x) => x.questionId);
+    const uniq = new Set(questionIds);
+    if (uniq.size !== questionIds.length) {
+      res.status(400).json({ ok: false, error: "duplicate_question_in_lesson" });
+      return;
+    }
+    try {
+      const qr = await pool.query<{ id: number }>(
+        `SELECT id FROM questions WHERE id = ANY($1::int[])`,
+        [questionIds],
+      );
+      if (qr.rows.length !== questionIds.length) {
+        res.status(400).json({ ok: false, error: "unknown_question_id" });
+        return;
+      }
+      await replaceLessonItems(
+        id,
+        parsed.data.items.map((x) => ({
+          questionId: x.questionId,
+          answerMs: x.answerMs,
+          studyCardMs: x.studyCardMs,
+        })),
+      );
+      res.json({ ok: true, itemCount: questionIds.length });
+    } catch (e: unknown) {
+      const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
+      if (code === "23505") {
+        res.status(409).json({ ok: false, error: "items_conflict" });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "save_failed" });
     }
   });
 

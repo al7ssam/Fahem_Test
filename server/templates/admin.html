@@ -555,6 +555,7 @@
             <button type="button" class="btn" id="cb-run-btn">تحديث الكاش الآن</button>
             <button type="button" class="btn btn-secondary" onclick="window.open('/admin/usage-analytics', '_blank')">Usage Analytics</button>
             <button type="button" class="btn btn-secondary" onclick="window.open('/admin/simple-content', '_blank')">المسار البسيط لتوليد المحتوى</button>
+            <button type="button" class="btn btn-secondary" onclick="window.open('/admin/lessons', '_blank')">إدارة الدروس</button>
           </div>
         </div>
         <div class="msg" id="cb-msg"></div>
@@ -1005,6 +1006,19 @@
           <div class="card">
             <p class="subtitle">تم نقل إدارة التصنيفات إلى صفحة مستقلة بتجربة عرض وتحكم أفضل.</p>
             <button type="button" class="btn btn-secondary" id="open-categories-page">فتح صفحة إدارة التصنيفات</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="accordion-item">
+        <button class="accordion-trigger" data-acc="lessons">
+          <span class="accordion-title">إدارة الدروس (صفحة مستقلة)</span>
+          <span class="accordion-icon">⌄</span>
+        </button>
+        <div class="accordion-content">
+          <div class="card">
+            <p class="subtitle">إنشاء دروس مرتبة من أسئلة بنك الأسئلة، مع تصنيفات وتوقيت منفصل عن أوضاع التحدي.</p>
+            <button type="button" class="btn btn-secondary" id="open-lessons-page">فتح صفحة إدارة الدروس</button>
           </div>
         </div>
       </div>
@@ -2139,6 +2153,14 @@
         if (!openCategoriesBtn) return;
         openCategoriesBtn.addEventListener("click", function () {
           window.location.href = "/admin/categories";
+        });
+      })();
+
+      (function () {
+        var openLessonsBtn = document.getElementById("open-lessons-page");
+        if (!openLessonsBtn) return;
+        openLessonsBtn.addEventListener("click", function () {
+          window.location.href = "/admin/lessons";
         });
       })();
 
