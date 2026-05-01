@@ -209,6 +209,20 @@ body {
   filter: grayscale(0.08);
 }
 
+.option-btn--review-correct {
+  opacity: 1;
+  border-color: rgba(34, 197, 94, 0.85);
+  background: rgba(22, 101, 52, 0.35);
+  color: #bbf7d0;
+}
+
+.option-btn--review-wrong {
+  opacity: 1;
+  border-color: rgba(239, 68, 68, 0.9);
+  background: rgba(127, 29, 29, 0.32);
+  color: #fecaca;
+}
+
 /* مراجعة المذاكرة — ألوان pastel وحركة دخول */
 @keyframes study-card-in {
   from {

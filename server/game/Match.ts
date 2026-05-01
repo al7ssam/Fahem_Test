@@ -1,9 +1,16 @@
 ﻿import type { Server } from "socket.io";
 import { getPool } from "../db/pool";
+import type { LessonPlaybackPayload } from "../db/lessons";
+import {
+  lessonPlaybackToStudyCardsFromSteps,
+  lessonStepToQuestionRow,
+  lessonStudyPhaseTotalMsForSteps,
+} from "../db/lessons";
 import {
   getRandomQuestion,
   getStudyPhaseCardsFromQuestionIds,
   type QuestionRow,
+  type StudyPhaseCardPayload,
 } from "../db/questions";
 import { getResultMessages, type ResultMessages } from "../db/resultCopy";
 
@@ -17,7 +24,7 @@ const DEFAULT_STUDY_PHASE_MS = 60_000;
 const DEFAULT_ROUND_READY_MS = 12_000;
 const RUNTIME_SETTINGS_CACHE_MS = 15_000;
 
-export type GameMode = "direct" | "study_then_quiz";
+export type GameMode = "direct" | "study_then_quiz" | "lesson";
 export type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 
 export type MatchPlayerPublic = {
@@ -90,6 +97,18 @@ export class Match {
   private skipSocketsForQuestion = new Set<string>();
   private revealRemainingBySocket = new Map<string, number>();
   private revealMacroRoundBySocket = new Map<string, number | null>();
+  /** في نمط الدرس: تاريخ إجابات لكل مقبس لبناء lessonReview عند game_over */
+  private lessonAnswerHistory = new Map<
+    string,
+    Array<{
+      questionId: number;
+      choiceIndex: number | null;
+      correctIndex: number;
+      prompt: string;
+      options: string[];
+      studyBody: string | null;
+    }>
+  >();
   private keysStreakPerKey = 5;
   private keysSmallStreakReward = 1;
   private keysMegaStreak = 8;
@@ -124,6 +143,7 @@ export class Match {
       questionMsOverride?: number;
       studyPhaseMsOverride?: number;
     },
+    private readonly lessonPlayback: LessonPlaybackPayload | null = null,
   ) {
     this.room = `match_${matchId}`;
     this.isSoloMatch = entries.length === 1;
@@ -212,7 +232,7 @@ export class Match {
   private hasRevealFor(socketId: string): boolean {
     const rem = this.revealRemainingBySocket.get(socketId) ?? 0;
     if (rem <= 0) return false;
-    if (this.gameMode === "study_then_quiz") {
+    if (this.gameMode === "study_then_quiz" || this.gameMode === "lesson") {
       const mr = this.revealMacroRoundBySocket.get(socketId);
       return mr === this.macroRound;
     }
@@ -607,6 +627,8 @@ export class Match {
 
     if (this.gameMode === "direct") {
       await this.runDirectQuestionLoop(pool);
+    } else if (this.gameMode === "lesson") {
+      await this.runLessonMatchLoop(pool);
     } else {
       await this.runStudyThenQuizLoop(pool);
     }
@@ -630,6 +652,116 @@ export class Match {
       }
       await this.playOneQuestion(pool, q);
       if (this.finished) return;
+    }
+  }
+
+  private async runLessonStudyPhase(
+    cards: StudyPhaseCardPayload[],
+    phaseMs: number,
+    sectionMeta?: {
+      lessonSectionIndex: number;
+      lessonSectionCount: number;
+      lessonSectionTitle: string | null;
+    },
+  ): Promise<void> {
+    if (cards.length === 0 || phaseMs <= 0) return;
+    this.activeRoundToken = `${this.matchId}:${this.macroRound}:${Date.now()}`;
+    const now = Date.now();
+    const studyStartsAt = now;
+    const studyEndsAt = now + phaseMs;
+
+    this.io.to(this.room).emit("study_phase", {
+      cards,
+      roundToken: this.activeRoundToken,
+      startsAt: studyStartsAt,
+      endsAt: studyEndsAt,
+      serverNow: now,
+      macroRound: this.macroRound,
+      scope: "lesson",
+      ...sectionMeta,
+    });
+
+    await new Promise<void>((resolve) => {
+      this.studyPhaseResolve = resolve;
+      this.studyWaitTimer = setTimeout(() => {
+        this.studyWaitTimer = null;
+        this.studyPhaseResolve = null;
+        resolve();
+      }, Math.max(0, studyEndsAt - Date.now()));
+    });
+    this.clearStudyWait();
+
+    this.io.to(this.room).emit("study_phase_end", {
+      roundToken: this.activeRoundToken,
+      macroRound: this.macroRound,
+      startsAt: studyStartsAt,
+      studyEndsAt: studyEndsAt,
+      serverNow: Date.now(),
+      ...sectionMeta,
+    });
+  }
+
+  private async runLessonMatchLoop(pool: ReturnType<typeof getPool>): Promise<void> {
+    void pool;
+    const playback = this.lessonPlayback;
+    if (!playback || playback.steps.length === 0) {
+      this.emitNoQuestions();
+      return;
+    }
+    this.lessonAnswerHistory.clear();
+    for (const sid of this.players.keys()) {
+      this.lessonAnswerHistory.set(sid, []);
+    }
+
+    const sections =
+      playback.sections.length > 0
+        ? playback.sections
+        : [{ id: 0, sortOrder: 0, titleAr: null as string | null, steps: playback.steps }];
+
+    const sectionCount = sections.length;
+
+    for (let si = 0; si < sections.length; si++) {
+      const sec = sections[si];
+      if (this.finished) return;
+      this.macroRound = si + 1;
+      this.clearRevealIfNewMacro();
+
+      const sectionMeta = {
+        lessonSectionIndex: si,
+        lessonSectionCount: sectionCount,
+        lessonSectionTitle: sec.titleAr,
+      };
+
+      const studyCards = lessonPlaybackToStudyCardsFromSteps(sec.steps);
+      const phaseMs = lessonStudyPhaseTotalMsForSteps(sec.steps);
+      if (studyCards.length > 0) {
+        await this.runLessonStudyPhase(studyCards, phaseMs, sectionMeta);
+        if (this.finished) return;
+      } else {
+        const now = Date.now();
+        this.io.to(this.room).emit("study_phase", {
+          cards: [],
+          roundToken: `${this.matchId}:${this.macroRound}:${now}`,
+          startsAt: now,
+          endsAt: now,
+          serverNow: now,
+          macroRound: this.macroRound,
+          scope: "lesson",
+          ...sectionMeta,
+        });
+      }
+
+      for (const step of sec.steps) {
+        if (this.finished || !this.hasEnoughActivePlayersForQuestions() || this.round >= MAX_ROUNDS) {
+          return;
+        }
+        const q = lessonStepToQuestionRow(step);
+        const answerMs =
+          this.timeOverrides?.questionMsOverride != null
+            ? this.timeOverrides.questionMsOverride
+            : step.effectiveAnswerMs;
+        await this.playOneQuestion(pool, q, answerMs);
+      }
     }
   }
 
@@ -709,6 +841,7 @@ export class Match {
   private async playOneQuestion(
     pool: ReturnType<typeof getPool>,
     q: QuestionRow,
+    answerMsOverride?: number,
   ): Promise<void> {
     void pool;
     this.clearQuestionTimers();
@@ -720,7 +853,11 @@ export class Match {
     this.currentCorrectIndex = q.correct_index;
     this.currentOptionsCount = q.options.length;
     this.questionStartedAt = Date.now();
-    this.answerDeadline = Date.now() + this.questionMs;
+    const windowMs = Math.min(
+      120_000,
+      Math.max(5_000, answerMsOverride ?? this.questionMs),
+    );
+    this.answerDeadline = Date.now() + windowMs;
     this.pendingAnswers.clear();
     this.answerTimes.clear();
 
@@ -757,7 +894,7 @@ export class Match {
         this.abilityGraceTimer = null;
         this.finishRound();
       }, ABILITY_GRACE_MS);
-    }, this.questionMs);
+    }, windowMs);
     await waitRound;
 
     if (this.shouldDeclareWinnerForActiveCount() && !this.finished) {
@@ -780,6 +917,7 @@ export class Match {
       socketId: string;
       correct: boolean;
       skipped?: boolean;
+      choiceIndex?: number | null;
       pointsAward: number;
       hearts: number;
       eliminated: boolean;
@@ -794,6 +932,7 @@ export class Match {
           socketId,
           correct: false,
           skipped: true,
+          choiceIndex: null,
           pointsAward: 0,
           hearts: p.hearts,
           eliminated: p.eliminated,
@@ -803,6 +942,7 @@ export class Match {
 
       const choice = this.pendingAnswers.get(socketId);
       const answered = choice !== undefined;
+      const choiceIndexForResult: number | null = answered ? choice! : null;
       const correct = answered && choice === correctIndex;
       let pointsAward = 0;
 
@@ -838,6 +978,7 @@ export class Match {
         results.push({
           socketId,
           correct: false,
+          choiceIndex: choiceIndexForResult,
           pointsAward: 0,
           hearts: p.hearts,
           eliminated: p.eliminated,
@@ -849,10 +990,29 @@ export class Match {
       results.push({
         socketId,
         correct: true,
+        choiceIndex: choiceIndexForResult,
         pointsAward,
         hearts: p.hearts,
         eliminated: p.eliminated,
       });
+    }
+
+    if (this.gameMode === "lesson" && questionId != null && this.lessonPlayback) {
+      const step = this.lessonPlayback.steps.find((s) => s.questionId === questionId);
+      if (step) {
+        for (const r of results) {
+          const list = this.lessonAnswerHistory.get(r.socketId);
+          if (!list) continue;
+          list.push({
+            questionId,
+            choiceIndex: r.choiceIndex ?? null,
+            correctIndex,
+            prompt: step.prompt,
+            options: step.options,
+            studyBody: step.studyBody,
+          });
+        }
+      }
     }
 
     for (const [socketId, rem] of this.revealRemainingBySocket.entries()) {
@@ -894,6 +1054,19 @@ export class Match {
     }
   }
 
+  private emitFinishedGameOver(payload: Record<string, unknown>): void {
+    if (this.gameMode === "lesson") {
+      for (const socketId of this.players.keys()) {
+        this.io.to(socketId).emit("game_over", {
+          ...payload,
+          lessonReview: this.lessonAnswerHistory.get(socketId) ?? [],
+        });
+      }
+      return;
+    }
+    this.io.to(this.room).emit("game_over", payload);
+  }
+
   private declareWinner(): void {
     if (this.finished) return;
     this.finished = true;
@@ -921,7 +1094,7 @@ export class Match {
         loser: "",
         tie: "",
       };
-      this.io.to(this.room).emit("game_over", {
+      this.emitFinishedGameOver({
         reason: "finished",
         outcomeType: "single_winner",
         winner,
@@ -982,7 +1155,7 @@ export class Match {
       loser: "",
       tie: "",
     };
-    this.io.to(this.room).emit("game_over", {
+    this.emitFinishedGameOver({
       reason: "finished",
       outcomeType,
       winner,
@@ -1082,7 +1255,7 @@ export class Match {
     if (p.keys < this.keysRevealCost) return { ok: false, error: "not_enough_keys" };
 
     let revealQuestions = 0;
-    if (this.gameMode === "study_then_quiz") {
+    if (this.gameMode === "study_then_quiz" || this.gameMode === "lesson") {
       if (this.macroRound <= 0) return { ok: false, error: "reveal_not_available" };
       if (this.keysRevealQuestionsStudy <= 0) return { ok: false, error: "reveal_not_available" };
       if (this.hasRevealFor(socketId) && this.revealMacroRoundBySocket.get(socketId) === this.macroRound) {

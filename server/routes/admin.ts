@@ -18,7 +18,7 @@ import {
   listLessonCategories,
   listLessonsAdmin,
   listPublishedLessons,
-  replaceLessonItems,
+  replaceLessonSections,
   updateLesson,
   updateLessonCategory,
 } from "../db/lessons";
@@ -394,17 +394,27 @@ const lessonPostSchema = z.object({
 
 const lessonPatchSchema = lessonPostSchema.partial();
 
-const lessonItemsPutSchema = z.object({
-  items: z
-    .array(
-      z.object({
-        questionId: z.number().int().positive(),
-        answerMs: z.number().int().min(3000).max(120000).nullable().optional(),
-        studyCardMs: z.number().int().min(2000).max(300000).nullable().optional(),
-      }),
-    )
-    .max(500),
+const lessonItemReplaceBodySchema = z.object({
+  questionId: z.number().int().positive(),
+  answerMs: z.number().int().min(3000).max(120000).nullable().optional(),
+  studyCardMs: z.number().int().min(2000).max(300000).nullable().optional(),
 });
+
+const lessonItemsPutSchema = z.union([
+  z.object({
+    items: z.array(lessonItemReplaceBodySchema).max(500),
+  }),
+  z.object({
+    sections: z
+      .array(
+        z.object({
+          titleAr: z.string().max(500).nullable().optional(),
+          items: z.array(lessonItemReplaceBodySchema).min(1).max(50),
+        }),
+      )
+      .max(20),
+  }),
+]);
 
 function timingSafeEqualString(a: string, b: string): boolean {
   try {
@@ -3498,30 +3508,53 @@ export function registerAdminRoutes(app: Express): void {
       res.status(404).json({ ok: false, error: "not_found" });
       return;
     }
-    const questionIds = parsed.data.items.map((x) => x.questionId);
+    const sectionsPayload =
+      "sections" in parsed.data
+        ? parsed.data.sections.map((sec) => ({
+            titleAr: sec.titleAr ?? null,
+            items: sec.items.map((x) => ({
+              questionId: x.questionId,
+              answerMs: x.answerMs,
+              studyCardMs: x.studyCardMs,
+            })),
+          }))
+        : parsed.data.items.length
+          ? [
+              {
+                titleAr: null as string | null,
+                items: parsed.data.items.map((x) => ({
+                  questionId: x.questionId,
+                  answerMs: x.answerMs,
+                  studyCardMs: x.studyCardMs,
+                })),
+              },
+            ]
+          : [];
+
+    if ("sections" in parsed.data && parsed.data.sections.some((s) => s.items.length === 0)) {
+      res.status(400).json({ ok: false, error: "empty_section" });
+      return;
+    }
+
+    const questionIds = sectionsPayload.flatMap((s) => s.items.map((x) => x.questionId));
     const uniq = new Set(questionIds);
     if (uniq.size !== questionIds.length) {
       res.status(400).json({ ok: false, error: "duplicate_question_in_lesson" });
       return;
     }
     try {
-      const qr = await pool.query<{ id: number }>(
-        `SELECT id FROM questions WHERE id = ANY($1::int[])`,
-        [questionIds],
-      );
-      if (qr.rows.length !== questionIds.length) {
-        res.status(400).json({ ok: false, error: "unknown_question_id" });
-        return;
+      if (questionIds.length > 0) {
+        const qr = await pool.query<{ id: number }>(
+          `SELECT id FROM questions WHERE id = ANY($1::int[])`,
+          [questionIds],
+        );
+        if (qr.rows.length !== questionIds.length) {
+          res.status(400).json({ ok: false, error: "unknown_question_id" });
+          return;
+        }
       }
-      await replaceLessonItems(
-        id,
-        parsed.data.items.map((x) => ({
-          questionId: x.questionId,
-          answerMs: x.answerMs,
-          studyCardMs: x.studyCardMs,
-        })),
-      );
-      res.json({ ok: true, itemCount: questionIds.length });
+      await replaceLessonSections(id, sectionsPayload);
+      res.json({ ok: true, itemCount: questionIds.length, sectionCount: sectionsPayload.length });
     } catch (e: unknown) {
       const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
       if (code === "23505") {

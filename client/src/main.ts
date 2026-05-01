@@ -2,7 +2,7 @@ import "./style.css";
 import { io, type Socket } from "socket.io-client";
 import { toDataURL as qrToDataURL } from "qrcode";
 
-type GameMode = "direct" | "study_then_quiz";
+type GameMode = "direct" | "study_then_quiz" | "lesson";
 type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 type Phase =
   | "name"
@@ -10,6 +10,8 @@ type Phase =
   | "lesson_study"
   | "lesson_quiz"
   | "lesson_done"
+  | "lesson_review"
+  | "match_lesson_review"
   | "matchmaking"
   | "private_room_lobby"
   | "countdown"
@@ -28,6 +30,13 @@ type LessonPlaybackStep = {
   effectiveStudyCardMs: number;
 };
 
+type LessonPlaybackSection = {
+  id: number;
+  sortOrder: number;
+  titleAr: string | null;
+  steps: LessonPlaybackStep[];
+};
+
 type LessonPlaybackPayload = {
   id: number;
   title: string;
@@ -36,9 +45,10 @@ type LessonPlaybackPayload = {
   defaultAnswerMs: number;
   defaultStudyCardMs: number;
   category: { id: number; nameAr: string; icon: string } | null;
+  sections?: LessonPlaybackSection[];
   steps: LessonPlaybackStep[];
 };
-type NameFlowStep = "mode" | "main_categories" | "sub_categories" | "difficulty";
+type NameFlowStep = "mode" | "main_categories" | "sub_categories" | "difficulty" | "lesson_pick";
 type JoinKind = "public" | "solo" | "private_create" | "private_join";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -64,6 +74,21 @@ let privateRoomHostSocketId: string | null = null;
 let privateRoomInviteUrl: string | null = null;
 let privateRoomQuestionMs = 15_000;
 let privateRoomStudyPhaseMs = 60_000;
+/** درس مباراة Socket: معرّف الدرس المختار من شاشة الاسم */
+let selectedLessonMatchId: number | null = null;
+/** واجهة بطاقة واحدة (تالي/سابق) لمراجعة الدرس في المباراة */
+let lessonMatchStudyNav = false;
+let lessonMatchStudyCardIndex = 0;
+let lessonMatchSectionMeta = { index: 0, count: 0, title: null as string | null };
+let matchLessonReviewItems: Array<{
+  questionId: number;
+  choiceIndex: number | null;
+  correctIndex: number;
+  prompt: string;
+  options: string[];
+  studyBody: string | null;
+}> | null = null;
+let matchLessonReviewIndex = 0;
 let pendingJoinRoomCode = "";
 let privateRoomVersionState = 0;
 let privateReadyPending = false;
@@ -160,10 +185,15 @@ let lessonStudyQueue: Array<{ body: string; ms: number }> = [];
 let lessonStudyIdx = 0;
 let lessonStudySegmentEndAt = 0;
 let lessonQuizIdx = 0;
+let lessonQuizIdxInSection = 0;
+let lessonSectionIdx = 0;
 let lessonQuizCorrect = 0;
 let lessonQuizLocked = false;
 /** يمنع معالجة انتهاء الوقت بعد إجابة اللاعب أو معالجة المؤقت مرتين */
 let lessonQuizRoundResolved = false;
+/** اختيارات مسار REST: questionId → فهرس الخيار أو null إن انتهى الوقت دون إجابة */
+let lessonRestChoiceByQuestionId = new Map<number, number | null>();
+let lessonReviewIndex = 0;
 
 const DEFAULT_RESULT_MESSAGES = {
   winnerTitle: "فزت!",
@@ -497,6 +527,9 @@ function returnToHomeFromSearch(): void {
   selectedMainCategoryId = null;
   selectedSubcategoryKey = null;
   selectedSubcategoryLabel = null;
+  selectedLessonMatchId = null;
+  lessonMatchStudyNav = false;
+  lessonMatchStudyCardIndex = 0;
   lastPrivateRoomCode = null;
   isPrivateRoomSession = false;
   pendingJoinRoomCode = "";
@@ -532,6 +565,20 @@ function render(): void {
     const isPrivateEntryFlow = Boolean(pendingJoinRoomCode);
     const renderModePicker = !isPrivateEntryFlow && nameFlowStep === "mode";
     const renderDifficultyPicker = !isPrivateEntryFlow && nameFlowStep === "difficulty";
+    const renderLessonMatchPicker = !isPrivateEntryFlow && nameFlowStep === "lesson_pick";
+    const lessonMatchPickCards = lessonBrowseLessons
+      .map(
+        (l) => `
+        <button type="button" class="mode-option-btn text-right w-full flex flex-col items-stretch gap-1 py-3 px-4 ${
+          selectedLessonMatchId === l.id ? "mode-option-btn--selected" : ""
+        }" data-lesson-match-id="${l.id}" aria-pressed="${selectedLessonMatchId === l.id ? "true" : "false"}">
+          <span class="mode-option-title">${escapeHtml(l.title)}</span>
+          <span class="mode-option-desc text-slate-400">${escapeHtml(
+            l.category ? `${l.category.icon} ${l.category.nameAr}` : "بدون تصنيف",
+          )} — ${l.itemCount} سؤالاً</span>
+        </button>`,
+      )
+      .join("");
     const selectedMain = categoriesState.find((c) => c.id === selectedMainCategoryId) ?? null;
     const subItems = selectedMain?.subcategories ?? [];
     const mainCards = categoriesState
@@ -582,11 +629,13 @@ function render(): void {
                   ? `الانضمام للغرفة الخاصة (${pendingJoinRoomCode})`
                   : renderModePicker
                   ? "اختر نمط اللعب"
-                  : nameFlowStep === "main_categories"
-                    ? "اختر التصنيف الرئيسي"
-                    : nameFlowStep === "sub_categories"
-                      ? "اختر التصنيف الفرعي"
-                      : "اختر مستوى الصعوبة"
+                  : nameFlowStep === "lesson_pick"
+                    ? "اختر درساً للعب — مراجعة بطاقات ثم أسئلة الدرس"
+                    : nameFlowStep === "main_categories"
+                      ? "اختر التصنيف الرئيسي"
+                      : nameFlowStep === "sub_categories"
+                        ? "اختر التصنيف الفرعي"
+                        : "اختر مستوى الصعوبة"
               }</p>
               <div class="mode-picker-grid" role="group" aria-label="اختيارات">
                 ${
@@ -617,7 +666,15 @@ function render(): void {
                   <span class="mode-option-title">دروس منظمة</span>
                   <span class="mode-option-desc">تسلسل تعليمي مرتب يعيد استخدام أسئلة البنك — بدون تحدٍ عشوائي</span>
                 </button>
+                <button type="button" class="mode-option-btn" data-mode="lesson">
+                  <span class="mode-option-icon" aria-hidden="true">🎯</span>
+                  <span class="mode-option-title">درس في تحدٍ</span>
+                  <span class="mode-option-desc">مباراة على درس منشور: مهلة مراجعة واحدة ثم أسئلة الدرس بالترتيب</span>
+                </button>
                 `
+                    : renderLessonMatchPicker
+                      ? lessonMatchPickCards ||
+                        `<p class="text-slate-400 text-sm text-center py-4 m-0">لا توجد دروس منشورة. جرّب لاحقاً أو عد للخلف.</p>`
                     : nameFlowStep === "main_categories"
                       ? mainCards
                       : nameFlowStep === "sub_categories"
@@ -628,13 +685,15 @@ function render(): void {
               <div class="flex gap-2">
                 <button id="back-mode-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg ${
                   renderModePicker || isPrivateEntryFlow ? "hidden" : ""
-                }">رجوع</button>
+                }">${renderLessonMatchPicker ? "العودة لأنماط اللعب" : "رجوع"}</button>
                 <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg ${
-                  isPrivateEntryFlow || renderModePicker || renderDifficultyPicker ? "" : "hidden"
+                  isPrivateEntryFlow || renderModePicker || renderDifficultyPicker || renderLessonMatchPicker
+                    ? ""
+                    : "hidden"
                 }">${
                   isPrivateEntryFlow
                     ? "انضمام للغرفة"
-                    : renderModePicker || renderDifficultyPicker
+                    : renderModePicker || renderDifficultyPicker || renderLessonMatchPicker
                     ? "ابدأ التحدي"
                     : nameFlowStep === "main_categories"
                       ? "التالي"
@@ -642,9 +701,11 @@ function render(): void {
                 }</button>
               </div>
               <button id="solo-learning-btn" class="ui-btn ui-btn--primary w-full py-3 text-lg ${
-                renderDifficultyPicker && !isPrivateEntryFlow ? "" : "hidden"
+                (renderDifficultyPicker || renderLessonMatchPicker) && !isPrivateEntryFlow ? "" : "hidden"
               }">التعلم الفردي</button>
-              <div class="${renderDifficultyPicker && !isPrivateEntryFlow ? "space-y-2" : "hidden"}">
+              <div class="${
+                (renderDifficultyPicker || renderLessonMatchPicker) && !isPrivateEntryFlow ? "space-y-2" : "hidden"
+              }">
                 <button id="create-private-room-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg">إنشاء غرفة خاصة</button>
                 <div class="flex gap-2">
                   <input id="private-room-code-input" type="text" placeholder="كود الغرفة" class="app-input w-full px-3 py-2 text-right" />
@@ -701,6 +762,20 @@ function render(): void {
         err.textContent = "تعذر تحميل التصنيفات.";
       }
     };
+    const goToLessonMatchPick = async () => {
+      err.textContent = "";
+      playerNameDraft = input.value;
+      selectedModeInName = "lesson";
+      selectedLessonMatchId = null;
+      try {
+        await fetchLessonBrowse();
+        nameFlowStep = "lesson_pick";
+        render();
+      } catch {
+        err.textContent = "تعذر تحميل الدروس.";
+        render();
+      }
+    };
     if (renderModePicker) {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
@@ -722,6 +797,10 @@ function render(): void {
               });
             return;
           }
+          if (b.dataset.mode === "lesson") {
+            void goToLessonMatchPick();
+            return;
+          }
           selectedModeInName =
             b.dataset.mode === "study_then_quiz" ? "study_then_quiz" : "direct";
           modeBtns.forEach((x) => {
@@ -732,6 +811,19 @@ function render(): void {
           if (selectedModeInName === "study_then_quiz") {
             void goToStudyCategories();
           }
+        });
+      });
+    } else if (renderLessonMatchPicker) {
+      app.querySelectorAll<HTMLButtonElement>("[data-lesson-match-id]").forEach((b) => {
+        b.addEventListener("click", () => {
+          const id = Number(b.dataset.lessonMatchId);
+          if (!Number.isInteger(id) || id < 1) return;
+          selectedLessonMatchId = id;
+          app.querySelectorAll<HTMLButtonElement>("[data-lesson-match-id]").forEach((x) => {
+            const on = x === b;
+            x.classList.toggle("mode-option-btn--selected", on);
+            x.setAttribute("aria-pressed", on ? "true" : "false");
+          });
         });
       });
     } else if (nameFlowStep === "main_categories") {
@@ -776,7 +868,10 @@ function render(): void {
     }
     backBtn?.addEventListener("click", () => {
       if (isPrivateEntryFlow) return;
-      if (nameFlowStep === "difficulty") {
+      if (nameFlowStep === "lesson_pick") {
+        nameFlowStep = "mode";
+        selectedLessonMatchId = null;
+      } else if (nameFlowStep === "difficulty") {
         nameFlowStep = selectedModeInName === "direct" ? "mode" : "sub_categories";
       } else if (nameFlowStep === "sub_categories") {
         nameFlowStep = "main_categories";
@@ -858,6 +953,20 @@ function render(): void {
         render();
         return;
       }
+      if (nameFlowStep === "lesson_pick") {
+        if (!selectedLessonMatchId) {
+          btn.disabled = false;
+          btn.classList.remove("btn-pending");
+          err.textContent = "اختر درساً من القائمة.";
+          return;
+        }
+        btn.textContent = "جاري الدخول...";
+        phase = "matchmaking";
+        lobbyNotice = "جاري الاتصال بالخادم والبحث عن منافسين لنفس الدرس…";
+        render();
+        connectSocket(name, "lesson", null, "mix", "public", undefined, selectedLessonMatchId);
+        return;
+      }
       btn.textContent = "جاري الدخول...";
       phase = "matchmaking";
       if (selectedModeInName === "direct") {
@@ -882,6 +991,10 @@ function render(): void {
         err.textContent = "اختر تصنيفًا فرعيًا أولاً.";
         return;
       }
+      if (selectedModeInName === "lesson" && !selectedLessonMatchId) {
+        err.textContent = "اختر درساً من القائمة أولاً.";
+        return;
+      }
       storePlayerName(name);
       playerNameDraft = name;
       soloBtn.disabled = true;
@@ -893,19 +1006,26 @@ function render(): void {
       lobbyNotice =
         selectedModeInName === "direct"
           ? `جاري بدء التعلم الفردي... (${difficultyModeLabelAr(selectedDifficultyMode)})`
-          : `جاري بدء التعلم الفردي... (${selectedSubcategoryLabel ?? selectedSubcategoryKey} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
+          : selectedModeInName === "lesson"
+            ? "جاري بدء التعلم الفردي على الدرس…"
+            : `جاري بدء التعلم الفردي... (${selectedSubcategoryLabel ?? selectedSubcategoryKey} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
       render();
       connectSoloSocket(
         name,
         selectedModeInName,
         selectedModeInName === "study_then_quiz" ? selectedSubcategoryKey : null,
         selectedDifficultyMode,
+        selectedModeInName === "lesson" ? selectedLessonMatchId : null,
       );
     });
     createPrivateBtn?.addEventListener("click", () => {
       const name = input.value.trim();
       if (!name) {
         err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        return;
+      }
+      if (selectedModeInName === "lesson" && !selectedLessonMatchId) {
+        err.textContent = "اختر درساً من القائمة قبل إنشاء الغرفة.";
         return;
       }
       storePlayerName(name);
@@ -924,6 +1044,8 @@ function render(): void {
         selectedModeInName === "study_then_quiz" ? selectedSubcategoryKey : null,
         selectedDifficultyMode,
         "private_create",
+        undefined,
+        selectedModeInName === "lesson" ? selectedLessonMatchId : null,
       );
     });
     joinPrivateBtn?.addEventListener("click", () => {
@@ -1053,7 +1175,7 @@ function render(): void {
             <div id="lesson-seg-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums">—</div>
           </div>
           <p class="text-amber-200 text-sm text-right m-0">${escapeHtml(lessonPlayback?.title ?? "")}</p>
-          <p class="text-slate-400 text-xs text-right m-0">بطاقة ${lessonStudyIdx + 1} من ${total}</p>
+          <p class="text-slate-400 text-xs text-right m-0">القسم ${lessonSectionIdx + 1} من ${lessonSectionsResolved().length} — بطاقة ${lessonStudyIdx + 1} من ${total}</p>
           <div class="study-cards-container flex-1">
             <div class="study-card study-card--0">
               <p class="study-card__body font-medium whitespace-pre-wrap">${escapeHtml(card?.body ?? "")}</p>
@@ -1081,7 +1203,8 @@ function render(): void {
       lessonStudyIdx++;
       if (lessonStudyIdx >= lessonStudyQueue.length) {
         phase = "lesson_quiz";
-        lessonPrepareQuizQuestion(0);
+        lessonQuizIdxInSection = 0;
+        lessonPrepareCurrentLessonQuizQuestion();
       } else {
         lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[lessonStudyIdx].ms;
       }
@@ -1098,7 +1221,8 @@ function render(): void {
         lessonStudyIdx++;
         if (lessonStudyIdx >= lessonStudyQueue.length) {
           phase = "lesson_quiz";
-          lessonPrepareQuizQuestion(0);
+          lessonQuizIdxInSection = 0;
+          lessonPrepareCurrentLessonQuizQuestion();
         } else {
           lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[lessonStudyIdx].ms;
         }
@@ -1109,8 +1233,11 @@ function render(): void {
   }
 
   if (phase === "lesson_quiz") {
-    const step = lessonPlayback?.steps[lessonQuizIdx];
+    const secs = lessonSectionsResolved();
+    const sec = secs[lessonSectionIdx];
+    const step = sec?.steps[lessonQuizIdxInSection];
     const totalQ = lessonPlayback?.steps.length ?? 0;
+    const secCount = secs.length;
     app.append(
       el(`
         <div class="playing-shell app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
@@ -1118,7 +1245,7 @@ function render(): void {
             <button type="button" id="lesson-quiz-exit" class="ui-btn ui-btn--ghost py-2 text-sm">خروج</button>
             <div id="lesson-quiz-clock" class="text-xl font-mono font-bold text-amber-300 tabular-nums">—</div>
           </div>
-          <p class="text-slate-400 text-xs text-right m-0">سؤال ${lessonQuizIdx + 1} من ${totalQ}</p>
+          <p class="text-slate-400 text-xs text-right m-0">القسم ${lessonSectionIdx + 1} من ${secCount} — سؤال ${lessonGlobalQuestionOrdinal()} من ${totalQ}</p>
           <div class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0">
             <p id="lesson-q-text" class="text-right text-xl font-semibold leading-relaxed min-h-[4rem]"></p>
             <div id="lesson-opts" class="options-grid grid"></div>
@@ -1151,7 +1278,7 @@ function render(): void {
           if (status) {
             status.textContent = ok ? "صحيح!" : "غير صحيح.";
           }
-          advanceLessonQuizAfterResolution(ok);
+          advanceLessonQuizAfterResolution(ok, idx);
         });
         opts.appendChild(b);
       });
@@ -1176,11 +1303,17 @@ function render(): void {
           <h2 class="text-2xl font-extrabold text-amber-300">أنهيت الدرس</h2>
           <p class="text-slate-200 text-lg">${escapeHtml(lessonPlayback?.title ?? "")}</p>
           <p class="text-emerald-300 text-xl font-bold">النتيجة: ${lessonQuizCorrect} / ${total}</p>
+          <button type="button" id="lesson-review-open" class="ui-btn ui-btn--primary w-full py-3 text-lg">مراجعة</button>
           <button type="button" id="lesson-done-back" class="ui-btn ui-btn--cta w-full py-3 text-lg">قائمة الدروس</button>
           <button type="button" id="lesson-done-home" class="ui-btn ui-btn--ghost w-full py-3">الوضع العادي</button>
         </div>
       `),
     );
+    app.querySelector("#lesson-review-open")?.addEventListener("click", () => {
+      lessonReviewIndex = 0;
+      phase = "lesson_review";
+      render();
+    });
     app.querySelector("#lesson-done-back")?.addEventListener("click", () => {
       resetLessonState();
       phase = "lesson_menu";
@@ -1192,6 +1325,128 @@ function render(): void {
       resetLessonState();
       phase = "name";
       render();
+    });
+    return;
+  }
+
+  if (phase === "lesson_review") {
+    const items = lessonRestReviewItems();
+    const cur = items[lessonReviewIndex];
+    const n = items.length;
+    app.append(
+      el(`
+        <div class="playing-shell app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" id="lesson-review-back" class="ui-btn ui-btn--ghost py-2 text-sm">رجوع للنتيجة</button>
+            <span class="text-slate-400 text-xs">سؤال ${lessonReviewIndex + 1} / ${n}</span>
+          </div>
+          <p class="text-amber-200 text-sm text-right m-0">${escapeHtml(lessonPlayback?.title ?? "")}</p>
+          <div id="lesson-review-root" class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0"></div>
+          <div class="flex gap-2">
+            <button type="button" id="lesson-review-prev" class="ui-btn ui-btn--ghost flex-1 py-2" ${lessonReviewIndex <= 0 ? "disabled" : ""}>السابق</button>
+            <button type="button" id="lesson-review-next" class="ui-btn ui-btn--ghost flex-1 py-2" ${lessonReviewIndex >= n - 1 ? "disabled" : ""}>التالي</button>
+          </div>
+        </div>
+      `),
+    );
+    const root = app.querySelector<HTMLDivElement>("#lesson-review-root");
+    if (root && cur) {
+      const choiceIdx = cur.choiceIndex;
+      const optsHtml = cur.options
+        .map((label, idx) => {
+          const isCorrect = idx === cur.correctIndex;
+          const isWrongPick =
+            choiceIdx != null && choiceIdx !== cur.correctIndex && choiceIdx === idx;
+          let cls = "option-btn option-btn--disabled";
+          if (isCorrect) cls += " option-btn--review-correct";
+          if (isWrongPick) cls += " option-btn--review-wrong";
+          return `<button type="button" disabled class="${cls}">${escapeHtml(label)}</button>`;
+        })
+        .join("");
+      const studyBlock = cur.studyBody?.trim()
+        ? `<div class="study-card study-card--0 mt-2"><p class="study-card__body font-medium whitespace-pre-wrap">${escapeHtml(cur.studyBody)}</p></div>`
+        : "";
+      root.innerHTML = `<p class="text-right text-xl font-semibold leading-relaxed">${escapeHtml(cur.prompt)}</p>
+        <div class="options-grid grid">${optsHtml}</div>${studyBlock}`;
+    }
+    app.querySelector("#lesson-review-back")?.addEventListener("click", () => {
+      phase = "lesson_done";
+      render();
+    });
+    app.querySelector("#lesson-review-prev")?.addEventListener("click", () => {
+      if (lessonReviewIndex > 0) {
+        lessonReviewIndex--;
+        render();
+      }
+    });
+    app.querySelector("#lesson-review-next")?.addEventListener("click", () => {
+      if (lessonReviewIndex < n - 1) {
+        lessonReviewIndex++;
+        render();
+      }
+    });
+    return;
+  }
+
+  if (phase === "match_lesson_review") {
+    const items = matchLessonReviewItems ?? [];
+    const cur = items[matchLessonReviewIndex];
+    const n = items.length;
+    app.append(
+      el(`
+        <div class="playing-shell app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" id="match-lesson-review-back" class="ui-btn ui-btn--ghost py-2 text-sm">رجوع للنتيجة</button>
+            <span class="text-slate-400 text-xs">سؤال ${matchLessonReviewIndex + 1} / ${n}</span>
+          </div>
+          <p class="text-amber-200 text-sm text-right m-0">مراجعة الدرس</p>
+          <div id="match-lesson-review-root" class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0"></div>
+          <div class="flex gap-2">
+            <button type="button" id="match-lesson-review-prev" class="ui-btn ui-btn--ghost flex-1 py-2" ${
+              matchLessonReviewIndex <= 0 ? "disabled" : ""
+            }>السابق</button>
+            <button type="button" id="match-lesson-review-next" class="ui-btn ui-btn--ghost flex-1 py-2" ${
+              matchLessonReviewIndex >= n - 1 ? "disabled" : ""
+            }>التالي</button>
+          </div>
+        </div>
+      `),
+    );
+    const root = app.querySelector<HTMLDivElement>("#match-lesson-review-root");
+    if (root && cur) {
+      const choiceIdx = cur.choiceIndex;
+      const optsHtml = cur.options
+        .map((label, idx) => {
+          const isCorrect = idx === cur.correctIndex;
+          const isWrongPick =
+            choiceIdx != null && choiceIdx !== cur.correctIndex && choiceIdx === idx;
+          let cls = "option-btn option-btn--disabled";
+          if (isCorrect) cls += " option-btn--review-correct";
+          if (isWrongPick) cls += " option-btn--review-wrong";
+          return `<button type="button" disabled class="${cls}">${escapeHtml(label)}</button>`;
+        })
+        .join("");
+      const studyBlock = cur.studyBody?.trim()
+        ? `<div class="study-card study-card--0 mt-2"><p class="study-card__body font-medium whitespace-pre-wrap">${escapeHtml(cur.studyBody)}</p></div>`
+        : "";
+      root.innerHTML = `<p class="text-right text-xl font-semibold leading-relaxed">${escapeHtml(cur.prompt)}</p>
+        <div class="options-grid grid">${optsHtml}</div>${studyBlock}`;
+    }
+    app.querySelector("#match-lesson-review-back")?.addEventListener("click", () => {
+      phase = "result";
+      render();
+    });
+    app.querySelector("#match-lesson-review-prev")?.addEventListener("click", () => {
+      if (matchLessonReviewIndex > 0) {
+        matchLessonReviewIndex--;
+        render();
+      }
+    });
+    app.querySelector("#match-lesson-review-next")?.addEventListener("click", () => {
+      if (matchLessonReviewIndex < n - 1) {
+        matchLessonReviewIndex++;
+        render();
+      }
     });
     return;
   }
@@ -1413,23 +1668,46 @@ function render(): void {
 
   if (phase === "studying") {
     const hasCards = studyCards.length > 0;
+    const lessonNav = lessonMatchStudyNav && hasCards;
+    const idx1 = lessonNav ? lessonMatchStudyCardIndex + 1 : 0;
     app.append(
       el(`
         <div class="study-shell min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
           <div class="study-progress-fixed">
             <div class="study-progress-head">
-              <h2 class="text-lg font-bold text-amber-200 drop-shadow-sm">مراجعة قبل الأسئلة</h2>
+              <h2 class="text-lg font-bold text-amber-200 drop-shadow-sm">${
+                lessonMatchStudyNav ? "مراجعة الدرس" : "مراجعة قبل الأسئلة"
+              }</h2>
               <div id="study-main-clock" class="text-xl font-mono font-bold text-emerald-300 tabular-nums drop-shadow-sm">—</div>
             </div>
-            <p id="study-main-clock-label" class="text-right text-slate-300 text-xs min-h-[1rem]">وقت المذاكرة</p>
+            <p id="study-main-clock-label" class="text-right text-slate-300 text-xs min-h-[1rem]">${
+              lessonMatchStudyNav ? "وقت المراجعة" : "وقت المذاكرة"
+            }</p>
             <div id="study-progress-track" class="study-progress-track" role="progressbar" aria-label="تقدم وقت المذاكرة" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
               <div id="study-progress-fill" class="study-progress-fill"></div>
             </div>
           </div>
           <div class="study-content-stack">
+          <div class="${lessonMatchStudyNav ? "hidden" : ""} space-y-2">
           <button id="round-ready-btn" type="button" class="ui-btn ui-btn--primary w-full py-2 text-sm">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
           <p id="study-ready-state" class="text-right text-amber-200/90 text-xs min-h-[1.1rem] leading-relaxed"></p>
+          </div>
+          <p id="study-lesson-card-pos" class="text-right text-slate-400 text-xs min-h-[1rem] m-0 ${
+            lessonNav ? "" : "hidden"
+          }">بطاقة ${idx1} من ${studyCards.length}${
+            lessonNav && lessonMatchSectionMeta.count > 0
+              ? ` — القسم ${lessonMatchSectionMeta.index + 1} من ${lessonMatchSectionMeta.count}`
+              : ""
+          }${lessonNav && lessonMatchSectionMeta.title ? ` (${escapeHtml(lessonMatchSectionMeta.title)})` : ""}</p>
           <div id="study-cards" class="study-cards-container flex-1 space-y-4 overflow-y-auto pb-2"></div>
+          <div class="flex gap-2 pt-1 ${lessonNav ? "" : "hidden"}">
+            <button type="button" id="lesson-match-study-prev" class="ui-btn ui-btn--ghost flex-1 py-2" ${
+              lessonNav && lessonMatchStudyCardIndex <= 0 ? "disabled" : ""
+            }>السابق</button>
+            <button type="button" id="lesson-match-study-next" class="ui-btn ui-btn--primary flex-1 py-2" ${
+              lessonNav && lessonMatchStudyCardIndex >= studyCards.length - 1 ? "disabled" : ""
+            }>التالي</button>
+          </div>
           </div>
         </div>
       `),
@@ -1437,7 +1715,7 @@ function render(): void {
     const container = app.querySelector<HTMLDivElement>("#study-cards");
     const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
     const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
-    if (readyBtn) {
+    if (readyBtn && !lessonMatchStudyNav) {
       readyBtn.disabled = readyBtnState !== "window_open";
       if (readyBtnState === "submitted") {
         readyBtn.textContent = "تم تسجيل جاهزيتك";
@@ -1457,7 +1735,7 @@ function render(): void {
         }
       };
     }
-    if (readyStateEl && !readyStateEl.textContent) {
+    if (readyStateEl && !lessonMatchStudyNav && !readyStateEl.textContent) {
       readyStateEl.textContent =
         readyBtnState === "window_open"
           ? "زر الجاهزية متاح الآن."
@@ -1466,15 +1744,33 @@ function render(): void {
             : "";
     }
     if (container && hasCards) {
-      studyCards.forEach((c, i) => {
-        const card = document.createElement("div");
-        const variant = Math.abs(c.order) % 6;
-        card.className = `study-card study-card--${variant}`;
-        card.style.animationDelay = `${i * 0.08}s`;
-        card.innerHTML = `<p class="study-card__body font-medium">${escapeHtml(c.body)}</p>`;
-        container.appendChild(card);
-      });
+      if (lessonMatchStudyNav) {
+        const c = studyCards[lessonMatchStudyCardIndex];
+        if (c) {
+          const variant = Math.abs(c.order) % 6;
+          container.innerHTML = `<div class="study-card study-card--${variant}"><p class="study-card__body font-medium whitespace-pre-wrap">${escapeHtml(c.body)}</p></div>`;
+        }
+      } else {
+        studyCards.forEach((c, i) => {
+          const card = document.createElement("div");
+          const variant = Math.abs(c.order) % 6;
+          card.className = `study-card study-card--${variant}`;
+          card.style.animationDelay = `${i * 0.08}s`;
+          card.innerHTML = `<p class="study-card__body font-medium">${escapeHtml(c.body)}</p>`;
+          container.appendChild(card);
+        });
+      }
     }
+    app.querySelector("#lesson-match-study-prev")?.addEventListener("click", () => {
+      if (!lessonMatchStudyNav || lessonMatchStudyCardIndex <= 0) return;
+      lessonMatchStudyCardIndex -= 1;
+      render();
+    });
+    app.querySelector("#lesson-match-study-next")?.addEventListener("click", () => {
+      if (!lessonMatchStudyNav || lessonMatchStudyCardIndex >= studyCards.length - 1) return;
+      lessonMatchStudyCardIndex += 1;
+      render();
+    });
     startStudyTimer();
     refreshKeysBadge();
     return;
@@ -1557,6 +1853,9 @@ function render(): void {
           <button id="continue-watch" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base hidden">متابعة الجولة كمشاهد</button>
           <div id="res-leaderboard" class="w-full text-right"></div>
           <div id="res-stats" class="result-screen__stats hidden"></div>
+          <button id="match-lesson-review-open" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-base ${
+            matchLessonReviewItems && matchLessonReviewItems.length > 0 && !showPrivateRoomActions ? "" : "hidden"
+          }">مراجعة الدرس</button>
           <div class="${showPrivateRoomActions ? "w-full flex flex-col sm:flex-row gap-3" : "hidden"}">
             <button id="back-private-room" type="button" class="result-screen__again ui-btn ui-btn--cta w-full py-3 text-base">العودة للغرفة الخاصة</button>
             <button id="go-home-from-result" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base">الصفحة الرئيسية</button>
@@ -1574,8 +1873,16 @@ function render(): void {
         socket?.emit("continue_as_spectator", {});
       });
     }
+    app.querySelector("#match-lesson-review-open")?.addEventListener("click", () => {
+      if (!matchLessonReviewItems?.length) return;
+      matchLessonReviewIndex = 0;
+      phase = "match_lesson_review";
+      render();
+    });
     const again = app.querySelector<HTMLButtonElement>("#again")!;
     again.addEventListener("click", () => {
+      matchLessonReviewItems = null;
+      matchLessonReviewIndex = 0;
       phase = "name";
       nameFlowStep = "mode";
       selectedDifficultyMode = "mix";
@@ -1629,20 +1936,26 @@ function updateLobbyModeLabel(): void {
     elMode.textContent =
       currentGameMode === "direct"
         ? "التعلم الفردي — نمط مباشر"
-        : "التعلم الفردي — مراجعة ثم أسئلة";
+        : currentGameMode === "lesson"
+          ? "التعلم الفردي — درس في تحدٍ"
+          : "التعلم الفردي — مراجعة ثم أسئلة";
     return;
   }
   if (privateRoomCodeState) {
     elMode.textContent =
       currentGameMode === "direct"
         ? `غرفة خاصة (${privateRoomCodeState}) — نمط مباشر`
-        : `غرفة خاصة (${privateRoomCodeState}) — مراجعة ثم أسئلة`;
+        : currentGameMode === "lesson"
+          ? `غرفة خاصة (${privateRoomCodeState}) — درس في تحدٍ`
+          : `غرفة خاصة (${privateRoomCodeState}) — مراجعة ثم أسئلة`;
     return;
   }
   elMode.textContent =
     currentGameMode === "direct"
       ? "البحث عن تحدي — نمط مباشر"
-      : "البحث عن تحدي — مراجعة ثم أسئلة";
+      : currentGameMode === "lesson"
+        ? "البحث عن تحدي — درس في تحدٍ"
+        : "البحث عن تحدي — مراجعة ثم أسئلة";
 }
 
 function updateConnectionBadge(): void {
@@ -1739,10 +2052,52 @@ function resetLessonState(): void {
   lessonStudyIdx = 0;
   lessonStudySegmentEndAt = 0;
   lessonQuizIdx = 0;
+  lessonQuizIdxInSection = 0;
+  lessonSectionIdx = 0;
   lessonQuizCorrect = 0;
   lessonQuizLocked = false;
   lessonQuizRoundResolved = false;
+  lessonRestChoiceByQuestionId = new Map();
+  lessonReviewIndex = 0;
   currentQuestionId = null;
+}
+
+function lessonSectionsResolved(): LessonPlaybackSection[] {
+  if (!lessonPlayback) return [];
+  if (lessonPlayback.sections && lessonPlayback.sections.length > 0) return lessonPlayback.sections;
+  return [{ id: 0, sortOrder: 0, titleAr: null, steps: lessonPlayback.steps }];
+}
+
+function lessonGlobalQuestionOrdinal(): number {
+  const secs = lessonSectionsResolved();
+  let n = 0;
+  for (let i = 0; i < lessonSectionIdx; i++) n += secs[i]?.steps.length ?? 0;
+  return n + lessonQuizIdxInSection + 1;
+}
+
+function startLessonStudyForCurrentSection(): void {
+  if (!lessonPlayback) {
+    phase = "lesson_done";
+    return;
+  }
+  const secs = lessonSectionsResolved();
+  if (lessonSectionIdx >= secs.length) {
+    phase = "lesson_done";
+    return;
+  }
+  const sec = secs[lessonSectionIdx];
+  lessonStudyQueue = sec.steps
+    .filter((s) => Boolean(s.studyBody?.trim()))
+    .map((s) => ({ body: s.studyBody as string, ms: s.effectiveStudyCardMs }));
+  lessonStudyIdx = 0;
+  if (lessonStudyQueue.length > 0) {
+    phase = "lesson_study";
+    lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[0].ms;
+  } else {
+    phase = "lesson_quiz";
+    lessonQuizIdxInSection = 0;
+    lessonPrepareCurrentLessonQuizQuestion();
+  }
 }
 
 async function fetchLessonBrowse(): Promise<void> {
@@ -1762,46 +2117,78 @@ async function fetchLessonBrowse(): Promise<void> {
 function beginLessonPlayback(data: LessonPlaybackPayload): void {
   resetLessonState();
   lessonPlayback = data;
-  lessonStudyQueue = data.steps
-    .filter((s) => Boolean(s.studyBody?.trim()))
-    .map((s) => ({ body: s.studyBody as string, ms: s.effectiveStudyCardMs }));
-  lessonStudyIdx = 0;
-  if (lessonStudyQueue.length > 0) {
-    phase = "lesson_study";
-    lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[0].ms;
-  } else {
-    phase = "lesson_quiz";
-    lessonPrepareQuizQuestion(0);
-  }
+  lessonSectionIdx = 0;
+  lessonQuizIdxInSection = 0;
+  startLessonStudyForCurrentSection();
 }
 
-function lessonPrepareQuizQuestion(index: number): void {
+function lessonPrepareCurrentLessonQuizQuestion(): void {
   if (!lessonPlayback) {
     phase = "lesson_done";
     return;
   }
-  if (index >= lessonPlayback.steps.length) {
+  const secs = lessonSectionsResolved();
+  if (lessonSectionIdx >= secs.length) {
     phase = "lesson_done";
     return;
   }
-  lessonQuizIdx = index;
-  const step = lessonPlayback.steps[index];
+  const sec = secs[lessonSectionIdx];
+  if (lessonQuizIdxInSection >= sec.steps.length) {
+    const nextSec = lessonSectionIdx + 1;
+    if (nextSec >= secs.length) {
+      phase = "lesson_done";
+      return;
+    }
+    lessonSectionIdx = nextSec;
+    startLessonStudyForCurrentSection();
+    return;
+  }
+  let globalIdx = 0;
+  for (let i = 0; i < lessonSectionIdx; i++) globalIdx += secs[i]?.steps.length ?? 0;
+  globalIdx += lessonQuizIdxInSection;
+  lessonQuizIdx = globalIdx;
+  const step = sec.steps[lessonQuizIdxInSection];
   currentQuestionId = step.questionId;
   endsAt = nowSynced() + step.effectiveAnswerMs;
   lessonQuizLocked = false;
   lessonQuizRoundResolved = false;
 }
 
-function advanceLessonQuizAfterResolution(wasCorrect: boolean): void {
+function advanceLessonQuizAfterResolution(wasCorrect: boolean, selectedChoice: number | null): void {
   if (lessonQuizRoundResolved) return;
   lessonQuizRoundResolved = true;
   lessonQuizLocked = true;
   if (wasCorrect) lessonQuizCorrect++;
+  if (currentQuestionId != null) {
+    lessonRestChoiceByQuestionId.set(currentQuestionId, selectedChoice);
+  }
   clearTimer();
   window.setTimeout(() => {
-    lessonPrepareQuizQuestion(lessonQuizIdx + 1);
+    lessonQuizIdxInSection += 1;
+    lessonPrepareCurrentLessonQuizQuestion();
     render();
   }, 900);
+}
+
+function lessonRestReviewItems(): Array<{
+  questionId: number;
+  choiceIndex: number | null;
+  correctIndex: number;
+  prompt: string;
+  options: string[];
+  studyBody: string | null;
+}> {
+  if (!lessonPlayback) return [];
+  return lessonPlayback.steps.map((step) => ({
+    questionId: step.questionId,
+    choiceIndex: lessonRestChoiceByQuestionId.has(step.questionId)
+      ? (lessonRestChoiceByQuestionId.get(step.questionId) ?? null)
+      : null,
+    correctIndex: step.correctIndex,
+    prompt: step.prompt,
+    options: step.options,
+    studyBody: step.studyBody,
+  }));
 }
 
 async function openLessonById(id: number): Promise<void> {
@@ -1841,7 +2228,7 @@ function startLessonQuizTimer(): void {
         htmlBtn.classList.add("option-btn--disabled");
       });
       if (status) status.textContent = "انتهى الوقت.";
-      advanceLessonQuizAfterResolution(false);
+      advanceLessonQuizAfterResolution(false, null);
       return;
     }
     const showMs = Math.max(0, ms);
@@ -2289,6 +2676,7 @@ function connectSocket(
   difficultyMode: DifficultyMode = "mix",
   joinKind: JoinKind = "public",
   roomCode?: string,
+  lessonIdForMatch?: number | null,
 ): void {
   const playerSessionId = getOrCreatePlayerSessionId();
   const flowToken = ++searchFlowToken;
@@ -2381,6 +2769,7 @@ function connectSocket(
       name,
       mode,
       ...(mode === "study_then_quiz" && subcategoryKey ? { subcategoryKey } : {}),
+      ...(mode === "lesson" && lessonIdForMatch != null && lessonIdForMatch > 0 ? { lessonId: lessonIdForMatch } : {}),
       difficultyMode,
       ...(roomCode ? { roomCode } : {}),
       origin: window.location.origin,
@@ -2485,6 +2874,7 @@ function connectSocket(
       hostSocketId: string;
       mode: GameMode;
       subcategoryKey: string | null;
+      lessonId?: number | null;
       difficultyMode: DifficultyMode;
       roomVersion: number;
       players: Array<{ socketId: string; name: string; ready: boolean }>;
@@ -2499,6 +2889,9 @@ function connectSocket(
       privateRoomHostSocketId = payload.hostSocketId;
       currentGameMode = payload.mode;
       selectedSubcategoryKey = payload.subcategoryKey;
+      if (payload.mode === "lesson" && payload.lessonId != null && payload.lessonId > 0) {
+        selectedLessonMatchId = payload.lessonId;
+      }
       selectedDifficultyMode = payload.difficultyMode;
       privateRoomQuestionMs = payload.roomSettings.questionMs;
       privateRoomStudyPhaseMs = payload.roomSettings.studyPhaseMs;
@@ -2659,7 +3052,9 @@ function connectSocket(
     lobbyNotice =
       payload?.reason === "not_enough_questions"
         ? payload.message || "لا توجد أسئلة كافية في مستوى الصعوبة هذا أو هذا التصنيف."
-        : LOBBY_MSG_CANCELLED;
+        : payload?.reason === "lesson_not_found" || payload?.reason === "lesson_invalid"
+          ? payload?.message || "تعذر بدء مباراة الدرس."
+          : LOBBY_MSG_CANCELLED;
     if (phase === "matchmaking" || phase === "private_room_lobby") render();
   });
 
@@ -2710,7 +3105,7 @@ function connectSocket(
       refreshAbilityAffordability();
       spectatorEligible = false;
       spectatorFollowing = false;
-      if (payload.gameMode === "study_then_quiz") {
+      if (payload.gameMode === "study_then_quiz" || payload.gameMode === "lesson") {
         phase = "studying";
         studyCards = [];
         studyEndsAt = nowSynced();
@@ -2720,6 +3115,11 @@ function connectSocket(
         studyPhaseState = "idle";
         activeStudyRoundToken = null;
         activeStudyMacroRound = 0;
+        lessonMatchStudyNav = false;
+        lessonMatchStudyCardIndex = 0;
+        lessonMatchSectionMeta = { index: 0, count: 0, title: null };
+        matchLessonReviewItems = null;
+        matchLessonReviewIndex = 0;
         render();
       } else {
         phase = "playing";
@@ -2770,6 +3170,9 @@ function connectSocket(
       serverNow?: number;
       macroRound?: number;
       scope?: string;
+      lessonSectionIndex?: number;
+      lessonSectionCount?: number;
+      lessonSectionTitle?: string | null;
     }) => {
       syncClock(payload.serverNow);
       if (payload.roundToken) {
@@ -2784,6 +3187,27 @@ function connectSocket(
       studyDurationMs = Math.max(1000, studyEndsAt - studyStartsAt);
       phase = "studying";
       studyPhaseState = "study_content";
+      const isLessonStudy = payload.scope === "lesson";
+      lessonMatchStudyNav = isLessonStudy && studyCards.length > 0;
+      if (isLessonStudy) {
+        if (
+          typeof payload.lessonSectionIndex === "number" &&
+          typeof payload.lessonSectionCount === "number"
+        ) {
+          lessonMatchSectionMeta = {
+            index: payload.lessonSectionIndex,
+            count: payload.lessonSectionCount,
+            title: payload.lessonSectionTitle ?? null,
+          };
+        } else {
+          lessonMatchSectionMeta = { index: 0, count: 0, title: null };
+        }
+        lessonMatchStudyCardIndex = 0;
+        render();
+        startStudyTimer();
+        return;
+      }
+      lessonMatchSectionMeta = { index: 0, count: 0, title: null };
       if (!app.querySelector("#study-cards")) render();
       const container = app.querySelector<HTMLDivElement>("#study-cards");
       const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
@@ -2886,6 +3310,7 @@ function connectSocket(
     }) => {
       syncClock(q.serverNow);
       if (spectatorEligible && !spectatorFollowing) return;
+      lessonMatchStudyNav = false;
       currentQuestionId = q.questionId;
       endsAt = q.endsAt;
       currentMatchPlayers = currentMatchPlayers.map((p) => {
@@ -3063,12 +3488,26 @@ function connectSocket(
         skillPoints: number;
         medal: "gold" | "silver" | "bronze" | null;
       }>;
+      lessonReview?: Array<{
+        questionId: number;
+        choiceIndex: number | null;
+        correctIndex: number;
+        prompt: string;
+        options: string[];
+        studyBody: string | null;
+      }>;
     }) => {
       if (cdInterval) {
         window.clearInterval(cdInterval);
         cdInterval = null;
       }
       clearTimer();
+      const lr = payload.lessonReview;
+      matchLessonReviewItems =
+        Array.isArray(lr) && lr.length > 0
+          ? (lr as NonNullable<typeof matchLessonReviewItems>)
+          : null;
+      matchLessonReviewIndex = 0;
       phase = "result";
       render();
       const me = payload.players.find((p) => p.socketId === mySocketId);
@@ -3089,6 +3528,7 @@ function connectSocket(
       const loseCopy = rm?.loser?.trim() || DEFAULT_RESULT_MESSAGES.loser;
       const tieCopy = rm?.tie?.trim() || DEFAULT_RESULT_MESSAGES.tie;
       if (payload.reason === "no_questions" || payload.outcomeType === "no_questions") {
+        matchLessonReviewItems = null;
         title.textContent = "لا توجد أسئلة";
         body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
         if (stats) stats.classList.add("hidden");
@@ -3258,8 +3698,9 @@ function connectSoloSocket(
   mode: GameMode,
   subcategoryKey?: string | null,
   difficultyMode: DifficultyMode = "mix",
+  lessonIdForMatch?: number | null,
 ): void {
-  connectSocket(name, mode, subcategoryKey, difficultyMode, "solo");
+  connectSocket(name, mode, subcategoryKey, difficultyMode, "solo", undefined, lessonIdForMatch);
 }
 
 function renderHearts(n: number): void {

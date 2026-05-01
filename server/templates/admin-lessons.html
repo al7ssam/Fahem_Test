@@ -128,8 +128,9 @@
         let lessons = [];
         let selectedLessonId = null;
         let detail = null;
-        /** @type {{ questionId: number, answerMs: string, studyCardMs: string, preview: string }[]} */
-        let draftItems = [];
+        /** @type {{ titleAr: string, items: { questionId: number, answerMs: string, studyCardMs: string, preview: string }[] }[]} */
+        let draftSections = [];
+        let addQuestionTargetSection = 0;
 
         document.getElementById("go-admin").onclick = () => { window.location.href = "/admin"; };
 
@@ -226,60 +227,128 @@
             document.getElementById("l-sort").value = String(d.lesson.sortOrder ?? 0);
             const cid = d.lesson.lessonCategoryId;
             document.getElementById("l-cat").value = cid != null ? String(cid) : "";
-            draftItems = (d.items || []).map((it) => ({
-              questionId: it.questionId,
-              answerMs: it.answerMs != null ? String(it.answerMs) : "",
-              studyCardMs: it.studyCardMs != null ? String(it.studyCardMs) : "",
-              preview: it.promptPreview || "",
-            }));
+            if (d.sections && d.sections.length) {
+              draftSections = d.sections.map((sec) => ({
+                titleAr: sec.titleAr || "",
+                items: (sec.items || []).map((it) => ({
+                  questionId: it.questionId,
+                  answerMs: it.answerMs != null ? String(it.answerMs) : "",
+                  studyCardMs: it.studyCardMs != null ? String(it.studyCardMs) : "",
+                  preview: it.promptPreview || "",
+                })),
+              }));
+            } else {
+              draftSections = [{ titleAr: "", items: [] }];
+            }
+            addQuestionTargetSection = Math.max(0, draftSections.length - 1);
             renderItems();
           } catch (_) {}
         }
 
         function renderItems() {
           const wrap = document.getElementById("items-wrap");
-          wrap.innerHTML = draftItems.map((it, idx) =>
-            `<div class="item-row">
-              <span class="muted">${idx + 1}.</span>
-              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:42vw">${escapeHtml(it.preview)}</span>
-              <input type="number" data-i="${idx}" data-f="answer" placeholder="إجابة ms" style="width:100px" value="${escapeHtml(it.answerMs)}" />
-              <input type="number" data-i="${idx}" data-f="study" placeholder="بطاقة ms" style="width:100px" value="${escapeHtml(it.studyCardMs)}" />
-              <span class="row" style="gap:.2rem">
-                <button type="button" class="btn btn-secondary btn-xs" data-up="${idx}">↑</button>
-                <button type="button" class="btn btn-secondary btn-xs" data-down="${idx}">↓</button>
-                <button type="button" class="btn btn-danger btn-xs" data-rm="${idx}">✕</button>
-              </span>
-            </div>`
-          ).join("") || '<div class="muted" style="padding:.5rem">لا عناصر — أضف أسئلة من البحث.</div>';
+          let html = `<div class="row" style="margin:.35rem 0;align-items:end">
+            <div><label class="muted" for="target-sec-for-add">إضافة سؤال إلى</label>
+            <select id="target-sec-for-add" class="muted" style="min-width:8rem;margin-top:.2rem">`;
+          draftSections.forEach((sec, si) => {
+            html += `<option value="${si}"${si === addQuestionTargetSection ? " selected" : ""}>القسم ${si + 1} (${sec.items.length})</option>`;
+          });
+          html += `</select></div>
+            <button type="button" class="btn btn-secondary" id="sec-add">قسم جديد</button>
+            </div>`;
 
+          draftSections.forEach((sec, si) => {
+            html += `<div class="card" style="margin:.55rem 0;padding:.55rem" data-sec-block="${si}">
+              <div class="row" style="justify-content:space-between;align-items:center">
+                <strong>القسم ${si + 1}</strong>
+                ${draftSections.length > 1 ? `<button type="button" class="btn btn-danger" style="padding:.25rem .5rem;font-size:.78rem" data-sec-del="${si}">حذف القسم ودمج أسئلته مع السابق</button>` : ""}
+              </div>
+              <label class="muted" style="display:block;margin-top:.35rem">عنوان القسم (اختياري)</label>
+              <input type="text" data-sec-title="${si}" value="${escapeHtml(sec.titleAr)}" placeholder="مثال: المفاهيم الأساسية" style="width:100%;margin:.25rem 0" />
+              <p class="muted" style="margin:.2rem 0;font-size:.82rem">${sec.items.length} سؤالاً في هذا القسم</p>`;
+            if (!sec.items.length) {
+              html += '<div class="muted" style="padding:.35rem">لا أسئلة — أضف من البحث أعلاه.</div>';
+            } else {
+              sec.items.forEach((it, idx) => {
+                html += `<div class="item-row">
+                  <span class="muted">${idx + 1}.</span>
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:36vw">${escapeHtml(it.preview)}</span>
+                  <input type="number" data-si="${si}" data-ii="${idx}" data-f="answer" placeholder="إجابة ms" style="width:100px" value="${escapeHtml(it.answerMs)}" />
+                  <input type="number" data-si="${si}" data-ii="${idx}" data-f="study" placeholder="بطاقة ms" style="width:100px" value="${escapeHtml(it.studyCardMs)}" />
+                  <span class="row" style="gap:.2rem">
+                    <button type="button" class="btn btn-secondary btn-xs" data-up="${si}:${idx}">↑</button>
+                    <button type="button" class="btn btn-secondary btn-xs" data-down="${si}:${idx}">↓</button>
+                    <button type="button" class="btn btn-danger btn-xs" data-rm="${si}:${idx}">✕</button>
+                  </span>
+                </div>`;
+              });
+            }
+            html += `</div>`;
+          });
+
+          wrap.innerHTML = html || '<div class="muted" style="padding:.5rem">لا أقسام</div>';
+
+          const sel = document.getElementById("target-sec-for-add");
+          if (sel) {
+            sel.addEventListener("change", () => {
+              addQuestionTargetSection = Number(sel.value) || 0;
+            });
+          }
+          document.getElementById("sec-add")?.addEventListener("click", () => {
+            draftSections.push({ titleAr: "", items: [] });
+            addQuestionTargetSection = draftSections.length - 1;
+            renderItems();
+          });
+          wrap.querySelectorAll("[data-sec-del]").forEach((b) => {
+            b.addEventListener("click", () => {
+              const si = Number(b.getAttribute("data-sec-del"));
+              if (si <= 0 || draftSections.length < 2) return;
+              if (!confirm("دمج أسئلة هذا القسم مع القسم السابق؟")) return;
+              draftSections[si - 1].items.push(...draftSections[si].items);
+              draftSections.splice(si, 1);
+              addQuestionTargetSection = Math.min(addQuestionTargetSection, draftSections.length - 1);
+              renderItems();
+            });
+          });
+          wrap.querySelectorAll("input[data-sec-title]").forEach((inp) => {
+            inp.addEventListener("change", () => {
+              const si = Number(inp.getAttribute("data-sec-title"));
+              if (draftSections[si]) draftSections[si].titleAr = inp.value;
+            });
+          });
           wrap.querySelectorAll("input[data-f]").forEach((inp) => {
             inp.addEventListener("change", () => {
-              const i = Number(inp.getAttribute("data-i"));
+              const si = Number(inp.getAttribute("data-si"));
+              const ii = Number(inp.getAttribute("data-ii"));
               const f = inp.getAttribute("data-f");
-              if (f === "answer") draftItems[i].answerMs = inp.value.trim();
-              else draftItems[i].studyCardMs = inp.value.trim();
+              const it = draftSections[si]?.items[ii];
+              if (!it) return;
+              if (f === "answer") it.answerMs = inp.value.trim();
+              else it.studyCardMs = inp.value.trim();
             });
           });
           wrap.querySelectorAll("[data-up]").forEach((b) => {
             b.addEventListener("click", () => {
-              const i = Number(b.getAttribute("data-up"));
-              if (i <= 0) return;
-              const t = draftItems[i - 1]; draftItems[i - 1] = draftItems[i]; draftItems[i] = t;
+              const [ssi, iix] = (b.getAttribute("data-up") || "0:0").split(":").map(Number);
+              const arr = draftSections[ssi]?.items;
+              if (!arr || iix <= 0) return;
+              const t = arr[iix - 1]; arr[iix - 1] = arr[iix]; arr[iix] = t;
               renderItems();
             });
           });
           wrap.querySelectorAll("[data-down]").forEach((b) => {
             b.addEventListener("click", () => {
-              const i = Number(b.getAttribute("data-down"));
-              if (i >= draftItems.length - 1) return;
-              const t = draftItems[i + 1]; draftItems[i + 1] = draftItems[i]; draftItems[i] = t;
+              const [ssi, iix] = (b.getAttribute("data-down") || "0:0").split(":").map(Number);
+              const arr = draftSections[ssi]?.items;
+              if (!arr || iix >= arr.length - 1) return;
+              const t = arr[iix + 1]; arr[iix + 1] = arr[iix]; arr[iix] = t;
               renderItems();
             });
           });
           wrap.querySelectorAll("[data-rm]").forEach((b) => {
             b.addEventListener("click", () => {
-              const i = Number(b.getAttribute("data-rm"));
-              draftItems.splice(i, 1);
+              const [ssi, iix] = (b.getAttribute("data-rm") || "0:0").split(":").map(Number);
+              draftSections[ssi]?.items.splice(iix, 1);
               renderItems();
             });
           });
@@ -363,11 +432,15 @@
                 const id = Number(b.getAttribute("data-add-q"));
                 const row = data.items.find((x) => x.id === id);
                 const preview = row ? String(row.promptPreview || "").slice(0, 180) : "#" + id;
-                if (draftItems.some((x) => x.questionId === id)) {
-                  setMsg("السؤال موجود بالفعل في التسلسل.", false);
+                const ts = Number(document.getElementById("target-sec-for-add")?.value ?? addQuestionTargetSection) || 0;
+                const sec = draftSections[ts] || draftSections[0];
+                if (!sec) return;
+                const flatIds = draftSections.flatMap((s) => s.items.map((x) => x.questionId));
+                if (flatIds.includes(id)) {
+                  setMsg("السؤال موجود بالفعل في أحد الأقسام.", false);
                   return;
                 }
-                draftItems.push({ questionId: id, answerMs: "", studyCardMs: "", preview });
+                sec.items.push({ questionId: id, answerMs: "", studyCardMs: "", preview });
                 renderItems();
                 setMsg("أُضيف للمسودة — احفظ التسلسل.", true);
               });
@@ -377,12 +450,16 @@
 
         document.getElementById("l-save-items").onclick = async () => {
           if (!selectedLessonId) return;
-          const items = draftItems.map((it) => ({
-            questionId: it.questionId,
-            answerMs: it.answerMs.trim() === "" ? null : Number(it.answerMs),
-            studyCardMs: it.studyCardMs.trim() === "" ? null : Number(it.studyCardMs),
+          const sections = draftSections.map((sec) => ({
+            titleAr: sec.titleAr.trim() === "" ? null : sec.titleAr.trim(),
+            items: sec.items.map((it) => ({
+              questionId: it.questionId,
+              answerMs: it.answerMs.trim() === "" ? null : Number(it.answerMs),
+              studyCardMs: it.studyCardMs.trim() === "" ? null : Number(it.studyCardMs),
+            })),
           }));
-          for (const x of items) {
+          const flat = sections.flatMap((s) => s.items);
+          for (const x of flat) {
             if (!Number.isInteger(x.questionId) || x.questionId < 1) {
               setMsg("معرّف سؤال غير صالح.", false);
               return;
@@ -396,9 +473,16 @@
               return;
             }
           }
+          if (flat.length > 0 && sections.some((s) => s.items.length === 0)) {
+            setMsg("كل قسم يجب أن يحتوي سؤالاً واحداً على الأقل، أو احذف القسم الفارغ.", false);
+            return;
+          }
           try {
-            await api("/api/admin/lessons/" + selectedLessonId + "/items", { method: "PUT", body: JSON.stringify({ items }) });
-            setMsg("تم حفظ التسلسل.", true);
+            await api("/api/admin/lessons/" + selectedLessonId + "/items", {
+              method: "PUT",
+              body: JSON.stringify(flat.length === 0 ? { sections: [] } : { sections }),
+            });
+            setMsg("تم حفظ الأقسام والتسلسل.", true);
             await loadAll();
             await loadDetail(selectedLessonId);
           } catch (_) {}

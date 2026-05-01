@@ -2,16 +2,26 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getPool } from "../db/pool";
+import { getPublishedLessonPlaybackById } from "../db/lessons";
 import { countQuestionsBySubcategory } from "../db/questions";
 import { Match, type DifficultyMode, type GameMode } from "./Match";
 
-const joinLobbySchema = z.object({
-  name: z.string().trim().min(1).max(32),
-  mode: z.enum(["direct", "study_then_quiz"]).default("direct"),
-  subcategoryKey: z.string().trim().min(1).max(120).optional(),
-  difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
-  playerSessionId: z.string().trim().min(1).max(120).optional(),
-});
+const joinLobbySchema = z
+  .object({
+    name: z.string().trim().min(1).max(32),
+    mode: z.enum(["direct", "study_then_quiz", "lesson"]).default("direct"),
+    subcategoryKey: z.string().trim().min(1).max(120).optional(),
+    lessonId: z.number().int().positive().optional(),
+    difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
+    playerSessionId: z.string().trim().min(1).max(120).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.mode === "lesson") {
+      if (data.lessonId == null || !Number.isFinite(data.lessonId) || data.lessonId < 1) {
+        ctx.addIssue({ code: "custom", path: ["lessonId"], message: "lesson_id_required" });
+      }
+    }
+  });
 
 const answerSchema = z.object({
   questionId: z.number().int().positive(),
@@ -34,6 +44,8 @@ type LobbyEntry = {
   readyOrder: number | null;
   mode: GameMode;
   subcategoryKey: string | null;
+  /** مطلوب عند mode === "lesson" */
+  lessonId: number | null;
   difficultyMode: DifficultyMode;
   roomCode?: string | null;
 };
@@ -71,6 +83,7 @@ type PrivateRoomState = {
   hostSocketId: string;
   mode: GameMode;
   subcategoryKey: string | null;
+  lessonId: number | null;
   difficultyMode: DifficultyMode;
   settings: PrivateRoomSettings;
   members: Map<string, LobbyEntry>;
@@ -85,6 +98,7 @@ type PrivateRoomStatePayload = {
   hostSocketId: string;
   mode: GameMode;
   subcategoryKey: string | null;
+  lessonId: number | null;
   difficultyMode: DifficultyMode;
   roomVersion: number;
   players: Array<{ socketId: string; name: string; ready: boolean }>;
@@ -103,6 +117,7 @@ export class GameManager {
   private readonly lobbies: Record<GameMode, Map<string, LobbyEntry>> = {
     direct: new Map(),
     study_then_quiz: new Map(),
+    lesson: new Map(),
   };
   private readonly matchStartTimers: Record<
     GameMode,
@@ -110,21 +125,25 @@ export class GameManager {
   > = {
     direct: null,
     study_then_quiz: null,
+    lesson: null,
   };
   private readonly countdownEndsAt: Record<GameMode, number | null> = {
     direct: null,
     study_then_quiz: null,
+    lesson: null,
   };
   private readonly countdownGroup: Record<
     GameMode,
-    { subcategoryKey: string | null; difficultyMode: DifficultyMode } | null
+    { subcategoryKey: string | null; difficultyMode: DifficultyMode; lessonId: number | null } | null
   > = {
     direct: null,
     study_then_quiz: null,
+    lesson: null,
   };
   private readonly scheduleChain: Record<GameMode, Promise<void>> = {
     direct: Promise.resolve(),
     study_then_quiz: Promise.resolve(),
+    lesson: Promise.resolve(),
   };
   private readonly socketToMatch = new Map<string, Match>();
   private readonly socketToPlayerSessionId = new Map<string, string>();
@@ -133,6 +152,7 @@ export class GameManager {
   private readonly lockedParticipants: Record<GameMode, string[]> = {
     direct: [],
     study_then_quiz: [],
+    lesson: [],
   };
   private readyOrderCounter = 0;
   private maxPlayersPerMatch = DEFAULT_MAX_PLAYERS_PER_MATCH;
@@ -152,8 +172,10 @@ export class GameManager {
     mode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): string {
     if (mode === "direct") return `lobby:direct:${difficultyMode}`;
+    if (mode === "lesson") return `lobby:lesson:${lessonId ?? 0}`;
     return `lobby:study_then_quiz:${subcategoryKey ?? "general_default"}:${difficultyMode}`;
   }
 
@@ -182,6 +204,7 @@ export class GameManager {
     mode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): LobbyStatePayload {
     const isStarting = Boolean(this.matchStartTimers[mode]);
     const endsAt = this.countdownEndsAt[mode];
@@ -195,16 +218,17 @@ export class GameManager {
         .filter(
           (p) =>
             p.difficultyMode === difficultyMode &&
-            (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")),
+            (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")) &&
+            (mode !== "lesson" || p.lessonId === lessonId),
         )
         .map((p) => ({
-        socketId: p.socketId,
-        name: p.name,
-        ready: p.ready,
-        mode: p.mode,
-        subcategoryKey: p.subcategoryKey,
-        difficultyMode: p.difficultyMode,
-      })),
+          socketId: p.socketId,
+          name: p.name,
+          ready: p.ready,
+          mode: p.mode,
+          subcategoryKey: p.subcategoryKey,
+          difficultyMode: p.difficultyMode,
+        })),
       isStarting,
       participantSocketIds: [...this.lockedParticipants[mode]],
       maxPlayersPerMatch: this.maxPlayersPerMatch,
@@ -246,6 +270,7 @@ export class GameManager {
       hostSocketId: room.hostSocketId,
       mode: room.mode,
       subcategoryKey: room.subcategoryKey,
+      lessonId: room.lessonId,
       difficultyMode: room.difficultyMode,
       roomVersion: room.roomVersion,
       players: [...room.members.values()].map((p) => ({
@@ -280,6 +305,7 @@ export class GameManager {
           mode === "study_then_quiz"
             ? String(parsed.data.subcategoryKey ?? "general_default").trim()
             : null;
+        const lessonId = mode === "lesson" ? (parsed.data.lessonId ?? null) : null;
         this.leaveMatchForSocket(socket.id);
         this.leaveLobbyEverywhere(socket.id);
         this.removeFromPrivateRoom(socket.id);
@@ -291,13 +317,14 @@ export class GameManager {
           readyOrder: ++this.readyOrderCounter,
           mode,
           subcategoryKey,
+          lessonId,
           difficultyMode,
         });
         this.socketToPlayerSessionId.set(socket.id, playerSessionId);
-        await socket.join(this.lobbyRoom(mode, subcategoryKey, difficultyMode));
-        this.broadcastLobby(mode, subcategoryKey, difficultyMode);
-        socket.emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey, difficultyMode));
-        this.enqueueScheduleMatchStart(mode, subcategoryKey, difficultyMode);
+        await socket.join(this.lobbyRoom(mode, subcategoryKey, difficultyMode, lessonId));
+        this.broadcastLobby(mode, subcategoryKey, difficultyMode, lessonId);
+        socket.emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey, difficultyMode, lessonId));
+        this.enqueueScheduleMatchStart(mode, subcategoryKey, difficultyMode, lessonId);
         cb?.({ ok: true });
       } catch {
         cb?.({ ok: false, error: "server" });
@@ -319,6 +346,11 @@ export class GameManager {
           mode === "study_then_quiz"
             ? String(d.subcategoryKey ?? "general_default").trim()
             : null;
+        const lessonId = mode === "lesson" ? (d.lessonId ?? null) : null;
+        if (mode === "lesson" && (lessonId == null || lessonId < 1)) {
+          cb?.({ ok: false, error: "lesson_id_required", message: "اختر درساً صالحاً." });
+          return;
+        }
         const questionMsRaw = Number((raw as { questionMs?: unknown }).questionMs ?? 15_000);
         const studyPhaseMsRaw = Number((raw as { studyPhaseMs?: unknown }).studyPhaseMs ?? 60_000);
         const settings: PrivateRoomSettings = {
@@ -336,6 +368,7 @@ export class GameManager {
           readyOrder: null,
           mode,
           subcategoryKey,
+          lessonId,
           difficultyMode: d.difficultyMode ?? "mix",
           roomCode,
         };
@@ -344,6 +377,7 @@ export class GameManager {
           hostSocketId: socket.id,
           mode,
           subcategoryKey,
+          lessonId,
           difficultyMode: d.difficultyMode ?? "mix",
           settings,
           members: new Map([[socket.id, entry]]),
@@ -366,6 +400,7 @@ export class GameManager {
           hostSocketId: socket.id,
           mode,
           subcategoryKey,
+          lessonId: room.lessonId,
           difficultyMode: d.difficultyMode ?? "mix",
           roomSettings: settings,
           roomVersion: room.roomVersion,
@@ -400,6 +435,7 @@ export class GameManager {
           readyOrder: null,
           mode: room.mode,
           subcategoryKey: room.subcategoryKey,
+          lessonId: room.lessonId,
           difficultyMode: room.difficultyMode,
           roomCode,
         };
@@ -415,6 +451,7 @@ export class GameManager {
           hostSocketId: room.hostSocketId,
           mode: room.mode,
           subcategoryKey: room.subcategoryKey,
+          lessonId: room.lessonId,
           difficultyMode: room.difficultyMode,
           roomSettings: room.settings,
           roomVersion: room.roomVersion,
@@ -500,6 +537,24 @@ export class GameManager {
           mode === "study_then_quiz"
             ? String(parsed.data.subcategoryKey ?? "general_default").trim()
             : null;
+        const lessonId = mode === "lesson" ? (parsed.data.lessonId ?? null) : null;
+        let lessonPlaybackForMatch: Awaited<ReturnType<typeof getPublishedLessonPlaybackById>> = null;
+
+        if (mode === "lesson") {
+          if (lessonId == null || lessonId < 1) {
+            cb?.({ ok: false, error: "lesson_id_required", message: "معرّف الدرس مطلوب." });
+            return;
+          }
+          lessonPlaybackForMatch = await getPublishedLessonPlaybackById(lessonId);
+          if (!lessonPlaybackForMatch || lessonPlaybackForMatch.steps.length === 0) {
+            cb?.({
+              ok: false,
+              error: "lesson_not_found",
+              message: "الدرس غير متاح أو غير منشور.",
+            });
+            return;
+          }
+        }
 
         if (mode === "study_then_quiz") {
           const key = subcategoryKey ?? "general_default";
@@ -522,6 +577,7 @@ export class GameManager {
         this.removeFromPrivateRoom(socket.id);
 
         const matchId = randomUUID();
+
         const match = new Match(
           this.io,
           matchId,
@@ -529,6 +585,8 @@ export class GameManager {
           mode,
           mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
           difficultyMode,
+          undefined,
+          lessonPlaybackForMatch,
         );
 
         await socket.join(match.room);
@@ -576,8 +634,8 @@ export class GameManager {
         entry.ready = true;
         entry.readyOrder = ++this.readyOrderCounter;
       }
-      this.broadcastLobby(entry.mode, entry.subcategoryKey, entry.difficultyMode);
-      this.enqueueScheduleMatchStart(entry.mode, entry.subcategoryKey, entry.difficultyMode);
+      this.broadcastLobby(entry.mode, entry.subcategoryKey, entry.difficultyMode, entry.lessonId);
+      this.enqueueScheduleMatchStart(entry.mode, entry.subcategoryKey, entry.difficultyMode, entry.lessonId);
       cb?.({ ok: true });
     });
 
@@ -677,7 +735,7 @@ export class GameManager {
   }
 
   private findLobbyEntry(socketId: string): LobbyEntry | undefined {
-    for (const mode of ["direct", "study_then_quiz"] as const) {
+    for (const mode of ["direct", "study_then_quiz", "lesson"] as const) {
       const e = this.lobbies[mode].get(socketId);
       if (e) return e;
     }
@@ -685,15 +743,15 @@ export class GameManager {
   }
 
   private leaveLobbyEverywhere(socketId: string): void {
-    for (const mode of ["direct", "study_then_quiz"] as const) {
+    for (const mode of ["direct", "study_then_quiz", "lesson"] as const) {
       const prev = this.lobbies[mode].get(socketId);
       if (this.lobbies[mode].delete(socketId)) {
         this.lockedParticipants[mode] = this.lockedParticipants[mode].filter((id) => id !== socketId);
         void this.io.sockets.sockets.get(socketId)?.leave(
-          this.lobbyRoom(mode, prev?.subcategoryKey, prev?.difficultyMode ?? "mix"),
+          this.lobbyRoom(mode, prev?.subcategoryKey, prev?.difficultyMode ?? "mix", prev?.lessonId),
         );
         this.clearMatchStartTimerIfNeeded(mode);
-        this.broadcastLobby(mode, prev?.subcategoryKey, prev?.difficultyMode ?? "mix");
+        this.broadcastLobby(mode, prev?.subcategoryKey, prev?.difficultyMode ?? "mix", prev?.lessonId);
       }
     }
   }
@@ -706,10 +764,10 @@ export class GameManager {
       (id) => id !== socketId,
     );
     void this.io.sockets.sockets.get(socketId)?.leave(
-      this.lobbyRoom(entry.mode, entry.subcategoryKey, entry.difficultyMode),
+      this.lobbyRoom(entry.mode, entry.subcategoryKey, entry.difficultyMode, entry.lessonId),
     );
     this.clearMatchStartTimerIfNeeded(entry.mode);
-    this.broadcastLobby(entry.mode, entry.subcategoryKey, entry.difficultyMode);
+    this.broadcastLobby(entry.mode, entry.subcategoryKey, entry.difficultyMode, entry.lessonId);
   }
 
   private removeFromPrivateRoom(socketId: string): void {
@@ -761,6 +819,24 @@ export class GameManager {
         return;
       }
     }
+    if (room.mode === "lesson") {
+      const lid = room.lessonId;
+      if (lid == null || lid < 1) {
+        this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+          reason: "lesson_invalid",
+          message: "غرفة الدرس لا تحتوي على معرّف درس صالح.",
+        });
+        return;
+      }
+      const lesson = await getPublishedLessonPlaybackById(lid);
+      if (!lesson || lesson.steps.length === 0) {
+        this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+          reason: "lesson_not_found",
+          message: "الدرس غير متاح أو غير منشور.",
+        });
+        return;
+      }
+    }
     room.lockedParticipants = members.map((m) => m.socketId);
     room.countdownEndsAt = Date.now() + (this.matchFillWindowSeconds * 1000);
     room.roomVersion += 1;
@@ -791,6 +867,16 @@ export class GameManager {
       return;
     }
     const matchId = randomUUID();
+    const lessonPlayback =
+      room.mode === "lesson" && room.lessonId != null
+        ? await getPublishedLessonPlaybackById(room.lessonId)
+        : null;
+    if (room.mode === "lesson" && !lessonPlayback) {
+      room.lockedParticipants = [];
+      room.roomVersion += 1;
+      this.emitPrivateLobbyState(roomCode);
+      return;
+    }
     const match = new Match(
       this.io,
       matchId,
@@ -802,6 +888,7 @@ export class GameManager {
         questionMsOverride: room.settings.questionMs,
         studyPhaseMsOverride: room.settings.studyPhaseMs,
       },
+      lessonPlayback,
     );
     await Promise.all(participants.map(async (p) => {
       room.members.delete(p.socketId);
@@ -841,6 +928,7 @@ export class GameManager {
               readyOrder: null,
               mode: room.mode,
               subcategoryKey: room.subcategoryKey,
+              lessonId: room.lessonId,
               difficultyMode: room.difficultyMode,
               roomCode,
             };
@@ -895,12 +983,14 @@ export class GameManager {
     mode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): LobbyEntry[] {
     return [...this.lobbies[mode].values()].filter(
       (p) =>
         p.ready &&
         p.difficultyMode === difficultyMode &&
-        (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")),
+        (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")) &&
+        (mode !== "lesson" || p.lessonId === lessonId),
     );
   }
 
@@ -908,8 +998,9 @@ export class GameManager {
     mode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): LobbyEntry[] {
-    return this.readyPlayers(mode, subcategoryKey, difficultyMode).sort((a, b) => {
+    return this.readyPlayers(mode, subcategoryKey, difficultyMode, lessonId).sort((a, b) => {
       const aOrder = a.readyOrder ?? Number.MAX_SAFE_INTEGER;
       const bOrder = b.readyOrder ?? Number.MAX_SAFE_INTEGER;
       return aOrder - bOrder;
@@ -967,27 +1058,33 @@ export class GameManager {
     mode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): void {
     this.io
-      .to(this.lobbyRoom(mode, subcategoryKey, difficultyMode))
-      .emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey, difficultyMode));
+      .to(this.lobbyRoom(mode, subcategoryKey, difficultyMode, lessonId))
+      .emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey, difficultyMode, lessonId));
   }
 
   private enqueueScheduleMatchStart(
     mode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): void {
     this.scheduleChain[mode] = this.scheduleChain[mode]
       .catch(() => undefined)
-      .then(() => this.runScheduleMatchStart(mode, subcategoryKey, difficultyMode));
+      .then(() => this.runScheduleMatchStart(mode, subcategoryKey, difficultyMode, lessonId));
   }
 
   private clearMatchStartTimerIfNeeded(mode: GameMode): void {
+    const g = this.countdownGroup[mode];
+    const sub = mode === "study_then_quiz" ? (g?.subcategoryKey ?? "general_default") : null;
+    const diff = g?.difficultyMode ?? "mix";
+    const lessonId = mode === "lesson" ? (g?.lessonId ?? null) : null;
     const effectiveReadyCount =
       this.lockedParticipants[mode].length > 0
         ? this.lockedParticipants[mode].length
-        : this.readyPlayers(mode).length;
+        : this.readyPlayers(mode, sub, diff, lessonId).length;
     if (effectiveReadyCount < 2) {
       const t = this.matchStartTimers[mode];
       if (t) {
@@ -996,11 +1093,11 @@ export class GameManager {
         this.countdownEndsAt[mode] = null;
         this.countdownGroup[mode] = null;
         this.lockedParticipants[mode] = [];
-        this.io.to(this.lobbyRoom(mode)).emit("match_start_cancelled", {
+        this.io.to(this.lobbyRoom(mode, sub ?? undefined, diff, lessonId)).emit("match_start_cancelled", {
           reason: "not_enough_ready",
         });
-        if (this.readyPlayers(mode).length >= 2) {
-          this.enqueueScheduleMatchStart(mode);
+        if (this.readyPlayers(mode, sub, diff, lessonId).length >= 2) {
+          this.enqueueScheduleMatchStart(mode, sub, diff, lessonId);
         }
       }
     }
@@ -1012,11 +1109,12 @@ export class GameManager {
     maxPlayers: number,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): void {
     const fillMs = this.matchFillWindowSeconds * 1000;
     const endsAt = this.countdownEndsAt[mode] ?? Date.now() + fillMs;
     const seconds = Math.max(1, Math.ceil((endsAt - Date.now()) / 1000));
-    this.io.to(this.lobbyRoom(mode, subcategoryKey, difficultyMode)).emit("match_starting", {
+    this.io.to(this.lobbyRoom(mode, subcategoryKey, difficultyMode, lessonId)).emit("match_starting", {
       seconds,
       participantSocketIds: locked,
       maxPlayersPerMatch: maxPlayers,
@@ -1028,6 +1126,7 @@ export class GameManager {
     mode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): Promise<void> {
     const activeGroup = this.countdownGroup[mode];
     const normalizedSubcategory =
@@ -1038,8 +1137,11 @@ export class GameManager {
     if (activeGroup && activeGroup.difficultyMode !== difficultyMode) {
       return;
     }
+    if (mode === "lesson" && activeGroup && activeGroup.lessonId !== lessonId) {
+      return;
+    }
     const maxPlayers = await this.loadMaxPlayersPerMatch();
-    const locked = this.sortedReadyPlayers(mode, subcategoryKey, difficultyMode)
+    const locked = this.sortedReadyPlayers(mode, subcategoryKey, difficultyMode, lessonId)
       .slice(0, maxPlayers)
       .map((p) => p.socketId);
     if (locked.length < 2) {
@@ -1051,26 +1153,27 @@ export class GameManager {
       this.countdownEndsAt[mode] = null;
       this.countdownGroup[mode] = null;
       this.lockedParticipants[mode] = [];
-      this.io.to(this.lobbyRoom(mode, subcategoryKey, difficultyMode)).emit("match_start_cancelled", {
+      this.io.to(this.lobbyRoom(mode, subcategoryKey, difficultyMode, lessonId)).emit("match_start_cancelled", {
         reason: "not_enough_ready",
       });
-      this.broadcastLobby(mode, subcategoryKey, difficultyMode);
-      if (this.readyPlayers(mode, subcategoryKey, difficultyMode).length >= 2) {
-        this.enqueueScheduleMatchStart(mode, subcategoryKey, difficultyMode);
+      this.broadcastLobby(mode, subcategoryKey, difficultyMode, lessonId);
+      if (this.readyPlayers(mode, subcategoryKey, difficultyMode, lessonId).length >= 2) {
+        this.enqueueScheduleMatchStart(mode, subcategoryKey, difficultyMode, lessonId);
       }
       return;
     }
     this.lockedParticipants[mode] = locked;
-    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey, difficultyMode);
-    this.broadcastLobby(mode, subcategoryKey, difficultyMode);
+    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey, difficultyMode, lessonId);
+    this.broadcastLobby(mode, subcategoryKey, difficultyMode, lessonId);
   }
 
   private async runScheduleMatchStart(
     mode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): Promise<void> {
-    const ready = this.readyPlayers(mode, subcategoryKey, difficultyMode);
+    const ready = this.readyPlayers(mode, subcategoryKey, difficultyMode, lessonId);
     if (ready.length < 2) {
       if (!this.matchStartTimers[mode]) {
         this.clearMatchStartTimerIfNeeded(mode);
@@ -1082,12 +1185,22 @@ export class GameManager {
       const activeGroup = this.countdownGroup[mode];
       const normalizedSubcategory =
         mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null;
-      if (
-        activeGroup &&
-        activeGroup.subcategoryKey === normalizedSubcategory &&
-        activeGroup.difficultyMode === difficultyMode
-      ) {
-        await this.updateRosterDuringCountdown(mode, subcategoryKey, difficultyMode);
+      let sameBucket = false;
+      if (mode === "study_then_quiz") {
+        sameBucket =
+          Boolean(activeGroup) &&
+          activeGroup!.subcategoryKey === normalizedSubcategory &&
+          activeGroup!.difficultyMode === difficultyMode;
+      } else if (mode === "lesson") {
+        sameBucket =
+          Boolean(activeGroup) &&
+          activeGroup!.lessonId === lessonId &&
+          activeGroup!.difficultyMode === difficultyMode;
+      } else {
+        sameBucket = Boolean(activeGroup) && activeGroup!.difficultyMode === difficultyMode;
+      }
+      if (sameBucket) {
+        await this.updateRosterDuringCountdown(mode, subcategoryKey, difficultyMode, lessonId);
       }
       return;
     }
@@ -1095,13 +1208,13 @@ export class GameManager {
     const maxPlayers = await this.loadMaxPlayersPerMatch();
     const fillSeconds = await this.loadMatchFillWindowSeconds();
     const fillMs = fillSeconds * 1000;
-    const locked = this.sortedReadyPlayers(mode, subcategoryKey, difficultyMode)
+    const locked = this.sortedReadyPlayers(mode, subcategoryKey, difficultyMode, lessonId)
       .slice(0, maxPlayers)
       .map((p) => p.socketId);
     if (locked.length < 2) return;
 
     if (this.matchStartTimers[mode]) {
-      await this.updateRosterDuringCountdown(mode, subcategoryKey, difficultyMode);
+      await this.updateRosterDuringCountdown(mode, subcategoryKey, difficultyMode, lessonId);
       return;
     }
 
@@ -1110,15 +1223,16 @@ export class GameManager {
     this.countdownGroup[mode] = {
       subcategoryKey: mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
       difficultyMode,
+      lessonId: mode === "lesson" ? lessonId ?? null : null,
     };
-    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey, difficultyMode);
-    this.broadcastLobby(mode, subcategoryKey, difficultyMode);
+    this.emitMatchStarting(mode, locked, maxPlayers, subcategoryKey, difficultyMode, lessonId);
+    this.broadcastLobby(mode, subcategoryKey, difficultyMode, lessonId);
 
     this.matchStartTimers[mode] = setTimeout(() => {
       this.matchStartTimers[mode] = null;
       this.countdownEndsAt[mode] = null;
       this.countdownGroup[mode] = null;
-      void this.startMatchFromLobby(mode, subcategoryKey, difficultyMode);
+      void this.startMatchFromLobby(mode, subcategoryKey, difficultyMode, lessonId);
     }, fillMs);
   }
 
@@ -1126,6 +1240,7 @@ export class GameManager {
     gameMode: GameMode,
     subcategoryKey?: string | null,
     difficultyMode: DifficultyMode = "mix",
+    lessonId?: number | null,
   ): Promise<void> {
     const startedAt = Date.now();
     const locked = this.lockedParticipants[gameMode];
@@ -1138,12 +1253,12 @@ export class GameManager {
       });
     if (participants.length < 2) {
       this.lockedParticipants[gameMode] = [];
-      this.io.to(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode)).emit("match_start_cancelled", {
+      this.io.to(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode, lessonId)).emit("match_start_cancelled", {
         reason: "not_enough_ready",
       });
-      this.broadcastLobby(gameMode, subcategoryKey, difficultyMode);
-      if (this.readyPlayers(gameMode, subcategoryKey, difficultyMode).length >= 2) {
-        this.enqueueScheduleMatchStart(gameMode, subcategoryKey, difficultyMode);
+      this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
+      if (this.readyPlayers(gameMode, subcategoryKey, difficultyMode, lessonId).length >= 2) {
+        this.enqueueScheduleMatchStart(gameMode, subcategoryKey, difficultyMode, lessonId);
       }
       return;
     }
@@ -1153,19 +1268,41 @@ export class GameManager {
       const total = await countQuestionsBySubcategory(getPool(), key, true, difficultyFilter);
       if (total < 30) {
         const isMix = difficultyMode === "mix";
-        this.io.to(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode)).emit("match_start_cancelled", {
+        this.io.to(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode, lessonId)).emit("match_start_cancelled", {
           reason: "not_enough_questions",
           message: isMix
             ? "لا توجد أسئلة كافية في هذا التصنيف."
             : "لا توجد أسئلة كافية في مستوى الصعوبة هذا داخل التصنيف. جرّب اختيار مزيج.",
           difficultyMode,
         });
-        this.broadcastLobby(gameMode, subcategoryKey, difficultyMode);
+        this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
+        return;
+      }
+    }
+    let lessonPlaybackForLobby: Awaited<ReturnType<typeof getPublishedLessonPlaybackById>> = null;
+    if (gameMode === "lesson") {
+      const lid = lessonId ?? participants[0]?.lessonId ?? null;
+      if (lid == null || lid < 1) {
+        this.io.to(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode, lessonId)).emit("match_start_cancelled", {
+          reason: "lesson_invalid",
+          message: "معرّف الدرس غير صالح.",
+        });
+        this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
+        return;
+      }
+      lessonPlaybackForLobby = await getPublishedLessonPlaybackById(lid);
+      if (!lessonPlaybackForLobby || lessonPlaybackForLobby.steps.length === 0) {
+        this.io.to(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode, lessonId)).emit("match_start_cancelled", {
+          reason: "lesson_not_found",
+          message: "الدرس غير متاح أو غير منشور.",
+        });
+        this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
         return;
       }
     }
     this.lockedParticipants[gameMode] = [];
     const matchId = randomUUID();
+
     const match = new Match(
       this.io,
       matchId,
@@ -1173,13 +1310,15 @@ export class GameManager {
       gameMode,
       gameMode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
       difficultyMode,
+      undefined,
+      lessonPlaybackForLobby,
     );
 
     await Promise.all(participants.map(async (p) => {
       this.lobbies[gameMode].delete(p.socketId);
       const s = this.io.sockets.sockets.get(p.socketId);
       if (s) {
-        await s.leave(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode));
+        await s.leave(this.lobbyRoom(gameMode, subcategoryKey, difficultyMode, lessonId));
         await s.join(match.room);
         this.socketToMatch.set(p.socketId, match);
         this.socketToPlayerSessionId.set(p.socketId, p.playerSessionId);
@@ -1190,7 +1329,7 @@ export class GameManager {
     console.debug(`[matchmaking] lobby_to_match_rooms_ms=${roomsReadyMs} mode=${gameMode} participants=${participants.length}`);
 
     this.runningMatches.set(matchId, match);
-    this.broadcastLobby(gameMode, subcategoryKey, difficultyMode);
+    this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
 
     try {
       await match.run();
