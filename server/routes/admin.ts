@@ -322,6 +322,17 @@ const questionPatchSchema = z.object({
   subcategory_key: z.string().trim().min(1).max(120).optional(),
 });
 
+/** تعديل سؤال مملوك لدرس فقط — لا يغيّر subcategory_key من هذه الواجهة */
+const lessonQuestionPatchSchema = z.object({
+  prompt: z.string().trim().min(1).max(2000).optional(),
+  options: questionOptionsSchema.optional(),
+  correctIndex: z.number().int().min(0).max(3).optional(),
+  correct_index: z.number().int().min(0).max(3).optional(),
+  difficulty: questionDifficultySchema.optional(),
+  studyBody: z.string().max(50_000).nullable().optional(),
+  study_body: z.string().max(50_000).nullable().optional(),
+});
+
 const mainCategorySchema = z.object({
   mainKey: z.string().trim().min(1).max(120),
   nameAr: z.string().trim().min(1).max(120),
@@ -2875,6 +2886,17 @@ export function registerAdminRoutes(app: Express): void {
         params.push(difficulty);
         whereParts.push(`q.difficulty = $${params.length}`);
       }
+      const includeLessonQuestionsRaw =
+        typeof req.query.includeLessonQuestions === "string"
+          ? req.query.includeLessonQuestions.trim().toLowerCase()
+          : "";
+      const includeLessonQuestions =
+        includeLessonQuestionsRaw === "1" ||
+        includeLessonQuestionsRaw === "true" ||
+        includeLessonQuestionsRaw === "yes";
+      if (!includeLessonQuestions) {
+        whereParts.push(`q.lesson_id IS NULL`);
+      }
       const where = whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
       params.push(limit, offset);
       const limIdx = params.length - 1;
@@ -3418,6 +3440,167 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true, lesson });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.post("/api/admin/lessons/:lessonId/questions", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const lessonId = Number(req.params.lessonId);
+    if (!Number.isInteger(lessonId) || lessonId < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const parsed = questionBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    const { prompt, options, correctIndex, difficulty } = parsed.data;
+    const studyBody = mergedStudyBody(parsed.data as {
+      studyBody?: string | null;
+      study_body?: string | null;
+    });
+    const subcategoryKey = String(
+      parsed.data.subcategoryKey ?? parsed.data.subcategory_key ?? "general_default",
+    ).trim();
+    try {
+      const pool = getPool();
+      const le = await pool.query<{ c: string }>(
+        `SELECT 1::text AS c FROM lessons WHERE id = $1`,
+        [lessonId],
+      );
+      if (!le.rows[0]) {
+        res.status(404).json({ ok: false, error: "lesson_not_found" });
+        return;
+      }
+      const ins = await pool.query<{ id: number }>(
+        `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id)
+         VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)
+         RETURNING id`,
+        [
+          prompt,
+          JSON.stringify(options),
+          correctIndex,
+          difficulty,
+          studyBody,
+          subcategoryKey || "general_default",
+          lessonId,
+        ],
+      );
+      const id = ins.rows[0]?.id;
+      const total = await countQuestions();
+      res.status(201).json({
+        ok: true,
+        id,
+        totalQuestions: total ?? undefined,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "insert_failed" });
+    }
+  });
+
+  app.patch("/api/admin/lessons/:lessonId/questions/:questionId", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const lessonId = Number(req.params.lessonId);
+    const questionId = Number(req.params.questionId);
+    if (!Number.isInteger(lessonId) || lessonId < 1 || !Number.isInteger(questionId) || questionId < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    const parsed = lessonQuestionPatchSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    const d = parsed.data;
+    const correctIdx = d.correctIndex ?? d.correct_index;
+    try {
+      const pool = getPool();
+      const cur = await pool.query<{
+        prompt: string;
+        options: unknown;
+        correct_index: number;
+        difficulty: string | null;
+        study_body: string | null;
+        subcategory_key: string;
+        lesson_id: number | null;
+      }>(
+        `SELECT prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id
+         FROM questions WHERE id = $1`,
+        [questionId],
+      );
+      const row = cur.rows[0];
+      if (!row || row.lesson_id !== lessonId) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      const nextPrompt = d.prompt ?? row.prompt;
+      let nextOptions: string[];
+      if (d.options) {
+        nextOptions = d.options;
+      } else {
+        nextOptions = Array.isArray(row.options)
+          ? (row.options as string[])
+          : (JSON.parse(String(row.options)) as string[]);
+      }
+      const nextCorrect =
+        correctIdx !== undefined ? correctIdx : row.correct_index;
+      if (!Number.isInteger(nextCorrect) || nextCorrect < 0 || nextCorrect >= nextOptions.length) {
+        res.status(400).json({
+          ok: false,
+          error: "invalid_body",
+          message: "correctIndex must be within options range",
+        });
+        return;
+      }
+      const nextDiff = (d.difficulty ?? row.difficulty ?? "medium") as "easy" | "medium" | "hard";
+      if (nextDiff !== "easy" && nextDiff !== "medium" && nextDiff !== "hard") {
+        res.status(400).json({ ok: false, error: "invalid_body", message: "invalid difficulty" });
+        return;
+      }
+
+      const rawBody = req.body as Record<string, unknown>;
+      const studyPatchProvided =
+        Object.prototype.hasOwnProperty.call(rawBody, "studyBody") ||
+        Object.prototype.hasOwnProperty.call(rawBody, "study_body");
+      let nextStudy = row.study_body;
+      if (studyPatchProvided) {
+        const raw = d.studyBody !== undefined ? d.studyBody : d.study_body;
+        if (raw === null || raw === undefined) {
+          nextStudy = null;
+        } else {
+          const t = String(raw).trim();
+          nextStudy = t.length === 0 ? null : t;
+        }
+      }
+
+      await pool.query(
+        `UPDATE questions
+         SET prompt = $1, options = $2::jsonb, correct_index = $3,
+             difficulty = $4, study_body = $5, subcategory_key = $6
+         WHERE id = $7 AND lesson_id = $8`,
+        [
+          nextPrompt,
+          JSON.stringify(nextOptions),
+          nextCorrect,
+          nextDiff,
+          nextStudy,
+          row.subcategory_key || "general_default",
+          questionId,
+          lessonId,
+        ],
+      );
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
     }
   });
 

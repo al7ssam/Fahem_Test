@@ -32,6 +32,14 @@ export type LessonItemAdmin = {
   studyCardMs: number | null;
   promptPreview: string;
   hasStudyBody: boolean;
+  /** سؤال أُنشئ من إدارة هذا الدرس (questions.lesson_id) */
+  lessonOwned: boolean;
+  /** للتحرير عند lessonOwned */
+  prompt?: string;
+  options?: string[];
+  correctIndex?: number;
+  studyBody?: string | null;
+  difficulty?: string | null;
 };
 
 export type LessonSectionAdmin = {
@@ -303,11 +311,15 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
     answer_ms: number | null;
     study_card_ms: number | null;
     prompt: string;
+    options: unknown;
+    correct_index: number;
     study_body: string | null;
+    lesson_id: number | null;
+    difficulty: string | null;
   }>(
     `SELECT ls.id AS section_id, ls.sort_order AS section_sort, ls.title_ar,
             li.sort_order, li.question_id, li.answer_ms, li.study_card_ms,
-            q.prompt, q.study_body
+            q.prompt, q.options, q.correct_index, q.study_body, q.lesson_id, q.difficulty
      FROM lesson_sections ls
      JOIN lesson_items li ON li.lesson_section_id = ls.id
      JOIN questions q ON q.id = li.question_id
@@ -331,14 +343,37 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
       sectionOrder.push(r.section_id);
     }
     const sec = bySection.get(r.section_id)!;
-    sec.items.push({
+    const lessonOwned = r.lesson_id != null && r.lesson_id === lessonId;
+    let optionsParsed: string[] | undefined;
+    if (lessonOwned) {
+      try {
+        const raw = r.options;
+        optionsParsed = Array.isArray(raw)
+          ? (raw as unknown[]).map((x) => String(x))
+          : typeof raw === "string"
+            ? (JSON.parse(raw) as string[])
+            : [];
+      } catch {
+        optionsParsed = [];
+      }
+    }
+    const item: LessonItemAdmin = {
       sortOrder: r.sort_order,
       questionId: r.question_id,
       answerMs: r.answer_ms,
       studyCardMs: r.study_card_ms,
       promptPreview: r.prompt.length > 180 ? `${r.prompt.slice(0, 180)}…` : r.prompt,
       hasStudyBody: Boolean(r.study_body?.trim()),
-    });
+      lessonOwned,
+    };
+    if (lessonOwned) {
+      item.prompt = r.prompt;
+      item.options = optionsParsed;
+      item.correctIndex = r.correct_index;
+      item.studyBody = r.study_body?.trim() ? r.study_body : null;
+      item.difficulty = r.difficulty;
+    }
+    sec.items.push(item);
   }
 
   const sections: LessonSectionAdmin[] = sectionOrder.map((sid) => {
