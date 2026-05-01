@@ -357,7 +357,7 @@ export class Match {
   }
 
   markRoundReady(socketId: string): void {
-    if (this.finished || this.gameMode !== "study_then_quiz") return;
+    if (this.finished || (this.gameMode !== "study_then_quiz" && this.gameMode !== "lesson")) return;
     const p = this.players.get(socketId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) return;
     this.roundReady.add(socketId);
@@ -666,9 +666,14 @@ export class Match {
   ): Promise<void> {
     if (cards.length === 0 || phaseMs <= 0) return;
     this.activeRoundToken = `${this.matchId}:${this.macroRound}:${Date.now()}`;
+    this.roundReady.clear();
+    this.clearRoundReadyWait();
     const now = Date.now();
+    const readyWindowMs = phaseMs;
+    const readyStartsAt = now;
     const studyStartsAt = now;
-    const studyEndsAt = now + phaseMs;
+    const readyEndsAt = readyStartsAt + (readyWindowMs || DEFAULT_ROUND_READY_MS);
+    const studyEndsAt = studyStartsAt + phaseMs;
 
     this.io.to(this.room).emit("study_phase", {
       cards,
@@ -681,7 +686,31 @@ export class Match {
       ...sectionMeta,
     });
 
-    await new Promise<void>((resolve) => {
+    this.io.to(this.room).emit("round_ready_window", {
+      roundToken: this.activeRoundToken,
+      startsAt: readyStartsAt,
+      endsAt: readyEndsAt,
+      serverNow: now,
+      macroRound: this.macroRound,
+    });
+    this.emitRoundReadyState();
+
+    const waitReady = new Promise<void>((resolve) => {
+      this.roundReadyResolve = resolve;
+      this.roundReadyTimer = setTimeout(() => {
+        this.roundReadyTimer = null;
+        this.roundReadyResolve = null;
+        this.io.to(this.room).emit("round_ready_closed", {
+          roundToken: this.activeRoundToken,
+          startsAt: readyStartsAt,
+          endsAt: readyEndsAt,
+          serverNow: Date.now(),
+          macroRound: this.macroRound,
+        });
+      }, Math.max(0, readyEndsAt - Date.now()));
+    });
+
+    const waitStudy = new Promise<void>((resolve) => {
       this.studyPhaseResolve = resolve;
       this.studyWaitTimer = setTimeout(() => {
         this.studyWaitTimer = null;
@@ -689,13 +718,16 @@ export class Match {
         resolve();
       }, Math.max(0, studyEndsAt - Date.now()));
     });
+
+    await Promise.race([waitReady, waitStudy]);
+    this.clearRoundReadyWait();
     this.clearStudyWait();
 
     this.io.to(this.room).emit("study_phase_end", {
       roundToken: this.activeRoundToken,
       macroRound: this.macroRound,
       startsAt: studyStartsAt,
-      studyEndsAt: studyEndsAt,
+      studyEndsAt,
       serverNow: Date.now(),
       ...sectionMeta,
     });

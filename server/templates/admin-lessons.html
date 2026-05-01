@@ -41,15 +41,18 @@
       .modal-backdrop[hidden] { display:none !important; pointer-events:none; visibility:hidden; }
       .modal-panel { max-width:36rem; width:100%; max-height:92vh; overflow:auto; }
       table { width:100%; border-collapse:collapse; font-size:.88rem; } th,td { padding:.4rem; border-bottom:1px solid var(--border); text-align:right; }
-      .lesson-create-panel { margin:.65rem 0; border:1px solid var(--border); border-radius:.9rem; background:var(--card); padding:.75rem .9rem 1rem; }
       .lesson-section-heading { display:block; margin:0 0 .5rem; font-size:1.05rem; font-weight:800; color:var(--amber); }
       .owned-editor-panel { margin:.75rem 0; padding:.75rem .9rem 1rem; border:1px solid rgba(223,187,106,.35); border-radius:.9rem; background:rgba(14,18,35,.95); }
       .owned-editor-panel[hidden] { display:none !important; }
-      .lesson-adv-wrap { margin-top:.55rem; border:1px dashed rgba(223,187,106,.28); border-radius:.65rem; padding:.4rem .55rem .65rem; background:rgba(0,0,0,.18); }
-      .lesson-adv-toggle { width:100%; text-align:right; cursor:pointer; font-size:.86rem; padding:.25rem 0 .4rem; font-weight:700; font-family:inherit; background:none; border:none; color:var(--muted); display:flex; align-items:center; justify-content:space-between; gap:.35rem; }
-      .lesson-adv-toggle:focus-visible { outline:2px solid var(--amber); outline-offset:2px; border-radius:.35rem; }
-      .lesson-adv-inner { padding-top:.35rem; }
       .sec-block { margin:.55rem 0; padding:.55rem .65rem; border:1px solid rgba(223,187,106,.18); border-radius:.75rem; color:var(--text); }
+      .split-col-a { background:linear-gradient(145deg, rgba(14,18,38,.92), rgba(8,12,26,.75)); border:1px solid rgba(223,187,106,.22); border-radius:.9rem; padding:.75rem; box-shadow:0 8px 28px rgba(0,0,0,.25); }
+      .split-col-b { background:linear-gradient(145deg, rgba(18,14,30,.92), rgba(12,8,22,.75)); border:1px solid rgba(223,187,106,.22); border-radius:.9rem; padding:.75rem; box-shadow:0 8px 28px rgba(0,0,0,.25); }
+      .editor-card-inner { background:linear-gradient(180deg, rgba(12,16,32,.55), rgba(6,8,18,.35)); border:1px solid rgba(223,187,106,.16); border-radius:1rem; padding:.85rem .95rem 1rem; margin-top:.65rem; }
+      .editor-meta-block { background:linear-gradient(135deg, rgba(16,22,44,.85), rgba(8,12,28,.65)); border:1px solid rgba(223,187,106,.2); border-radius:.85rem; padding:.65rem .75rem .85rem; margin:.5rem 0; }
+      .lesson-create-panel { margin:.65rem 0; padding:.75rem .9rem 1rem; border-radius:.9rem; background:linear-gradient(135deg, rgba(18,26,42,.9), rgba(10,14,28,.72)); border:1px solid rgba(223,187,106,.28); box-shadow:0 6px 22px rgba(0,0,0,.2); }
+      .bank-link-block { margin:.65rem 0; padding:.75rem .85rem; border-radius:.85rem; border:1px solid rgba(223,187,106,.22); background:linear-gradient(135deg, rgba(14,20,36,.88), rgba(8,12,24,.65)); }
+      .items-wrap-shell { margin-top:.55rem; padding:.45rem; border-radius:.85rem; border:1px solid rgba(223,187,106,.18); background:linear-gradient(180deg, rgba(10,14,28,.5), rgba(6,8,18,.35)); }
+      .create-q-extra { margin-top:.55rem; padding-top:.55rem; border-top:1px solid rgba(223,187,106,.15); }
       @media (max-width:1100px) { .split { grid-template-columns:1fr; } }
     </style>
   </head>
@@ -69,7 +72,7 @@
       </div>
 
       <div class="split">
-        <div class="card">
+        <div class="card split-col-a">
           <strong>تصنيفات الدروس</strong>
           <div class="row" style="margin:.5rem 0">
             <input id="cat-name" type="text" placeholder="اسم التصنيف" style="flex:1;min-width:120px" />
@@ -78,7 +81,7 @@
           </div>
           <div class="list" id="cat-list"></div>
         </div>
-        <div class="card">
+        <div class="card split-col-b">
           <div class="row" style="justify-content:space-between">
             <strong>الدروس</strong>
             <button class="btn btn-secondary" id="lesson-new" type="button">درس جديد</button>
@@ -87,8 +90,9 @@
         </div>
       </div>
 
-      <div class="card" id="editor-card" hidden>
+      <div class="card editor-card-inner" id="editor-card" hidden>
         <strong id="editor-title">تحرير الدرس</strong>
+        <div class="editor-meta-block">
         <div class="row" style="margin:.6rem 0">
           <label class="muted">عنوان</label>
           <input id="l-title" type="text" style="flex:1;min-width:200px" />
@@ -105,10 +109,10 @@
           <textarea id="l-desc" rows="2" style="flex:1;min-width:100%"></textarea>
         </div>
         <div class="row">
-          <label class="muted">وقت الإجابة الافتراضي (مللي)</label>
-          <input id="l-d-ans" type="number" min="3000" max="120000" step="500" value="15000" style="width:120px" />
-          <label class="muted">مدة بطاقة التعلم الافتراضية (مللي)</label>
-          <input id="l-d-study" type="number" min="2000" max="300000" step="500" value="10000" style="width:120px" />
+          <label class="muted">وقت الإجابة الافتراضي (ثانية)</label>
+          <input id="l-d-ans" type="number" min="3" max="120" step="0.5" value="15" style="width:120px" />
+          <label class="muted">مدة بطاقة التعلم الافتراضية (ثانية)</label>
+          <input id="l-d-study" type="number" min="2" max="300" step="0.5" value="10" style="width:120px" />
           <label class="muted">ترتيب</label>
           <input id="l-sort" type="number" min="0" value="0" style="width:80px" />
         </div>
@@ -117,11 +121,12 @@
           <button class="btn btn-danger" id="l-del" type="button">حذف الدرس</button>
           <span class="muted" id="l-id-label"></span>
         </div>
+        </div>
 
         <hr style="border-color:var(--border);margin:.75rem 0" />
 
         <strong>تسلسل الأسئلة والأقسام</strong>
-        <p class="muted" style="margin:.35rem 0">أنشئ أسئلة خاصة بهذا الدرس، أو اربط أسئلة من البنك. اسحب الصفوف لإعادة الترتيب أو النقل بين الأقسام، أو استخدم الأسهم. زمن المذاكرة يُضبط لكل قسم؛ يمكن ترك وقت الإجابة لكل سؤال فارغاً لاستخدام افتراضي الدرس.</p>
+        <p class="muted" style="margin:.35rem 0">أنشئ أسئلة خاصة بهذا الدرس، أو اربط أسئلة من البنك. اسحب الصفوف لإعادة الترتيب أو النقل بين الأقسام، أو استخدم الأسهم. زمن المذاكرة يُضبط لكل قسم بالثواني؛ يمكن ترك وقت الإجابة لكل سؤال فارغاً لاستخدام افتراضي الدرس.</p>
 
         <section class="lesson-create-panel" id="lesson-create-panel" aria-labelledby="lesson-create-heading">
           <h2 class="lesson-section-heading" id="lesson-create-heading">إنشاء سؤال خاص بالدرس</h2>
@@ -147,12 +152,7 @@
             <label class="muted">الإجابة الصحيحة</label>
             <select id="new-q-correct" aria-label="فهرس الإجابة الصحيحة"></select>
           </div>
-          <div class="lesson-adv-wrap">
-            <button type="button" class="lesson-adv-toggle" id="lesson-adv-toggle" aria-expanded="false" aria-controls="lesson-adv-panel">
-              <span>خيارات متقدمة (صعوبة، مذاكرة، أوقات)</span>
-              <span class="lesson-caret" aria-hidden="true">▼</span>
-            </button>
-            <div class="lesson-adv-inner" id="lesson-adv-panel" hidden>
+          <div class="create-q-extra">
               <div class="row" style="margin-top:.35rem">
                 <label class="muted">الصعوبة</label>
                 <select id="new-q-diff">
@@ -164,10 +164,9 @@
               <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة</label>
               <textarea id="new-q-study" rows="2" style="width:100%" placeholder="نص البطاقة (مطلوب)"></textarea>
               <div class="row" style="margin-top:.45rem">
-                <label class="muted">وقت الإجابة (مللي)</label>
-                <input id="new-q-ans-ms" type="number" min="3000" max="120000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
+                <label class="muted">وقت الإجابة لهذا السؤال (ثانية، اختياري)</label>
+                <input id="new-q-ans-ms" type="number" min="3" max="120" step="0.5" placeholder="افتراضي الدرس" style="width:140px" />
               </div>
-            </div>
           </div>
           <button type="button" class="btn" id="new-q-submit" style="margin-top:.65rem">إضافة السؤال إلى القسم المحدد</button>
         </section>
@@ -206,7 +205,8 @@
           </div>
         </div>
 
-        <strong style="display:block;margin-top:.5rem">ربط سؤال من البنك</strong>
+        <div class="bank-link-block">
+        <strong style="display:block;margin-top:.15rem">ربط سؤال من البنك</strong>
         <p class="muted" style="margin:.25rem 0;font-size:.82rem">البحث يعرض أسئلة البنك العامة فقط.</p>
         <div class="row">
           <input id="q-q" type="search" placeholder="بحث في نص السؤال" style="flex:1;min-width:140px" />
@@ -214,7 +214,10 @@
           <button class="btn btn-secondary" id="q-search" type="button">بحث</button>
         </div>
         <div class="list" id="q-results" style="max-height:160px;margin:.45rem 0"></div>
-        <div id="items-wrap" style="border:1px solid var(--border);border-radius:.75rem;margin-top:.45rem"></div>
+        </div>
+        <div class="items-wrap-shell">
+        <div id="items-wrap"></div>
+        </div>
         <div class="row" style="margin-top:.55rem">
           <button class="btn" id="l-save-items" type="button">حفظ التسلسل</button>
         </div>
@@ -233,6 +236,22 @@
         function hdr() {
           const s = secret();
           return { "Content-Type": "application/json", "X-Admin-Secret": s };
+        }
+
+        /** عرض رقم مللي ثانية كثوانٍ في الحقول */
+        function msToSecDisplay(ms) {
+          if (ms == null || ms === "") return "";
+          const n = Number(ms);
+          if (!Number.isFinite(n)) return "";
+          return String(Math.round((n / 1000) * 1000) / 1000);
+        }
+        /** تحويل سلسلة ثوانٍ إلى مللي (عدد صحيح) للـ API */
+        function secStrToMs(secStr) {
+          const t = String(secStr ?? "").trim();
+          if (t === "") return null;
+          const s = Number(t);
+          if (!Number.isFinite(s)) return NaN;
+          return Math.round(s * 1000);
         }
 
         let categories = [];
@@ -506,19 +525,20 @@
             document.getElementById("l-slug").value = d.lesson.slug || "";
             document.getElementById("l-desc").value = d.lesson.description || "";
             document.getElementById("l-pub").checked = !!d.lesson.isPublished;
-            document.getElementById("l-d-ans").value = String(d.lesson.defaultAnswerMs);
-            document.getElementById("l-d-study").value = String(d.lesson.defaultStudyCardMs);
+            document.getElementById("l-d-ans").value = msToSecDisplay(d.lesson.defaultAnswerMs);
+            document.getElementById("l-d-study").value = msToSecDisplay(d.lesson.defaultStudyCardMs);
             document.getElementById("l-sort").value = String(d.lesson.sortOrder ?? 0);
             const cid = d.lesson.lessonCategoryId;
             document.getElementById("l-cat").value = cid != null ? String(cid) : "";
             if (d.sections && d.sections.length) {
               draftSections = d.sections.map((sec) => ({
                 titleAr: sec.titleAr || "",
-                studyPhaseMs: sec.studyPhaseMs != null && sec.studyPhaseMs !== undefined ? String(sec.studyPhaseMs) : "",
+                studyPhaseMs:
+                  sec.studyPhaseMs != null && sec.studyPhaseMs !== undefined ? msToSecDisplay(sec.studyPhaseMs) : "",
                 items: (sec.items || []).map((it) => {
                   const row = {
                     questionId: it.questionId,
-                    answerMs: it.answerMs != null ? String(it.answerMs) : "",
+                    answerMs: it.answerMs != null ? msToSecDisplay(it.answerMs) : "",
                     preview: it.promptPreview || "",
                     lessonOwned: !!it.lessonOwned,
                   };
@@ -566,8 +586,8 @@
               <input type="text" data-sec-title="${si}" value="${escapeHtml(sec.titleAr)}" placeholder="مثال: المفاهيم الأساسية" style="width:100%;margin:.25rem 0" />
               <div class="row" style="margin:.35rem 0;flex-wrap:wrap;align-items:end;gap:.5rem">
                 <div>
-                  <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">زمن مرحلة المذاكرة لهذا القسم (مللي)</label>
-                  <input type="number" data-sec-phase="${si}" min="2000" max="300000" step="500" placeholder="فارغ = احتساب تلقائي من البيانات القديمة" style="width:220px"
+                  <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">زمن مرحلة المذاكرة لهذا القسم (ثانية)</label>
+                  <input type="number" data-sec-phase="${si}" min="2" max="300" step="0.5" placeholder="فارغ = احتساب تلقائي من البيانات القديمة" style="width:220px"
                     value="${escapeHtml(sec.studyPhaseMs)}" />
                 </div>
                 <span class="muted" style="font-size:.78rem">يُوزَّع هذا الزمن على بطاقات المذاكرة داخل القسم في التطبيق والمباراة.</span>
@@ -588,7 +608,7 @@
                   <span class="drag-hint" title="سحب لإعادة الترتيب أو النقل">⠿</span>
                   <span class="muted">${idx + 1}.</span>
                   <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;display:flex;align-items:center;gap:.35rem">${ownTag}<span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(it.preview)}</span></span>
-                  <input type="number" data-si="${si}" data-ii="${idx}" data-f="answer" placeholder="إجابة ms" style="width:100px" value="${escapeHtml(it.answerMs)}" />
+                  <input type="number" data-si="${si}" data-ii="${idx}" data-f="answer" placeholder="إجابة ث" min="3" max="120" step="0.5" style="width:100px" value="${escapeHtml(it.answerMs)}" />
                   <span class="row" style="gap:.2rem">
                     <button type="button" class="btn btn-secondary btn-xs" data-up="${si}:${idx}">↑</button>
                     <button type="button" class="btn btn-secondary btn-xs" data-down="${si}:${idx}">↓</button>
@@ -741,18 +761,6 @@
 
         document.getElementById("new-q-opt-count").addEventListener("change", syncNewQForm);
         safeSyncNewQForm();
-        (function () {
-          const btn = document.getElementById("lesson-adv-toggle");
-          const panel = document.getElementById("lesson-adv-panel");
-          const caret = btn && btn.querySelector(".lesson-caret");
-          if (!btn || !panel) return;
-          btn.addEventListener("click", function () {
-            panel.hidden = !panel.hidden;
-            const expanded = !panel.hidden;
-            btn.setAttribute("aria-expanded", expanded ? "true" : "false");
-            if (caret) caret.textContent = expanded ? "▲" : "▼";
-          });
-        })();
         document.getElementById("own-opt-count").addEventListener("change", syncOwnModalOpts);
 
         document.getElementById("new-q-submit").addEventListener("click", async () => {
@@ -904,14 +912,24 @@
         document.getElementById("l-save-meta").onclick = async () => {
           if (!selectedLessonId) return;
           const lessonCategoryIdRaw = document.getElementById("l-cat").value;
+          const da = secStrToMs(document.getElementById("l-d-ans").value);
+          const ds = secStrToMs(document.getElementById("l-d-study").value);
+          if (da == null || Number.isNaN(da) || ds == null || Number.isNaN(ds)) {
+            setMsg("أدخل أوقاتاً صالحة بالثواني للدرس.", false);
+            return;
+          }
+          if (da < 3000 || da > 120000 || ds < 2000 || ds > 300000) {
+            setMsg("وقت الإجابة الافتراضي 3–120 ثانية، وبطاقة التعلم 2–300 ثانية.", false);
+            return;
+          }
           const body = {
             title: document.getElementById("l-title").value.trim(),
             slug: document.getElementById("l-slug").value.trim() || null,
             description: document.getElementById("l-desc").value.trim() || null,
             lessonCategoryId: lessonCategoryIdRaw ? Number(lessonCategoryIdRaw) : null,
             isPublished: document.getElementById("l-pub").checked,
-            defaultAnswerMs: Number(document.getElementById("l-d-ans").value),
-            defaultStudyCardMs: Number(document.getElementById("l-d-study").value),
+            defaultAnswerMs: da,
+            defaultStudyCardMs: ds,
             sortOrder: Number(document.getElementById("l-sort").value),
           };
           try {
@@ -979,10 +997,11 @@
           if (!selectedLessonId) return;
           const sections = draftSections.map((sec) => ({
             titleAr: sec.titleAr.trim() === "" ? null : sec.titleAr.trim(),
-            studyPhaseMs: sec.studyPhaseMs.trim() === "" ? null : Number(sec.studyPhaseMs),
+            studyPhaseMs:
+              sec.studyPhaseMs.trim() === "" ? null : secStrToMs(sec.studyPhaseMs.trim()),
             items: sec.items.map((it) => ({
               questionId: it.questionId,
-              answerMs: it.answerMs.trim() === "" ? null : Number(it.answerMs),
+              answerMs: it.answerMs.trim() === "" ? null : secStrToMs(it.answerMs.trim()),
             })),
           }));
           const flat = sections.flatMap((s) => s.items);
@@ -991,14 +1010,23 @@
               setMsg("معرّف سؤال غير صالح.", false);
               return;
             }
-            if (x.answerMs != null && (!Number.isFinite(x.answerMs) || x.answerMs < 3000 || x.answerMs > 120000)) {
-              setMsg("وقت الإجابة يجب بين 3000 و 120000 أو فارغ.", false);
+            if (
+              x.answerMs != null &&
+              (Number.isNaN(x.answerMs) || !Number.isFinite(x.answerMs) || x.answerMs < 3000 || x.answerMs > 120000)
+            ) {
+              setMsg("وقت الإجابة لكل سؤال: 3–120 ثانية أو فارغ.", false);
               return;
             }
           }
           for (const sec of sections) {
-            if (sec.studyPhaseMs != null && (!Number.isFinite(sec.studyPhaseMs) || sec.studyPhaseMs < 2000 || sec.studyPhaseMs > 300000)) {
-              setMsg("زمن مرحلة المذاكرة لكل قسم يجب بين 2000 و 300000 مللي أو يُترك فارغاً.", false);
+            if (
+              sec.studyPhaseMs != null &&
+              (Number.isNaN(sec.studyPhaseMs) ||
+                !Number.isFinite(sec.studyPhaseMs) ||
+                sec.studyPhaseMs < 2000 ||
+                sec.studyPhaseMs > 300000)
+            ) {
+              setMsg("زمن مرحلة المذاكرة لكل قسم: 2–300 ثانية أو فارغ.", false);
               return;
             }
           }

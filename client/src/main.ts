@@ -1311,6 +1311,8 @@ function render(): void {
   if (phase === "lesson_study") {
     const card = lessonStudyQueue[lessonStudyIdx];
     const total = lessonStudyQueue.length;
+    const isFirst = lessonStudyIdx <= 0;
+    const isLast = total > 0 && lessonStudyIdx >= total - 1;
     app.append(
       el(`
         <div class="study-shell min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
@@ -1325,7 +1327,15 @@ function render(): void {
               <p class="study-card__body font-medium whitespace-pre-wrap">${escapeHtml(card?.body ?? "")}</p>
             </div>
           </div>
-          <button type="button" id="lesson-study-skip" class="ui-btn ui-btn--primary w-full py-3">التالي</button>
+          <div class="flex gap-2">
+            <button type="button" id="lesson-study-prev" class="ui-btn ui-btn--ghost flex-1 py-3" ${isFirst ? "disabled" : ""}>السابق</button>
+            <button type="button" id="lesson-study-skip" class="ui-btn ui-btn--primary flex-1 py-3" ${isLast ? "disabled" : ""}>التالي</button>
+          </div>
+          ${
+            isLast && total > 0
+              ? `<button type="button" id="lesson-study-finish-review" class="ui-btn ui-btn--cta w-full py-2 text-sm">أنهيت المراجعة — انتقل للاختبار</button>`
+              : ""
+          }
         </div>
       `),
     );
@@ -1340,16 +1350,25 @@ function render(): void {
         });
     };
     app.querySelector("#lesson-study-exit")?.addEventListener("click", exit);
+    app.querySelector("#lesson-study-prev")?.addEventListener("click", () => {
+      if (lessonStudyIdx <= 0) return;
+      clearTimer();
+      lessonStudyIdx--;
+      lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[lessonStudyIdx].ms;
+      render();
+    });
     app.querySelector("#lesson-study-skip")?.addEventListener("click", () => {
+      if (lessonStudyIdx >= lessonStudyQueue.length - 1) return;
       clearTimer();
       lessonStudyIdx++;
-      if (lessonStudyIdx >= lessonStudyQueue.length) {
-        phase = "lesson_quiz";
-        lessonQuizIdxInSection = 0;
-        lessonPrepareCurrentLessonQuizQuestion();
-      } else {
-        lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[lessonStudyIdx].ms;
-      }
+      lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[lessonStudyIdx].ms;
+      render();
+    });
+    app.querySelector("#lesson-study-finish-review")?.addEventListener("click", () => {
+      clearTimer();
+      phase = "lesson_quiz";
+      lessonQuizIdxInSection = 0;
+      lessonPrepareCurrentLessonQuizQuestion();
       render();
     });
     clearTimer();
@@ -1833,7 +1852,7 @@ function render(): void {
             </div>
           </div>
           <div class="study-content-stack">
-          <div class="${lessonMatchStudyNav ? "hidden" : ""} space-y-2">
+          <div class="space-y-2">
           <button id="round-ready-btn" type="button" class="ui-btn ui-btn--primary w-full py-2 text-sm">جاهز للجولة (تخطي العداد عند جاهزية الجميع)</button>
           <p id="study-ready-state" class="text-right text-amber-200/90 text-xs min-h-[1.1rem] leading-relaxed"></p>
           </div>
@@ -1860,7 +1879,7 @@ function render(): void {
     const container = app.querySelector<HTMLDivElement>("#study-cards");
     const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
     const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
-    if (readyBtn && !lessonMatchStudyNav) {
+    if (readyBtn) {
       readyBtn.disabled = readyBtnState !== "window_open";
       if (readyBtnState === "submitted") {
         readyBtn.textContent = "تم تسجيل جاهزيتك";
@@ -1880,7 +1899,7 @@ function render(): void {
         }
       };
     }
-    if (readyStateEl && !lessonMatchStudyNav && !readyStateEl.textContent) {
+    if (readyStateEl && !readyStateEl.textContent) {
       readyStateEl.textContent =
         readyBtnState === "window_open"
           ? "زر الجاهزية متاح الآن."
@@ -3336,7 +3355,7 @@ function connectSocket(
       studyEndsAt = payload.endsAt;
       studyStartsAt = payload.startsAt ?? payload.serverNow ?? nowSynced();
       studyDurationMs = Math.max(1000, studyEndsAt - studyStartsAt);
-      if (!app.querySelector("#study-cards")) render();
+      render();
       const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
       const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
       if (readyBtn) {
@@ -3380,6 +3399,7 @@ function connectSocket(
       const isLessonStudy = payload.scope === "lesson";
       lessonMatchStudyNav = isLessonStudy && studyCards.length > 0;
       if (isLessonStudy) {
+        readyBtnState = "idle";
         if (
           typeof payload.lessonSectionIndex === "number" &&
           typeof payload.lessonSectionCount === "number"
