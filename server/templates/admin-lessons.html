@@ -29,18 +29,18 @@
         .item-row input[type="number"] { width:100%; max-width:100%; }
       }
       .muted { color:var(--muted); font-size:.82rem; }
-      .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.58); z-index:100; display:flex; align-items:center; justify-content:center; padding:1rem; }
+      .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.58); z-index:200; display:flex; align-items:center; justify-content:center; padding:1rem; }
       .modal-panel { max-width:36rem; width:100%; max-height:92vh; overflow:auto; }
       table { width:100%; border-collapse:collapse; font-size:.88rem; } th,td { padding:.4rem; border-bottom:1px solid var(--border); text-align:right; }
-      .lesson-create-details { margin:.65rem 0; border:1px solid var(--border); border-radius:.9rem; background:rgba(8,12,28,.55); overflow:hidden; }
+      .lesson-create-details { margin:.65rem 0; border:1px solid var(--border); border-radius:.9rem; background:rgba(8,12,28,.55); }
       .lesson-create-details > summary { cursor:pointer; list-style:none; padding:.65rem .9rem; font-weight:800; color:var(--amber); background:rgba(0,0,0,.22); display:flex; justify-content:space-between; align-items:center; gap:.5rem; user-select:none; }
       .lesson-create-details > summary::-webkit-details-marker { display:none; }
       .lesson-create-details .lesson-caret { opacity:.75; font-size:.72rem; }
       .lesson-create-details .lesson-create-details-inner { padding:.75rem .9rem 1rem; border-top:1px solid rgba(223,187,106,.12); }
-      .lesson-adv-details { margin-top:.55rem; border:1px dashed rgba(223,187,106,.28); border-radius:.65rem; padding:.4rem .55rem .65rem; background:rgba(0,0,0,.18); }
-      .lesson-adv-details > summary { cursor:pointer; font-size:.86rem; color:var(--muted); padding:.2rem 0 .35rem; list-style:none; font-weight:700; }
-      .lesson-adv-details > summary::-webkit-details-marker { display:none; }
-      .lesson-adv-details .lesson-adv-inner { padding-top:.35rem; }
+      .lesson-adv-wrap { margin-top:.55rem; border:1px dashed rgba(223,187,106,.28); border-radius:.65rem; padding:.4rem .55rem .65rem; background:rgba(0,0,0,.18); }
+      .lesson-adv-toggle { width:100%; text-align:right; cursor:pointer; font-size:.86rem; padding:.25rem 0 .4rem; font-weight:700; font-family:inherit; background:none; border:none; color:var(--muted); display:flex; align-items:center; justify-content:space-between; gap:.35rem; }
+      .lesson-adv-toggle:focus-visible { outline:2px solid var(--amber); outline-offset:2px; border-radius:.35rem; }
+      .lesson-adv-inner { padding-top:.35rem; }
       .sec-block { margin:.55rem 0; padding:.55rem .65rem; background:rgba(6,10,22,.45); border:1px solid rgba(223,187,106,.14); border-radius:.75rem; }
       @media (max-width:1100px) { .split { grid-template-columns:1fr; } }
     </style>
@@ -140,9 +140,12 @@
               <label class="muted">الإجابة الصحيحة</label>
               <select id="new-q-correct" aria-label="فهرس الإجابة الصحيحة"></select>
             </div>
-            <details class="lesson-adv-details">
-              <summary>خيارات متقدمة (صعوبة، مذاكرة، أوقات)</summary>
-              <div class="lesson-adv-inner">
+            <div class="lesson-adv-wrap">
+              <button type="button" class="lesson-adv-toggle" id="lesson-adv-toggle" aria-expanded="false" aria-controls="lesson-adv-panel">
+                <span>خيارات متقدمة (صعوبة، مذاكرة، أوقات)</span>
+                <span class="lesson-caret" aria-hidden="true">▼</span>
+              </button>
+              <div class="lesson-adv-inner" id="lesson-adv-panel" hidden>
                 <div class="row" style="margin-top:.35rem">
                   <label class="muted">الصعوبة</label>
                   <select id="new-q-diff">
@@ -160,7 +163,7 @@
                   <input id="new-q-study-ms" type="number" min="2000" max="300000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
                 </div>
               </div>
-            </details>
+            </div>
             <button type="button" class="btn" id="new-q-submit" style="margin-top:.65rem">إضافة السؤال إلى القسم المحدد</button>
           </div>
         </details>
@@ -177,41 +180,41 @@
         <div class="row" style="margin-top:.55rem">
           <button class="btn" id="l-save-items" type="button">حفظ التسلسل</button>
         </div>
+      </div>
+    </div>
 
-        <div id="owned-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="owned-modal-title">
-          <div class="card modal-panel">
-            <strong id="owned-modal-title">تحرير سؤال خاص بالدرس</strong>
-            <p class="muted" style="font-size:.82rem;margin:.35rem 0">التعديل يخص هذا الدرس فقط.</p>
-            <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
-            <textarea id="own-prompt" rows="2" style="width:100%"></textarea>
-            <div class="row" style="margin-top:.45rem">
-              <label class="muted">عدد الخيارات</label>
-              <select id="own-opt-count"><option value="4">4</option><option value="2">2</option></select>
-              <label class="muted">الصعوبة</label>
-              <select id="own-diff">
-                <option value="easy">سهل</option>
-                <option value="medium">متوسط</option>
-                <option value="hard">صعب</option>
-              </select>
-            </div>
-            <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
-            <div style="display:grid;gap:.35rem;margin:.25rem 0">
-              <input id="own-o0" type="text" placeholder="خيار 1" />
-              <input id="own-o1" type="text" placeholder="خيار 2" />
-              <input id="own-o2" type="text" placeholder="خيار 3" />
-              <input id="own-o3" type="text" placeholder="خيار 4" />
-            </div>
-            <div class="row" style="margin-top:.35rem">
-              <label class="muted">الإجابة الصحيحة</label>
-              <select id="own-correct"></select>
-            </div>
-            <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة</label>
-            <textarea id="own-study" rows="2" style="width:100%"></textarea>
-            <div class="row" style="margin-top:.55rem">
-              <button type="button" class="btn" id="own-save">حفظ</button>
-              <button type="button" class="btn btn-secondary" id="own-cancel">إلغاء</button>
-            </div>
-          </div>
+    <div id="owned-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="owned-modal-title">
+      <div class="card modal-panel">
+        <strong id="owned-modal-title">تحرير سؤال خاص بالدرس</strong>
+        <p class="muted" style="font-size:.82rem;margin:.35rem 0">التعديل يخص هذا الدرس فقط.</p>
+        <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
+        <textarea id="own-prompt" rows="2" style="width:100%"></textarea>
+        <div class="row" style="margin-top:.45rem">
+          <label class="muted">عدد الخيارات</label>
+          <select id="own-opt-count"><option value="4">4</option><option value="2">2</option></select>
+          <label class="muted">الصعوبة</label>
+          <select id="own-diff">
+            <option value="easy">سهل</option>
+            <option value="medium">متوسط</option>
+            <option value="hard">صعب</option>
+          </select>
+        </div>
+        <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
+        <div style="display:grid;gap:.35rem;margin:.25rem 0">
+          <input id="own-o0" type="text" placeholder="خيار 1" />
+          <input id="own-o1" type="text" placeholder="خيار 2" />
+          <input id="own-o2" type="text" placeholder="خيار 3" />
+          <input id="own-o3" type="text" placeholder="خيار 4" />
+        </div>
+        <div class="row" style="margin-top:.35rem">
+          <label class="muted">الإجابة الصحيحة</label>
+          <select id="own-correct"></select>
+        </div>
+        <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة</label>
+        <textarea id="own-study" rows="2" style="width:100%"></textarea>
+        <div class="row" style="margin-top:.55rem">
+          <button type="button" class="btn" id="own-save">حفظ</button>
+          <button type="button" class="btn btn-secondary" id="own-cancel">إلغاء</button>
         </div>
       </div>
     </div>
@@ -274,6 +277,15 @@
           fillCorrectSelect(document.getElementById("own-correct"), n);
         }
 
+        function safeSyncNewQForm() {
+          try {
+            if (!document.getElementById("new-q-opt-count") || !document.getElementById("new-q-correct")) return;
+            syncNewQForm();
+          } catch (_) {}
+        }
+
+        let loadDetailToken = 0;
+
         function openOwnedEditor(si, ii) {
           const it = draftSections[si]?.items[ii];
           if (!it || !it.lessonOwned || !it.prompt) return;
@@ -299,16 +311,21 @@
           document.getElementById("own-diff").value = it.difficulty && /^easy|medium|hard$/.test(it.difficulty) ? it.difficulty : "medium";
           document.getElementById("own-study").value = it.studyBody || "";
           const modal = document.getElementById("owned-modal");
+          if (!modal) return;
           modalFocusBefore = document.activeElement;
           modal.hidden = false;
-          setTimeout(function () {
-            document.getElementById("own-prompt").focus();
-          }, 0);
+          requestAnimationFrame(function () {
+            try {
+              const pe = document.getElementById("own-prompt");
+              if (pe && typeof pe.focus === "function") pe.focus();
+            } catch (_) {}
+          });
         }
 
         function closeOwnedEditor() {
           editOwnedTarget = null;
-          document.getElementById("owned-modal").hidden = true;
+          const modal = document.getElementById("owned-modal");
+          if (modal) modal.hidden = true;
           if (modalFocusBefore && typeof modalFocusBefore.focus === "function") {
             try {
               modalFocusBefore.focus();
@@ -319,8 +336,8 @@
 
         document.addEventListener("keydown", function (ev) {
           if (ev.key !== "Escape") return;
-          const modal = document.getElementById("owned-modal");
-          if (!modal.hidden) {
+          const m = document.getElementById("owned-modal");
+          if (m && !m.hidden) {
             closeOwnedEditor();
             ev.preventDefault();
           }
@@ -458,8 +475,11 @@
         }
 
         async function loadDetail(id) {
+          const myTok = ++loadDetailToken;
           try {
+            closeOwnedEditor();
             const d = await api("/api/admin/lessons/" + id, { method: "GET" });
+            if (myTok !== loadDetailToken) return;
             detail = d;
             document.getElementById("editor-card").hidden = false;
             document.getElementById("l-id-label").textContent = "معرّف #" + id;
@@ -497,9 +517,12 @@
               draftSections = [{ titleAr: "", items: [] }];
             }
             addQuestionTargetSection = Math.max(0, draftSections.length - 1);
+            if (myTok !== loadDetailToken) return;
             renderItems();
+            safeSyncNewQForm();
             clearDraftDirty();
           } catch (_) {
+            if (myTok !== loadDetailToken) return;
             if (!msg.classList.contains("err")) {
               setMsg("تعذّر تحميل تفاصيل الدرس (تحقق من الشبكة أو مفتاح الإدارة).", false);
             }
@@ -627,7 +650,19 @@
         }
 
         document.getElementById("new-q-opt-count").addEventListener("change", syncNewQForm);
-        syncNewQForm();
+        safeSyncNewQForm();
+        (function () {
+          const btn = document.getElementById("lesson-adv-toggle");
+          const panel = document.getElementById("lesson-adv-panel");
+          const caret = btn && btn.querySelector(".lesson-caret");
+          if (!btn || !panel) return;
+          btn.addEventListener("click", function () {
+            panel.hidden = !panel.hidden;
+            const expanded = !panel.hidden;
+            btn.setAttribute("aria-expanded", expanded ? "true" : "false");
+            if (caret) caret.textContent = expanded ? "▲" : "▼";
+          });
+        })();
         document.getElementById("own-opt-count").addEventListener("change", syncOwnModalOpts);
 
         document.getElementById("new-q-submit").addEventListener("click", async () => {
@@ -696,7 +731,7 @@
 
         document.getElementById("own-cancel").addEventListener("click", closeOwnedEditor);
         document.getElementById("owned-modal").addEventListener("click", function (ev) {
-          if (ev.target.id === "owned-modal") closeOwnedEditor();
+          if (ev.target === ev.currentTarget) closeOwnedEditor();
         });
         document.getElementById("own-save").addEventListener("click", async () => {
           if (!editOwnedTarget || !selectedLessonId) return;
@@ -797,6 +832,7 @@
           if (!selectedLessonId || !confirm("حذف هذا الدرس نهائياً؟")) return;
           try {
             await api("/api/admin/lessons/" + selectedLessonId, { method: "DELETE" });
+            closeOwnedEditor();
             selectedLessonId = null;
             detail = null;
             clearDraftDirty();
