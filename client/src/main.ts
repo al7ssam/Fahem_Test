@@ -178,7 +178,12 @@ let lessonBrowseLessons: Array<{
   itemCount: number;
   category: { id: number; nameAr: string; icon: string } | null;
 }> = [];
-let lessonBrowseFilterCategoryId: number | null = null;
+/** تصفّح الدروس: تصنيفات ← قائمة دروس ← مركز درس */
+type LessonBrowseStep = "categories" | "lessons" | "lesson_hub";
+let lessonBrowseStep: LessonBrowseStep = "categories";
+/** في خطوة `lessons`: `null` = كل الدروس، `LESSON_BROWSE_UNCATEGORIZED` = بلا تصنيف، وإلا `id` التصنيف */
+let lessonBrowseSelectedCategoryId: number | null = null;
+const LESSON_BROWSE_UNCATEGORIZED = -1;
 let lessonBrowseMsg = "";
 let lessonPlayback: LessonPlaybackPayload | null = null;
 let lessonStudyQueue: Array<{ body: string; ms: number }> = [];
@@ -528,6 +533,8 @@ function returnToHomeFromSearch(): void {
   selectedSubcategoryKey = null;
   selectedSubcategoryLabel = null;
   selectedLessonMatchId = null;
+  lessonBrowseStep = "categories";
+  lessonBrowseSelectedCategoryId = null;
   lessonMatchStudyNav = false;
   lessonMatchStudyCardIndex = 0;
   lastPrivateRoomCode = null;
@@ -743,7 +750,8 @@ function render(): void {
           if (b.dataset.flow === "lessons") {
             err.textContent = "";
             lessonBrowseMsg = "جاري تحميل الدروس…";
-            lessonBrowseFilterCategoryId = null;
+            lessonBrowseStep = "categories";
+            lessonBrowseSelectedCategoryId = null;
             selectedLessonMatchId = null;
             phase = "lesson_menu";
             render();
@@ -1007,17 +1015,111 @@ function render(): void {
   }
 
   if (phase === "lesson_menu") {
-    const catOptions =
-      `<option value="">كل التصنيفات</option>` +
-      lessonBrowseCategories
-        .map((c) => `<option value="${c.id}">${escapeHtml(c.nameAr)}</option>`)
+    if (lessonBrowseStep === "lesson_hub" && selectedLessonMatchId == null) {
+      lessonBrowseStep = "categories";
+      lessonBrowseMsg = "";
+    }
+    const filtered = lessonBrowseFilteredLessons();
+    const sortedCats = lessonBrowseSortedCategories();
+    const hubLesson =
+      selectedLessonMatchId != null
+        ? lessonBrowseLessons.find((x) => x.id === selectedLessonMatchId)
+        : undefined;
+
+    const categoriesBlock = (() => {
+      const uncatTile = lessonBrowseHasUncategorized()
+        ? `<button type="button" class="mode-option-btn" data-lesson-uncat="1">
+            <span class="mode-option-icon" aria-hidden="true">📂</span>
+            <span class="mode-option-title">دروس بدون تصنيف</span>
+            <span class="mode-option-desc">عرض الدروس غير المرتبطة بتصنيف</span>
+          </button>`
+        : "";
+      const catTiles = sortedCats
+        .map(
+          (c) => `<button type="button" class="mode-option-btn" data-cat-id="${c.id}">
+            <span class="mode-option-icon" aria-hidden="true">${escapeHtml(c.icon || "📖")}</span>
+            <span class="mode-option-title">${escapeHtml(c.nameAr)}</span>
+          </button>`,
+        )
         .join("");
-    const filtered =
-      lessonBrowseFilterCategoryId == null
-        ? lessonBrowseLessons
-        : lessonBrowseLessons.filter(
-            (l) => l.category?.id === lessonBrowseFilterCategoryId,
-          );
+      return `
+        <p class="text-slate-300 text-sm text-right m-0">اختر تصنيفاً لعرض الدروس، أو تصفّح كل الدروس.</p>
+        <div class="mode-picker-grid lesson-picker-grid flex-1 overflow-y-auto min-h-0" role="group" aria-label="تصنيفات الدروس">
+          <button type="button" class="mode-option-btn" data-lesson-all="1">
+            <span class="mode-option-icon" aria-hidden="true">📚</span>
+            <span class="mode-option-title">جميع الدروس</span>
+            <span class="mode-option-desc">كل الدروس المنشورة</span>
+          </button>
+          ${uncatTile}
+          ${catTiles}
+        </div>`;
+    })();
+
+    const lessonsBlock = (() => {
+      const label = lessonBrowseCategoryLabel();
+      const lessonTiles =
+        filtered.length === 0
+          ? `<p class="text-slate-400 text-center py-10 m-0">لا توجد دروس في هذا العرض.</p>`
+          : `<div class="mode-picker-grid lesson-picker-grid flex-1 overflow-y-auto min-h-0 py-1" role="group" aria-label="قائمة الدروس">
+              ${filtered
+                .map(
+                  (l) => `<button type="button" class="mode-option-btn" data-pick-lesson="${l.id}">
+                <span class="mode-option-icon" aria-hidden="true">${escapeHtml(l.category?.icon ?? "📖")}</span>
+                <span class="mode-option-title">${escapeHtml(l.title)}</span>
+                <span class="mode-option-desc">${l.itemCount} سؤالاً</span>
+              </button>`,
+                )
+                .join("")}
+            </div>`;
+      return `
+        <div class="flex items-center gap-2 flex-wrap">
+          <button type="button" id="lesson-back-categories" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">تصنيفات</button>
+        </div>
+        <h2 class="text-lg font-extrabold text-amber-300 text-right m-0">${escapeHtml(label)}</h2>
+        ${lessonTiles}`;
+    })();
+
+    const hubTitle = escapeHtml(hubLesson?.title ?? "الدرس");
+    const hubDescRaw = (hubLesson?.description ?? "").trim();
+    const hubDesc =
+      hubDescRaw.length > 0
+        ? `<p class="text-slate-300 text-sm text-right m-0 whitespace-pre-wrap">${escapeHtml(hubDescRaw)}</p>`
+        : `<p class="text-slate-400 text-sm text-right m-0">${hubLesson?.itemCount ?? 0} سؤالاً في هذا الدرس.</p>`;
+
+    const hubBlock =
+      lessonBrowseStep === "lesson_hub"
+        ? `
+        <div class="flex items-center gap-2 flex-wrap">
+          <button type="button" id="lesson-back-lessons" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">قائمة الدروس</button>
+        </div>
+        <div class="text-right space-y-1">
+          <h2 class="text-xl font-extrabold text-amber-300 m-0">${hubTitle}</h2>
+          ${hubDesc}
+        </div>
+        <p id="lesson-browse-msg" class="text-amber-200 text-sm min-h-[1.25rem] m-0">${escapeHtml(lessonBrowseMsg)}</p>
+        <div class="app-card p-4 space-y-3 shrink-0">
+          <p class="text-slate-400 text-xs text-right m-0">يُستخدم اسمك من الشاشة الرئيسية للتحدي والغرفة. إن لم يكن معرّفاً، ارجع للرئيسية وأدخل الاسم ثم عد إلى الدروس.</p>
+          <button type="button" id="lesson-menu-rest" class="ui-btn ui-btn--primary w-full py-3">التعلم الفردي</button>
+          <button type="button" id="lesson-menu-public" class="ui-btn ui-btn--cta w-full py-3">ابدأ التحدي</button>
+          <button type="button" id="lesson-menu-create-private" class="ui-btn ui-btn--ghost w-full py-3">إنشاء غرفة خاصة</button>
+          <div class="flex gap-2">
+            <input id="lesson-menu-room-code" type="text" placeholder="كود الغرفة" class="app-input w-full px-3 py-2 text-right" />
+            <button type="button" id="lesson-menu-join-private" class="ui-btn ui-btn--cta px-4 py-2 shrink-0">انضمام</button>
+          </div>
+          <p id="lesson-menu-err" class="text-red-400 text-sm min-h-[1.25rem] m-0"></p>
+          <button type="button" id="lesson-menu-goto-name" class="ui-btn ui-btn--ghost w-full py-2 text-sm">الذهاب للرئيسية لإدخال الاسم</button>
+        </div>`
+        : "";
+
+    const stepIntro =
+      lessonBrowseStep === "categories"
+        ? categoriesBlock
+        : lessonBrowseStep === "lessons"
+          ? lessonsBlock
+          : hubBlock;
+
+    const showBrowseMsgInHub = lessonBrowseStep !== "lesson_hub";
+
     app.append(
       el(`
         <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4">
@@ -1025,46 +1127,12 @@ function render(): void {
             <button type="button" id="lesson-back-home" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">الرئيسية</button>
             <h1 class="text-xl font-extrabold text-amber-300">دروس منظمة</h1>
           </div>
-          <p class="text-slate-300 text-sm text-right m-0">اختر درساً ثم طريقة اللعب: تعلّم فردي محلياً، أو تحدٍ عام، أو غرفة خاصة.</p>
-          <div class="flex flex-wrap gap-2 items-center">
-            <label class="text-slate-400 text-sm">التصنيف</label>
-            <select id="lesson-cat-filter" class="app-input flex-1 min-w-[160px] px-3 py-2 text-right">${catOptions}</select>
-          </div>
-          <p id="lesson-browse-msg" class="text-amber-200 text-sm min-h-[1.25rem] m-0">${escapeHtml(lessonBrowseMsg)}</p>
-          <div id="lesson-list-root" class="flex flex-col gap-2 flex-1 overflow-y-auto max-h-[40vh] sm:max-h-none"></div>
-          <div class="app-card p-4 space-y-3 shrink-0">
-            <label class="block text-right text-sm text-slate-400">اسمك في اللعبة (للتحدي أو الغرفة)</label>
-            <input id="lesson-menu-name" maxlength="32" type="text" placeholder="مثال: سارة" class="app-input w-full px-4 py-3 text-right text-lg" />
-            <button type="button" id="lesson-menu-rest" class="ui-btn ui-btn--primary w-full py-3">التعلم الفردي</button>
-            <button type="button" id="lesson-menu-public" class="ui-btn ui-btn--cta w-full py-3">ابدأ التحدي</button>
-            <button type="button" id="lesson-menu-create-private" class="ui-btn ui-btn--ghost w-full py-3">إنشاء غرفة خاصة</button>
-            <div class="flex gap-2">
-              <input id="lesson-menu-room-code" type="text" placeholder="كود الغرفة" class="app-input w-full px-3 py-2 text-right" />
-              <button type="button" id="lesson-menu-join-private" class="ui-btn ui-btn--cta px-4 py-2 shrink-0">انضمام</button>
-            </div>
-            <p id="lesson-menu-err" class="text-red-400 text-sm min-h-[1.25rem] m-0"></p>
-          </div>
+          ${showBrowseMsgInHub ? `<p id="lesson-browse-msg" class="text-amber-200 text-sm min-h-[1.25rem] m-0">${escapeHtml(lessonBrowseMsg)}</p>` : ""}
+          <div class="flex flex-col gap-3 flex-1 min-h-0">${stepIntro}</div>
         </div>
       `),
     );
-    const sel = app.querySelector<HTMLSelectElement>("#lesson-cat-filter");
-    if (sel) {
-      sel.value =
-        lessonBrowseFilterCategoryId != null ? String(lessonBrowseFilterCategoryId) : "";
-      sel.addEventListener("change", () => {
-        const v = sel.value.trim();
-        lessonBrowseFilterCategoryId = v ? Number(v) : null;
-        render();
-      });
-    }
-    const nameMenuInput = app.querySelector<HTMLInputElement>("#lesson-menu-name");
-    const storedNm = getStoredPlayerName();
-    if (nameMenuInput && (playerNameDraft || storedNm)) {
-      nameMenuInput.value = playerNameDraft || storedNm;
-    }
-    nameMenuInput?.addEventListener("input", () => {
-      if (nameMenuInput) playerNameDraft = nameMenuInput.value;
-    });
+
     const roomMenuInput = app.querySelector<HTMLInputElement>("#lesson-menu-room-code");
     if (roomMenuInput) {
       roomMenuInput.value = pendingJoinRoomCode;
@@ -1073,55 +1141,96 @@ function render(): void {
       });
     }
     const menuErr = app.querySelector<HTMLParagraphElement>("#lesson-menu-err");
-    const root = app.querySelector<HTMLDivElement>("#lesson-list-root");
-    if (root) {
-      if (filtered.length === 0) {
-        root.innerHTML =
-          `<p class="text-slate-400 text-center py-8">لا توجد دروس منشورة حالياً.</p>`;
-      } else {
-        filtered.forEach((l) => {
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className =
-            "mode-option-btn text-right w-full flex flex-col items-stretch gap-1 py-3 px-4";
-          if (selectedLessonMatchId === l.id) {
-            btn.classList.add("mode-option-btn--selected");
-          }
-          const catLabel = l.category
-            ? `${l.category.icon} ${l.category.nameAr}`
-            : "بدون تصنيف";
-          btn.innerHTML = `
-            <span class="mode-option-title">${escapeHtml(l.title)}</span>
-            <span class="mode-option-desc text-slate-400">${escapeHtml(catLabel)} — ${l.itemCount} سؤالاً</span>
-          `;
-          btn.addEventListener("click", () => {
-            selectedLessonMatchId = l.id;
-            render();
-          });
-          root.appendChild(btn);
-        });
-      }
-    }
+
+    app.querySelector("#lesson-back-home")?.addEventListener("click", () => {
+      lessonBrowseMsg = "";
+      selectedLessonMatchId = null;
+      lessonBrowseStep = "categories";
+      lessonBrowseSelectedCategoryId = null;
+      phase = "name";
+      render();
+    });
+
+    app.querySelector("[data-lesson-all]")?.addEventListener("click", () => {
+      lessonBrowseSelectedCategoryId = null;
+      lessonBrowseStep = "lessons";
+      lessonBrowseMsg = "";
+      render();
+    });
+    app.querySelector("[data-lesson-uncat]")?.addEventListener("click", () => {
+      lessonBrowseSelectedCategoryId = LESSON_BROWSE_UNCATEGORIZED;
+      lessonBrowseStep = "lessons";
+      lessonBrowseMsg = "";
+      render();
+    });
+    app.querySelectorAll("[data-cat-id]").forEach((node) => {
+      node.addEventListener("click", () => {
+        const raw = (node as HTMLElement).dataset.catId;
+        const id = raw ? Number(raw) : NaN;
+        if (Number.isInteger(id) && id > 0) {
+          lessonBrowseSelectedCategoryId = id;
+          lessonBrowseStep = "lessons";
+          lessonBrowseMsg = "";
+          render();
+        }
+      });
+    });
+
+    app.querySelector("#lesson-back-categories")?.addEventListener("click", () => {
+      lessonBrowseStep = "categories";
+      lessonBrowseMsg = "";
+      render();
+    });
+
+    app.querySelectorAll("[data-pick-lesson]").forEach((node) => {
+      node.addEventListener("click", () => {
+        const raw = (node as HTMLElement).dataset.pickLesson;
+        const id = raw ? Number(raw) : NaN;
+        if (Number.isInteger(id) && id > 0) {
+          selectedLessonMatchId = id;
+          lessonBrowseStep = "lesson_hub";
+          lessonBrowseMsg = "";
+          render();
+        }
+      });
+    });
+
+    app.querySelector("#lesson-back-lessons")?.addEventListener("click", () => {
+      lessonBrowseStep = "lessons";
+      selectedLessonMatchId = null;
+      lessonBrowseMsg = "";
+      render();
+    });
+
     const clearMenuErr = (): void => {
       if (menuErr) menuErr.textContent = "";
     };
+
+    app.querySelector("#lesson-menu-goto-name")?.addEventListener("click", () => {
+      lessonBrowseMsg = "";
+      phase = "name";
+      nameFlowStep = "mode";
+      render();
+    });
+
     app.querySelector("#lesson-menu-rest")?.addEventListener("click", () => {
       clearMenuErr();
       if (!selectedLessonMatchId) {
-        if (menuErr) menuErr.textContent = "اختر درساً من القائمة.";
+        if (menuErr) menuErr.textContent = "تعذر تحديد الدرس.";
         return;
       }
       void openLessonById(selectedLessonMatchId);
     });
     app.querySelector("#lesson-menu-public")?.addEventListener("click", () => {
       clearMenuErr();
-      const name = (nameMenuInput?.value ?? "").trim();
+      const name = lessonMenuPlayerName();
       if (!selectedLessonMatchId) {
-        if (menuErr) menuErr.textContent = "اختر درساً من القائمة.";
+        if (menuErr) menuErr.textContent = "تعذر تحديد الدرس.";
         return;
       }
       if (!name) {
-        if (menuErr) menuErr.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        if (menuErr)
+          menuErr.textContent = "لم يُعرَّف اسم اللاعب. استخدم زر «الذهاب للرئيسية لإدخال الاسم».";
         return;
       }
       storePlayerName(name);
@@ -1135,13 +1244,14 @@ function render(): void {
     });
     app.querySelector("#lesson-menu-create-private")?.addEventListener("click", () => {
       clearMenuErr();
-      const name = (nameMenuInput?.value ?? "").trim();
+      const name = lessonMenuPlayerName();
       if (!name) {
-        if (menuErr) menuErr.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        if (menuErr)
+          menuErr.textContent = "لم يُعرَّف اسم اللاعب. استخدم زر «الذهاب للرئيسية لإدخال الاسم».";
         return;
       }
       if (!selectedLessonMatchId) {
-        if (menuErr) menuErr.textContent = "اختر درساً قبل إنشاء الغرفة.";
+        if (menuErr) menuErr.textContent = "تعذر تحديد الدرس.";
         return;
       }
       storePlayerName(name);
@@ -1167,10 +1277,11 @@ function render(): void {
     });
     app.querySelector("#lesson-menu-join-private")?.addEventListener("click", () => {
       clearMenuErr();
-      const name = (nameMenuInput?.value ?? "").trim();
+      const name = lessonMenuPlayerName();
       const roomCode = (roomMenuInput?.value || pendingJoinRoomCode).trim().toUpperCase();
       if (!name) {
-        if (menuErr) menuErr.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        if (menuErr)
+          menuErr.textContent = "لم يُعرَّف اسم اللاعب. استخدم زر «الذهاب للرئيسية لإدخال الاسم».";
         return;
       }
       if (!roomCode) {
@@ -1191,12 +1302,6 @@ function render(): void {
       lobbyNotice = "جاري الانضمام للغرفة الخاصة...";
       render();
       connectSocket(name, "lesson", null, "mix", "private_join", roomCode);
-    });
-    app.querySelector("#lesson-back-home")?.addEventListener("click", () => {
-      lessonBrowseMsg = "";
-      selectedLessonMatchId = null;
-      phase = "name";
-      render();
     });
     return;
   }
@@ -1223,9 +1328,7 @@ function render(): void {
       `),
     );
     const exit = () => {
-      clearTimer();
-      resetLessonState();
-      phase = "lesson_menu";
+      exitLessonPlaybackToHub();
       void fetchLessonBrowse()
         .then(() => {
           render();
@@ -1321,9 +1424,7 @@ function render(): void {
       });
     }
     app.querySelector("#lesson-quiz-exit")?.addEventListener("click", () => {
-      clearTimer();
-      resetLessonState();
-      phase = "lesson_menu";
+      exitLessonPlaybackToHub();
       void fetchLessonBrowse()
         .then(() => render())
         .catch(() => render());
@@ -1353,6 +1454,8 @@ function render(): void {
     });
     app.querySelector("#lesson-done-back")?.addEventListener("click", () => {
       resetLessonState();
+      lessonBrowseStep = "lessons";
+      selectedLessonMatchId = null;
       phase = "lesson_menu";
       void fetchLessonBrowse()
         .then(() => render())
@@ -1360,6 +1463,9 @@ function render(): void {
     });
     app.querySelector("#lesson-done-home")?.addEventListener("click", () => {
       resetLessonState();
+      lessonBrowseStep = "categories";
+      lessonBrowseSelectedCategoryId = null;
+      selectedLessonMatchId = null;
       phase = "name";
       render();
     });
@@ -2137,6 +2243,49 @@ function startLessonStudyForCurrentSection(): void {
   }
 }
 
+function lessonMenuPlayerName(): string {
+  return (playerNameDraft || getStoredPlayerName() || "").trim();
+}
+
+function lessonBrowseSortedCategories(): typeof lessonBrowseCategories {
+  return [...lessonBrowseCategories].sort((a, b) => {
+    const ap = a.parentId == null ? 0 : 1;
+    const bp = b.parentId == null ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.id - b.id;
+  });
+}
+
+function lessonBrowseHasUncategorized(): boolean {
+  return lessonBrowseLessons.some((l) => l.category == null);
+}
+
+function lessonBrowseFilteredLessons(): typeof lessonBrowseLessons {
+  if (lessonBrowseSelectedCategoryId === LESSON_BROWSE_UNCATEGORIZED) {
+    return lessonBrowseLessons.filter((l) => l.category == null);
+  }
+  if (lessonBrowseSelectedCategoryId != null && lessonBrowseSelectedCategoryId > 0) {
+    return lessonBrowseLessons.filter((l) => l.category?.id === lessonBrowseSelectedCategoryId);
+  }
+  return lessonBrowseLessons;
+}
+
+function lessonBrowseCategoryLabel(): string {
+  if (lessonBrowseSelectedCategoryId === LESSON_BROWSE_UNCATEGORIZED) return "دروس بدون تصنيف";
+  if (lessonBrowseSelectedCategoryId != null && lessonBrowseSelectedCategoryId > 0) {
+    const c = lessonBrowseCategories.find((x) => x.id === lessonBrowseSelectedCategoryId);
+    return c?.nameAr ?? "التصنيف";
+  }
+  return "جميع الدروس";
+}
+
+function exitLessonPlaybackToHub(): void {
+  clearTimer();
+  resetLessonState();
+  lessonBrowseStep = "lesson_hub";
+  phase = "lesson_menu";
+}
+
 async function fetchLessonBrowse(): Promise<void> {
   lessonBrowseMsg = "";
   const [cRes, lRes] = await Promise.all([
@@ -2229,6 +2378,8 @@ function lessonRestReviewItems(): Array<{
 }
 
 async function openLessonById(id: number): Promise<void> {
+  selectedLessonMatchId = id;
+  lessonBrowseStep = "lesson_hub";
   lessonBrowseMsg = "جاري تحميل الدرس…";
   phase = "lesson_menu";
   render();
