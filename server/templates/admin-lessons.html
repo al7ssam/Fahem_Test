@@ -85,6 +85,74 @@
         <div class="msg" id="msg" aria-live="polite"></div>
       </div>
 
+      <details class="card collapsible-details" style="margin-top:.65rem" id="import-json-panel" open>
+        <summary class="collapsible-summary">
+          <strong>استيراد درس كامل من JSON</strong>
+          <span class="collapsible-caret" aria-hidden="true">▼</span>
+        </summary>
+        <div class="collapsible-panel-body">
+          <p class="muted" style="margin:0 0 .5rem;font-size:.82rem">
+            الحقول الزمنية بالمللي ثانية (مثل 15000 = 15 ثانية). لا يُضمَّن تصنيف الدرس — عيّنه يدوياً من حقل التصنيف بعد الإنشاء.
+          </p>
+          <div class="row" style="margin-bottom:.35rem">
+            <label class="muted" style="font-size:.82rem">ملف JSON</label>
+            <input type="file" id="import-json-file" accept="application/json,.json" style="flex:1;min-width:12rem" />
+          </div>
+          <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">محتوى JSON</label>
+          <textarea id="import-json-text" rows="10" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:.78rem;line-height:1.35" placeholder='{"lesson":{"title":"…","defaultAnswerMs":15000,"defaultStudyCardMs":10000,"sortOrder":0},"sections":[{"titleAr":"القسم 1","studyPhaseMs":60000,"items":[…]}]}'></textarea>
+          <div class="row" style="margin-top:.55rem">
+            <button type="button" class="btn" id="import-json-preview">معاينة الدرس</button>
+            <button type="button" class="btn btn-secondary" id="import-json-commit">إضافة الدرس</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="card collapsible-details" style="margin-top:.55rem" id="ai-prompt-panel" open>
+        <summary class="collapsible-summary">
+          <strong>برومبت لإنشاء درس (ذكاء اصطناعي)</strong>
+          <span class="collapsible-caret" aria-hidden="true">▼</span>
+        </summary>
+        <div class="collapsible-panel-body">
+          <p class="muted" style="margin:0 0 .45rem;font-size:.82rem">
+            املأ المعطيات ثم انسخ البرومبت إلى أداة الذكاء الاصطناعي؛ الصق الناتج JSON في الكتلة أعلاه. للأسئلة لكل قسم إما رقم موحّد أو مصفوفة JSON مثل <code>[3,4,2]</code>.
+          </p>
+          <div class="row" style="align-items:end">
+            <div>
+              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">عدد الأقسام</label>
+              <input type="number" id="ai-sections" min="1" max="20" value="3" style="width:6rem" />
+            </div>
+            <div>
+              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">أسئلة/قسم (موحّد)</label>
+              <input type="number" id="ai-q-same" min="1" max="50" value="3" style="width:6rem" />
+            </div>
+            <div style="flex:1;min-width:10rem">
+              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">أو مصفوفة أسئلة لكل قسم (JSON)</label>
+              <input type="text" id="ai-q-list" placeholder='مثال: [3,3,4]' style="width:100%" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:.45rem;align-items:end">
+            <div>
+              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">وقت الإجابة الافتراضي (ثانية)</label>
+              <input type="number" id="ai-answer-sec" min="3" max="120" step="0.5" value="15" style="width:6rem" />
+            </div>
+            <div>
+              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">زمن مذاكرة القسم (ثانية، موحّد)</label>
+              <input type="number" id="ai-study-sec" min="2" max="300" step="0.5" value="60" style="width:7rem" />
+            </div>
+            <div style="flex:1;min-width:10rem">
+              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">أو زمن مذاكرة لكل قسم (ثوانٍ، JSON)</label>
+              <input type="text" id="ai-study-list" placeholder='مثال: [60,90,45]' style="width:100%" />
+            </div>
+          </div>
+          <label class="muted" style="display:block;margin:.45rem 0 .2rem;font-size:.82rem">موضوع الدرس / الجمهور / المنهاج (اختياري)</label>
+          <textarea id="ai-topic" rows="2" style="width:100%" placeholder="مثال: قواعد النحو للصف الثاني ثانوي"></textarea>
+          <div class="row" style="margin-top:.55rem">
+            <button type="button" class="btn" id="ai-copy-prompt">نسخ البرومبت</button>
+            <button type="button" class="btn btn-secondary" id="ai-copy-template">نسخ قالب JSON فارغ</button>
+          </div>
+        </div>
+      </details>
+
       <div class="split">
         <div class="card split-col-a">
           <strong>تصنيفات الدروس</strong>
@@ -893,6 +961,193 @@
             renderItems();
           } catch (_) {}
         });
+
+        const FAHEM_ADMIN_PREVIEW_KEY = "fahem_admin_lesson_preview_v1";
+
+        function parseImportJsonFromUI() {
+          const raw = document.getElementById("import-json-text").value.trim();
+          if (!raw) {
+            setMsg("الصق JSON أو اختر ملفاً.", false);
+            throw new Error("empty_json");
+          }
+          try {
+            return JSON.parse(raw);
+          } catch (_e) {
+            setMsg("JSON غير صالح (خطأ في الصياغة).", false);
+            throw new Error("bad_json");
+          }
+        }
+
+        document.getElementById("import-json-file").addEventListener("change", function (ev) {
+          const input = ev.target;
+          const f = input.files && input.files[0];
+          if (!f) return;
+          const reader = new FileReader();
+          reader.onload = function () {
+            document.getElementById("import-json-text").value = String(reader.result || "");
+            setMsg("تم تحميل الملف إلى المحرر.", true);
+          };
+          reader.readAsText(f, "utf-8");
+          input.value = "";
+        });
+
+        document.getElementById("import-json-preview").onclick = async function () {
+          let body;
+          try {
+            body = parseImportJsonFromUI();
+          } catch (_) {
+            return;
+          }
+          try {
+            const data = await api("/api/admin/lessons/import-preview", {
+              method: "POST",
+              body: JSON.stringify(body),
+            });
+            if (!data.lesson) {
+              setMsg("لم تُرجع المعاينة بيانات.", false);
+              return;
+            }
+            sessionStorage.setItem(FAHEM_ADMIN_PREVIEW_KEY, JSON.stringify(data.lesson));
+            window.open("/?lessonPreview=1", "_blank", "noopener,noreferrer");
+            setMsg("فُتحت المعاينة في نافذة جديدة.", true);
+          } catch (_) {}
+        };
+
+        document.getElementById("import-json-commit").onclick = async function () {
+          let body;
+          try {
+            body = parseImportJsonFromUI();
+          } catch (_) {
+            return;
+          }
+          if (!window.confirm("إضافة هذا الدرس إلى قاعدة البيانات؟ سيُنشأ بدون تصنيف؛ يمكنك تعيين التصنيف من محرر الدرس لاحقاً.")) return;
+          try {
+            const data = await api("/api/admin/lessons/import-commit", {
+              method: "POST",
+              body: JSON.stringify(body),
+            });
+            selectedLessonId = data.id;
+            setMsg("تم إنشاء الدرس #" + data.id + ". اختر التصنيف وحفظ بيانات الدرس عند الحاجة.", true);
+            await loadAll();
+            await loadDetail(data.id);
+            document.getElementById("editor-card").hidden = false;
+          } catch (_) {}
+        };
+
+        function buildAiLessonPrompt() {
+          var nSec = Math.min(20, Math.max(1, parseInt(document.getElementById("ai-sections").value, 10) || 3));
+          var qSameEl = document.getElementById("ai-q-same").value.trim();
+          var qSame = Math.min(50, Math.max(1, parseInt(qSameEl, 10) || 3));
+          var qListRaw = document.getElementById("ai-q-list").value.trim();
+          var ansSec = parseFloat(document.getElementById("ai-answer-sec").value);
+          if (!Number.isFinite(ansSec)) ansSec = 15;
+          ansSec = Math.min(120, Math.max(3, ansSec));
+          var studySameEl = document.getElementById("ai-study-sec").value.trim();
+          var studySec = parseFloat(studySameEl);
+          if (!Number.isFinite(studySec)) studySec = 60;
+          studySec = Math.min(300, Math.max(2, studySec));
+          var studyListRaw = document.getElementById("ai-study-list").value.trim();
+          var topic = document.getElementById("ai-topic").value.trim();
+
+          var defaultAnswerMs = Math.round(ansSec * 1000);
+          var studyPhaseMsUnified = Math.round(studySec * 1000);
+
+          var qDesc = qListRaw
+            ? "عدد الأسئلة في كل قسم يكون بالترتيب حسب مصفوفة JSON يكون طولها " +
+              nSec +
+              " (مثال للشكل: [3,4,2]). القيمة المُدخلة: " +
+              qListRaw
+            : "عدد الأسئلة في كل قسم موحّد: " + qSame + " أسئلة لكل من الأقسام الـ " + nSec;
+
+          var studyDesc = studyListRaw
+            ? "حقل studyPhaseMs لكل قسم بالمللي ثانية، بالترتيب، مصفوفة بطول " +
+              nSec +
+              " (تحويل الثواني إلى مللي: ثانية × 1000). مثال للشكل: [60000,90000]. القيمة المُدخلة: " +
+              studyListRaw
+            : "حقل studyPhaseMs لكل قسم يمكن ضبطه على نفس القيمة بالمللي ثانية: " +
+              studyPhaseMsUnified +
+              " (أي " +
+              studySec +
+              " ثانية) لجميع الأقسام، أو تخصيص كل قسم إن رغبت.";
+
+          var topicLine = topic ? "\nسياق الموضوع والجمهور:\n" + topic + "\n" : "";
+
+          return (
+            "أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية. أخرج JSON صالحاً فقط، من سطر واحد أو متعدد، بدون شرح قبله أو بعده وبدون Markdown.\n\n" +
+            "المطلوب هيكل الجذر:\n" +
+            "- lesson: title (نص)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح مللي ثانية)، defaultStudyCardMs (عدد صحيح مللي ثانية)، sortOrder (عدد صحيح).\n" +
+            "- sections: مصفوفة طولها " +
+            nSec +
+            "؛ كل عنصر يحتوي titleAr (عنوان القسم)، studyPhaseMs (عدد مللي ثانية لمجموع زمن بطاقات المذاكرة للقسم)، items: مصفوفة أسئلة.\n" +
+            "لا تُضمّن أي حقل لتصنيف الدرس (lessonCategoryId) في JSON.\n\n" +
+            "كل سؤال داخل items يجب أن يحتوي:\n" +
+            "prompt، options (مصفوفة من 2 أو 4 نصوص)، correctIndex (0..طول-1)، difficulty: easy|medium|hard، studyBody (نص بطاقة المذاكرة، مطلوب غير فارغ)، answerMs اختياري (مللي ثانية لهذا السؤال أو null للاعتماد على defaultAnswerMs)، subcategoryKey اختياري (مثل general_default).\n\n" +
+            "قيود المعطيات لهذا الطلب:\n" +
+            "- عدد الأقسام: " +
+            nSec +
+            ".\n- " +
+            qDesc +
+            ".\n- الوقت الافتراضي للإجابة للدرس (defaultAnswerMs): " +
+            defaultAnswerMs +
+            " مللي ثانية (" +
+            ansSec +
+            " ثانية).\n- defaultStudyCardMs للدرس اقترح قيمة منطيقية بالمللي (غالباً ما يُنسّق مع بطاقات قصيرة).\n- " +
+            studyDesc +
+            topicLine +
+            "\nاملأ جميع النصوص التعليمية بالعربية الفصحى أو العربية المناسبة للجمهور. تأكد أن كل قسم يحتوي على الأقل سؤالاً واحداً وأن الخيارات والإجابة الصحيحة متسقة."
+          );
+        }
+
+        function buildEmptyImportTemplate() {
+          return JSON.stringify(
+            {
+              lesson: {
+                title: "عنوان الدرس",
+                slug: null,
+                description: "",
+                defaultAnswerMs: 15000,
+                defaultStudyCardMs: 10000,
+                sortOrder: 0,
+              },
+              sections: [
+                {
+                  titleAr: "القسم الأول",
+                  studyPhaseMs: 60000,
+                  items: [
+                    {
+                      prompt: "صِغ سؤالاً هنا؟",
+                      options: ["خيار 1", "خيار 2", "خيار 3", "خيار 4"],
+                      correctIndex: 0,
+                      difficulty: "medium",
+                      studyBody: "نص بطاقة المذاكرة المرتبطة بهذا السؤال.",
+                      answerMs: null,
+                      subcategoryKey: "general_default",
+                    },
+                  ],
+                },
+              ],
+            },
+            null,
+            2,
+          );
+        }
+
+        async function copyTextToClipboard(text) {
+          try {
+            await navigator.clipboard.writeText(text);
+            setMsg("تم النسخ.", true);
+          } catch (_) {
+            setMsg("تعذر النسخ — انسخ يدوياً من المحرر.", false);
+          }
+        }
+
+        document.getElementById("ai-copy-prompt").onclick = function () {
+          void copyTextToClipboard(buildAiLessonPrompt());
+        };
+
+        document.getElementById("ai-copy-template").onclick = function () {
+          void copyTextToClipboard(buildEmptyImportTemplate());
+        };
 
         document.getElementById("load-all").onclick = () => void loadAll();
 

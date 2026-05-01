@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import type { QuestionRow, StudyPhaseCardPayload } from "./questions";
 import { getPool } from "./pool";
 
@@ -515,6 +515,111 @@ function legacySectionStudyPhaseMs(
   return clampResolvedStudyPhaseMs(sum > 0 ? sum : defaultStudyCardMs);
 }
 
+/** مسودة استيراد درس من JSON (بدون تصنيف). */
+export type LessonImportQuestionInput = {
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+  difficulty: string;
+  studyBody: string;
+  /** مللي ثانية لكل عنصر في الدرس؛ null = استخدام defaultAnswerMs للدرس */
+  answerMs: number | null;
+  subcategoryKey: string;
+};
+
+export type LessonImportSectionInput = {
+  titleAr: string | null;
+  studyPhaseMs: number | null;
+  items: LessonImportQuestionInput[];
+};
+
+export type LessonImportMetaInput = {
+  title: string;
+  slug: string | null;
+  description: string | null;
+  defaultAnswerMs: number;
+  defaultStudyCardMs: number;
+  sortOrder: number;
+};
+
+/**
+ * يبني حمولة التشغيل كما في قاعدة البيانات، لمعاينة الاستيراد أو للاختبار.
+ * معرفات الأسئلة سالبة متناقصة ما لم يُمرَّر مُخصّص.
+ */
+export function buildPlaybackFromImportDraft(
+  meta: LessonImportMetaInput,
+  sectionInputs: LessonImportSectionInput[],
+  options?: { lessonId?: number; startingQuestionId?: number },
+): LessonPlaybackPayload {
+  const lessonId = options?.lessonId ?? 0;
+  let nextQ =
+    options?.startingQuestionId !== undefined ? options.startingQuestionId : -1;
+
+  const sections: LessonPlaybackSection[] = sectionInputs.map((secIn, si) => {
+    const secRows = secIn.items.map((it) => ({
+      study_body: it.studyBody?.trim() ? it.studyBody.trim() : null,
+      study_card_ms: null as number | null,
+    }));
+
+    const steps: LessonPlaybackStep[] = [];
+    const studyIndices: number[] = [];
+    for (const it of secIn.items) {
+      const studyBody = it.studyBody?.trim() ? it.studyBody.trim() : null;
+      const effectiveAnswerMs = it.answerMs ?? meta.defaultAnswerMs;
+      const qid = nextQ--;
+      const idx = steps.length;
+      steps.push({
+        sortOrder: idx,
+        questionId: qid,
+        prompt: it.prompt,
+        options: [...it.options],
+        correctIndex: it.correctIndex,
+        studyBody,
+        effectiveAnswerMs,
+        effectiveStudyCardMs: 0,
+      });
+      if (studyBody) studyIndices.push(idx);
+    }
+
+    let resolved: number;
+    if (secIn.studyPhaseMs != null) {
+      resolved = clampResolvedStudyPhaseMs(secIn.studyPhaseMs);
+    } else {
+      resolved = legacySectionStudyPhaseMs(secRows, meta.defaultStudyCardMs);
+    }
+
+    const n = studyIndices.length;
+    if (n > 0) {
+      const parts = distributeStudyPhaseMsToCardSlots(resolved, n);
+      for (let i = 0; i < n; i++) {
+        steps[studyIndices[i]!]!.effectiveStudyCardMs = parts[i]!;
+      }
+    }
+
+    return {
+      id: -(si + 1),
+      sortOrder: si,
+      titleAr: secIn.titleAr?.trim() ? secIn.titleAr.trim() : null,
+      studyPhaseMs: resolved,
+      steps,
+    };
+  });
+
+  const stepsFlat: LessonPlaybackStep[] = sections.flatMap((s) => s.steps);
+
+  return {
+    id: lessonId,
+    title: meta.title.trim(),
+    slug: meta.slug?.trim() || null,
+    description: meta.description?.trim() ?? null,
+    defaultAnswerMs: meta.defaultAnswerMs,
+    defaultStudyCardMs: meta.defaultStudyCardMs,
+    category: null,
+    sections,
+    steps: stepsFlat,
+  };
+}
+
 /** يوزّع إجمالي القسم على بطاقات المذاكرة بحيث يبقى المجموع = الإجمالي بعد الضغط. */
 function distributeStudyPhaseMsToCardSlots(totalMs: number, cardCount: number): number[] {
   if (cardCount <= 0) return [];
@@ -528,39 +633,122 @@ function distributeStudyPhaseMsToCardSlots(totalMs: number, cardCount: number): 
   return out;
 }
 
+/** يستبدل أقسام الدرس وعناصره دون فتح معاملة (للاستدعاء من داخل معاملة أوسع). */
+export async function replaceLessonSectionsWithClient(
+  client: PoolClient,
+  lessonId: number,
+  sections: LessonSectionReplaceInput[],
+): Promise<void> {
+  await client.query(`DELETE FROM lesson_items WHERE lesson_id = $1`, [lessonId]);
+  await client.query(`DELETE FROM lesson_sections WHERE lesson_id = $1`, [lessonId]);
+  let secIdx = 0;
+  for (const sec of sections) {
+    const ins = await client.query<{ id: number }>(
+      `INSERT INTO lesson_sections (lesson_id, sort_order, title_ar, study_phase_ms)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [
+        lessonId,
+        secIdx++,
+        sec.titleAr?.trim() ? sec.titleAr.trim() : null,
+        sec.studyPhaseMs != null ? sec.studyPhaseMs : null,
+      ],
+    );
+    const sectionId = ins.rows[0]?.id;
+    if (sectionId == null) throw new Error("insert_lesson_section_failed");
+    let itemSort = 0;
+    for (const row of sec.items) {
+      await client.query(
+        `INSERT INTO lesson_items (lesson_id, lesson_section_id, question_id, sort_order, answer_ms, study_card_ms)
+         VALUES ($1, $2, $3, $4, $5, NULL)`,
+        [lessonId, sectionId, row.questionId, itemSort++, row.answerMs ?? null],
+      );
+    }
+  }
+}
+
 /** يستبدل أقسام الدرس وعناصره بالكامل. مصفوفة فارغة = حذف كل العناصر والأقسام. */
 export async function replaceLessonSections(lessonId: number, sections: LessonSectionReplaceInput[]): Promise<void> {
   const pool = getPool();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM lesson_items WHERE lesson_id = $1`, [lessonId]);
-    await client.query(`DELETE FROM lesson_sections WHERE lesson_id = $1`, [lessonId]);
-    let secIdx = 0;
-    for (const sec of sections) {
-      const ins = await client.query<{ id: number }>(
-        `INSERT INTO lesson_sections (lesson_id, sort_order, title_ar, study_phase_ms)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id`,
-        [
-          lessonId,
-          secIdx++,
-          sec.titleAr?.trim() ? sec.titleAr.trim() : null,
-          sec.studyPhaseMs != null ? sec.studyPhaseMs : null,
-        ],
-      );
-      const sectionId = ins.rows[0]?.id;
-      if (sectionId == null) throw new Error("insert_lesson_section_failed");
-      let itemSort = 0;
-      for (const row of sec.items) {
-        await client.query(
-          `INSERT INTO lesson_items (lesson_id, lesson_section_id, question_id, sort_order, answer_ms, study_card_ms)
-           VALUES ($1, $2, $3, $4, $5, NULL)`,
-          [lessonId, sectionId, row.questionId, itemSort++, row.answerMs ?? null],
-        );
-      }
-    }
+    await replaceLessonSectionsWithClient(client, lessonId, sections);
     await client.query("COMMIT");
+  } catch (e) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * إنشاء درس وأسئلته وأقسامه في معاملة واحدة (تصنيف الدرس دائماً null).
+ */
+export async function importLessonFromJsonTransaction(
+  meta: LessonImportMetaInput,
+  sections: LessonImportSectionInput[],
+): Promise<{ lessonId: number }> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const lr = await client.query<{ id: number }>(
+      `INSERT INTO lessons (
+         lesson_category_id, title, slug, description,
+         default_answer_ms, default_study_card_ms, is_published, sort_order
+       ) VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7)
+       RETURNING id`,
+      [
+        null,
+        meta.title.trim(),
+        meta.slug?.trim() || null,
+        meta.description?.trim() || null,
+        meta.defaultAnswerMs,
+        meta.defaultStudyCardMs,
+        meta.sortOrder,
+      ],
+    );
+    const lessonId = lr.rows[0]?.id;
+    if (lessonId == null) throw new Error("insert_lesson_failed");
+
+    const replaceSections: LessonSectionReplaceInput[] = [];
+    for (const sec of sections) {
+      const rows: LessonItemReplaceRow[] = [];
+      for (const it of sec.items) {
+        const insQ = await client.query<{ id: number }>(
+          `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id)
+           VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)
+           RETURNING id`,
+          [
+            it.prompt.trim(),
+            JSON.stringify(it.options),
+            it.correctIndex,
+            it.difficulty,
+            it.studyBody.trim(),
+            it.subcategoryKey.trim() || "general_default",
+            lessonId,
+          ],
+        );
+        const qid = insQ.rows[0]?.id;
+        if (qid == null) throw new Error("insert_question_failed");
+        rows.push({ questionId: qid, answerMs: it.answerMs });
+      }
+      replaceSections.push({
+        titleAr: sec.titleAr?.trim() ? sec.titleAr.trim() : null,
+        studyPhaseMs: sec.studyPhaseMs,
+        items: rows,
+      });
+    }
+
+    await replaceLessonSectionsWithClient(client, lessonId, replaceSections);
+    await client.query("COMMIT");
+    return { lessonId };
   } catch (e) {
     try {
       await client.query("ROLLBACK");

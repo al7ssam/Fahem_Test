@@ -6,6 +6,7 @@ import { z } from "zod";
 import { config } from "../config";
 import { getPool } from "../db/pool";
 import {
+  buildPlaybackFromImportDraft,
   countLessonItems,
   deleteLesson,
   deleteLessonCategory,
@@ -13,8 +14,11 @@ import {
   getLessonPlaybackAdmin,
   getPublishedLessonPlaybackById,
   getPublishedLessonPlaybackBySlug,
+  importLessonFromJsonTransaction,
   insertLesson,
   insertLessonCategory,
+  type LessonImportMetaInput,
+  type LessonImportSectionInput,
   listLessonCategories,
   listLessonsAdmin,
   listPublishedLessons,
@@ -456,6 +460,93 @@ const lessonItemsPutSchema = z.union([
       .max(20),
   }),
 ]);
+
+const lessonImportItemSchema = z
+  .object({
+    prompt: z.string().trim().min(1).max(2000),
+    options: questionOptionsSchema,
+    correctIndex: z.number().int().min(0).max(3),
+    difficulty: questionDifficultySchema,
+    studyBody: z.string().max(50_000).optional(),
+    study_body: z.string().max(50_000).optional(),
+    answerMs: z.number().int().min(3000).max(120000).nullable().optional(),
+    answer_ms: z.number().int().min(3000).max(120000).nullable().optional(),
+    subcategoryKey: z.string().trim().min(1).max(120).optional(),
+    subcategory_key: z.string().trim().min(1).max(120).optional(),
+  })
+  .superRefine((d, ctx) => {
+    if (d.correctIndex >= d.options.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["correctIndex"],
+        message: "correctIndex must be within options range",
+      });
+    }
+  })
+  .superRefine((d, ctx) => {
+    const sb = mergedStudyBody(d as { studyBody?: string | null; study_body?: string | null });
+    if (!sb?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["studyBody"],
+        message: "بطاقة المذاكرة مطلوبة ولا يمكن أن تكون فارغة",
+      });
+    }
+  });
+
+const lessonImportSectionSchema = z.object({
+  titleAr: z.string().max(500).nullable().optional(),
+  title_ar: z.string().max(500).nullable().optional(),
+  studyPhaseMs: z.number().int().min(2000).max(300000).nullable().optional(),
+  study_phase_ms: z.number().int().min(2000).max(300000).nullable().optional(),
+  items: z.array(lessonImportItemSchema).min(1).max(50),
+});
+
+const lessonImportBodySchema = z.object({
+  lesson: z.object({
+    title: z.string().trim().min(1).max(300),
+    slug: z.string().trim().max(160).nullable().optional(),
+    description: z.string().max(8000).nullable().optional(),
+    defaultAnswerMs: z.number().int().min(3000).max(120000),
+    defaultStudyCardMs: z.number().int().min(2000).max(300000),
+    sortOrder: z.number().int().min(0).max(100000).optional(),
+  }),
+  sections: z.array(lessonImportSectionSchema).min(1).max(20),
+});
+
+function normalizeLessonImportPayload(body: z.infer<typeof lessonImportBodySchema>): {
+  meta: LessonImportMetaInput;
+  sections: LessonImportSectionInput[];
+} {
+  const slugRaw = body.lesson.slug;
+  const slug =
+    slugRaw === null || slugRaw === undefined ? null : slugRaw.trim() === "" ? null : slugRaw.trim();
+  const meta: LessonImportMetaInput = {
+    title: body.lesson.title.trim(),
+    slug,
+    description: body.lesson.description?.trim() ?? null,
+    defaultAnswerMs: body.lesson.defaultAnswerMs,
+    defaultStudyCardMs: body.lesson.defaultStudyCardMs,
+    sortOrder: body.lesson.sortOrder ?? 0,
+  };
+  const sections: LessonImportSectionInput[] = body.sections.map((sec) => {
+    const titleRaw = sec.titleAr ?? sec.title_ar;
+    const titleAr =
+      titleRaw === null || titleRaw === undefined ? null : titleRaw.trim() === "" ? null : titleRaw.trim();
+    const studyPhaseMs = sec.studyPhaseMs ?? sec.study_phase_ms ?? null;
+    const items: LessonImportSectionInput["items"] = sec.items.map((it) => ({
+      prompt: it.prompt.trim(),
+      options: [...it.options],
+      correctIndex: it.correctIndex,
+      difficulty: it.difficulty,
+      studyBody: mergedStudyBody(it as { studyBody?: string | null; study_body?: string | null })!.trim(),
+      answerMs: it.answerMs ?? it.answer_ms ?? null,
+      subcategoryKey: (it.subcategoryKey ?? it.subcategory_key ?? "general_default").trim() || "general_default",
+    }));
+    return { titleAr, studyPhaseMs, items };
+  });
+  return { meta, sections };
+}
 
 function timingSafeEqualString(a: string, b: string): boolean {
   try {
@@ -3470,6 +3561,43 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true, lesson });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.post("/api/admin/lessons/import-preview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = lessonImportBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    try {
+      const normalized = normalizeLessonImportPayload(parsed.data);
+      const lesson = buildPlaybackFromImportDraft(normalized.meta, normalized.sections);
+      res.json({ ok: true, lesson });
+    } catch {
+      res.status(500).json({ ok: false, error: "preview_failed" });
+    }
+  });
+
+  app.post("/api/admin/lessons/import-commit", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = lessonImportBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: "invalid_body", issues: zodIssuesSummary(parsed.error) });
+      return;
+    }
+    try {
+      const normalized = normalizeLessonImportPayload(parsed.data);
+      const { lessonId } = await importLessonFromJsonTransaction(normalized.meta, normalized.sections);
+      res.status(201).json({ ok: true, id: lessonId });
+    } catch (e: unknown) {
+      const code = e && typeof e === "object" && "code" in e ? String((e as { code?: string }).code) : "";
+      if (code === "23505") {
+        res.status(409).json({ ok: false, error: "slug_taken" });
+        return;
+      }
+      res.status(500).json({ ok: false, error: "import_failed" });
     }
   });
 

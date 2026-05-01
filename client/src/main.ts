@@ -3971,8 +3971,30 @@ if (pendingJoinRoomCode) {
   nameFlowStep = "mode";
   privateEntryAutoJoinTried = false;
 }
-const lessonIdFromUrl = Number(new URLSearchParams(window.location.search).get("lesson") ?? "");
-if (Number.isInteger(lessonIdFromUrl) && lessonIdFromUrl > 0) {
+const FAHEM_ADMIN_LESSON_PREVIEW_KEY = "fahem_admin_lesson_preview_v1";
+const bootParams = new URLSearchParams(window.location.search);
+const lessonIdFromUrl = Number(bootParams.get("lesson") ?? "");
+const lessonPreviewBoot = bootParams.get("lessonPreview");
+if (lessonPreviewBoot === "1") {
+  const raw = sessionStorage.getItem(FAHEM_ADMIN_LESSON_PREVIEW_KEY);
+  if (raw) {
+    try {
+      sessionStorage.removeItem(FAHEM_ADMIN_LESSON_PREVIEW_KEY);
+      const payload = JSON.parse(raw) as LessonPlaybackPayload;
+      if (payload && typeof payload === "object" && Array.isArray(payload.steps) && payload.steps.length > 0) {
+        beginLessonPlayback(payload);
+        history.replaceState({}, "", window.location.pathname + window.location.hash);
+        render();
+      } else {
+        render();
+      }
+    } catch {
+      render();
+    }
+  } else {
+    render();
+  }
+} else if (Number.isInteger(lessonIdFromUrl) && lessonIdFromUrl > 0) {
   void openLessonById(lessonIdFromUrl);
 } else {
   render();
