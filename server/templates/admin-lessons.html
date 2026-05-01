@@ -50,16 +50,30 @@
       .editor-card-inner { background:linear-gradient(180deg, rgba(12,16,32,.55), rgba(6,8,18,.35)); border:1px solid rgba(223,187,106,.16); border-radius:1rem; padding:.85rem .95rem 1rem; margin-top:.65rem; }
       .editor-meta-block { background:linear-gradient(135deg, rgba(16,22,44,.85), rgba(8,12,28,.65)); border:1px solid rgba(223,187,106,.2); border-radius:.85rem; padding:.65rem .75rem .85rem; margin:.5rem 0; }
       .lesson-create-panel { margin:.65rem 0; padding:.75rem .9rem 1rem; border-radius:.9rem; background:linear-gradient(135deg, rgba(18,26,42,.9), rgba(10,14,28,.72)); border:1px solid rgba(223,187,106,.28); box-shadow:0 6px 22px rgba(0,0,0,.2); }
-      .bank-link-block { margin:.65rem 0; padding:.75rem .85rem; border-radius:.85rem; border:1px solid rgba(223,187,106,.22); background:linear-gradient(135deg, rgba(14,20,36,.88), rgba(8,12,24,.65)); }
       .items-wrap-shell { margin-top:.55rem; padding:.45rem; border-radius:.85rem; border:1px solid rgba(223,187,106,.18); background:linear-gradient(180deg, rgba(10,14,28,.5), rgba(6,8,18,.35)); }
       .create-q-extra { margin-top:.55rem; padding-top:.55rem; border-top:1px solid rgba(223,187,106,.15); }
+      .collapsible-details { margin:.65rem 0; }
+      .collapsible-details > summary {
+        list-style: none;
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.2rem 0 0.45rem;
+      }
+      .collapsible-details > summary::-webkit-details-marker { display: none; }
+      .collapsible-caret { flex-shrink: 0; font-size: 0.75rem; color: var(--muted); transition: transform 0.2s ease; }
+      .collapsible-details[open] .collapsible-caret { transform: rotate(-180deg); }
+      .collapsible-panel-body { padding-top: 0.35rem; }
       @media (max-width:1100px) { .split { grid-template-columns:1fr; } }
     </style>
   </head>
   <body>
     <div class="wrap">
       <h1 style="margin:0;color:var(--amber)">إدارة الدروس</h1>
-      <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong> — أنشئ أسئلة خاصة بالدرس أو اربط من البنك، ثم احفظ التسلسل.</p>
+      <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong> — أنشئ أسئلة خاصة بالدرس ثم احفظ التسلسل.</p>
 
       <div class="topbar">
         <div>
@@ -125,11 +139,12 @@
 
         <hr style="border-color:var(--border);margin:.75rem 0" />
 
-        <strong>تسلسل الأسئلة والأقسام</strong>
-        <p class="muted" style="margin:.35rem 0">أنشئ أسئلة خاصة بهذا الدرس، أو اربط أسئلة من البنك. اسحب الصفوف لإعادة الترتيب أو النقل بين الأقسام، أو استخدم الأسهم. زمن المذاكرة يُضبط لكل قسم بالثواني؛ يمكن ترك وقت الإجابة لكل سؤال فارغاً لاستخدام افتراضي الدرس.</p>
-
-        <section class="lesson-create-panel" id="lesson-create-panel" aria-labelledby="lesson-create-heading">
-          <h2 class="lesson-section-heading" id="lesson-create-heading">إنشاء سؤال خاص بالدرس</h2>
+        <details class="lesson-create-panel collapsible-details" id="lesson-create-panel" open>
+          <summary class="collapsible-summary" id="lesson-create-heading">
+            <span class="lesson-section-heading" style="margin:0;display:inline">إنشاء سؤال خاص بالدرس</span>
+            <span class="collapsible-caret" aria-hidden="true">▼</span>
+          </summary>
+          <div class="collapsible-panel-body">
           <p class="muted" style="margin:0 0 .5rem;font-size:.82rem">يُخزَّن السؤال ويُربط بهذا الدرس فقط ولا يظهر في بحث البنك العام.</p>
           <div id="lesson-create-target-slot"></div>
           <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
@@ -169,7 +184,8 @@
               </div>
           </div>
           <button type="button" class="btn" id="new-q-submit" style="margin-top:.65rem">إضافة السؤال إلى القسم المحدد</button>
-        </section>
+          </div>
+        </details>
 
         <div class="owned-editor-panel" id="owned-editor-panel" hidden role="region" aria-labelledby="owned-editor-title">
           <strong id="owned-editor-title">تحرير سؤال خاص بالدرس</strong>
@@ -205,22 +221,19 @@
           </div>
         </div>
 
-        <div class="bank-link-block">
-        <strong style="display:block;margin-top:.15rem">ربط سؤال من البنك</strong>
-        <p class="muted" style="margin:.25rem 0;font-size:.82rem">البحث يعرض أسئلة البنك العامة فقط.</p>
-        <div class="row">
-          <input id="q-q" type="search" placeholder="بحث في نص السؤال" style="flex:1;min-width:140px" />
-          <input id="q-sub" type="text" placeholder="subcategory_key" style="width:140px" />
-          <button class="btn btn-secondary" id="q-search" type="button">بحث</button>
-        </div>
-        <div class="list" id="q-results" style="max-height:160px;margin:.45rem 0"></div>
-        </div>
-        <div class="items-wrap-shell">
-        <div id="items-wrap"></div>
-        </div>
-        <div class="row" style="margin-top:.55rem">
-          <button class="btn" id="l-save-items" type="button">حفظ التسلسل</button>
-        </div>
+        <details class="items-wrap-shell collapsible-details" id="lesson-sequence-panel" open>
+          <summary class="collapsible-summary">
+            <strong>تسلسل الأسئلة والأقسام</strong>
+            <span class="collapsible-caret" aria-hidden="true">▼</span>
+          </summary>
+          <div class="collapsible-panel-body">
+            <p class="muted" style="margin:.35rem 0">أسحب الصفوف لإعادة الترتيب أو النقل بين الأقسام، أو استخدم الأسهم. زمن المذاكرة يُضبط لكل قسم بالثواني؛ يمكن ترك وقت الإجابة لكل سؤال فارغاً لاستخدام افتراضي الدرس.</p>
+            <div id="items-wrap"></div>
+            <div class="row" style="margin-top:.55rem">
+              <button class="btn" id="l-save-items" type="button">حفظ التسلسل</button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -418,7 +431,7 @@
           const slot = document.getElementById("lesson-create-target-slot");
           if (!slot) return;
           if (draftSections.length === 0) {
-            slot.innerHTML = '<p class="muted" style="margin:0;font-size:.82rem">لا أقسام بعد — انتقل إلى كتلة «تسلسل الأسئلة والأقسام» أسفل هذا النموذج واضغط «قسم جديد».</p>';
+            slot.innerHTML = '<p class="muted" style="margin:0;font-size:.82rem">لا أقسام بعد — وسّع كتلة «تسلسل الأسئلة والأقسام» ثم اضغط «قسم جديد».</p>';
             return;
           }
           if (addQuestionTargetSection >= draftSections.length) {
@@ -595,7 +608,7 @@
               <p class="muted" style="margin:.2rem 0;font-size:.82rem">${sec.items.length} سؤالاً في هذا القسم</p>
               <div class="sec-drop-zone" data-sec-drop="${si}" tabindex="-1">أفلت سؤالاً هنا لوضعه في بداية القسم</div>`;
             if (!sec.items.length) {
-              html += '<div class="muted" style="padding:.35rem">لا أسئلة — أنشئ سؤالاً أو أضف من البنك.</div>';
+              html += '<div class="muted" style="padding:.35rem">لا أسئلة — أنشئ سؤالاً من كتلة «إنشاء سؤال خاص بالدرس».</div>';
             } else {
               sec.items.forEach((it, idx) => {
                 const ownTag = it.lessonOwned
@@ -950,46 +963,6 @@
             document.getElementById("editor-card").hidden = true;
             setMsg("تم الحذف.", true);
             await loadAll();
-          } catch (_) {}
-        };
-
-        document.getElementById("q-search").onclick = async () => {
-          const q = document.getElementById("q-q").value.trim();
-          const sub = document.getElementById("q-sub").value.trim();
-          const qs = new URLSearchParams({ limit: "30", offset: "0", q, ...(sub ? { subcategoryKey: sub } : {}) });
-          try {
-            const data = await api("/api/admin/questions?" + qs.toString(), { method: "GET" });
-            const el = document.getElementById("q-results");
-            el.innerHTML = (data.items || []).map((it) =>
-              `<div class="list-item" style="cursor:default;display:flex;justify-content:space-between;align-items:flex-start;gap:.5rem">
-                <span><span class="muted">#${it.id}</span> ${escapeHtml(it.promptPreview)}</span>
-                <button type="button" class="btn btn-secondary" style="padding:.2rem .45rem;flex-shrink:0" data-add-q="${it.id}">إضافة</button>
-              </div>`
-            ).join("") || '<div class="muted" style="padding:.5rem">لا نتائج</div>';
-            el.querySelectorAll("[data-add-q]").forEach((b) => {
-              b.addEventListener("click", (ev) => {
-                ev.stopPropagation();
-                const id = Number(b.getAttribute("data-add-q"));
-                const row = data.items.find((x) => x.id === id);
-                if (row && row.hasStudyCards === false) {
-                  setMsg("لا يمكن ربط سؤال من البنك بلا بطاقة مذاكرة. أضف نص مذاكرة للسؤال أولاً من إدارة الأسئلة.", false);
-                  return;
-                }
-                const preview = row ? String(row.promptPreview || "").slice(0, 180) : "#" + id;
-                const ts = Number(document.getElementById("target-sec-for-add")?.value ?? addQuestionTargetSection) || 0;
-                const sec = draftSections[ts] || draftSections[0];
-                if (!sec) return;
-                const flatIds = draftSections.flatMap((s) => s.items.map((x) => x.questionId));
-                if (flatIds.includes(id)) {
-                  setMsg("السؤال موجود بالفعل في أحد الأقسام.", false);
-                  return;
-                }
-                markDraftDirty();
-                sec.items.push({ questionId: id, answerMs: "", preview, lessonOwned: false });
-                renderItems();
-                setMsg("أُضيف للمسودة — احفظ التسلسل.", true);
-              });
-            });
           } catch (_) {}
         };
 
