@@ -29,7 +29,8 @@ export type LessonItemAdmin = {
   sortOrder: number;
   questionId: number;
   answerMs: number | null;
-  studyCardMs: number | null;
+  /** مهجور — زمن بطاقات المذاكرة يحدد لكل قسم عبر studyPhaseMs */
+  studyCardMs?: number | null;
   promptPreview: string;
   hasStudyBody: boolean;
   /** سؤال أُنشئ من إدارة هذا الدرس (questions.lesson_id) */
@@ -46,6 +47,8 @@ export type LessonSectionAdmin = {
   id: number;
   sortOrder: number;
   titleAr: string | null;
+  /** زمن طور المذاكرة لهذا القسم بالمللي (NULL = احتساب تراجع من المجموع السابق على الخادم عند التشغيل) */
+  studyPhaseMs: number | null;
   items: LessonItemAdmin[];
 };
 
@@ -69,6 +72,8 @@ export type LessonPlaybackSection = {
   id: number;
   sortOrder: number;
   titleAr: string | null;
+  /** زمن طور المذاكرة المعتمد للقسم بعد الضغط بين 5000 و 300000 مللي */
+  studyPhaseMs: number;
   steps: LessonPlaybackStep[];
 };
 
@@ -306,6 +311,7 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
     section_id: number;
     section_sort: number;
     title_ar: string | null;
+    study_phase_ms: number | null;
     sort_order: number;
     question_id: number;
     answer_ms: number | null;
@@ -318,6 +324,7 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
     difficulty: string | null;
   }>(
     `SELECT ls.id AS section_id, ls.sort_order AS section_sort, ls.title_ar,
+            ls.study_phase_ms,
             li.sort_order, li.question_id, li.answer_ms, li.study_card_ms,
             q.prompt, q.options, q.correct_index, q.study_body, q.lesson_id, q.difficulty
      FROM lesson_sections ls
@@ -331,13 +338,19 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
   const sectionOrder: number[] = [];
   const bySection = new Map<
     number,
-    { sortOrder: number; titleAr: string | null; items: LessonItemAdmin[] }
+    {
+      sortOrder: number;
+      titleAr: string | null;
+      studyPhaseMs: number | null;
+      items: LessonItemAdmin[];
+    }
   >();
   for (const r of joined.rows) {
     if (!bySection.has(r.section_id)) {
       bySection.set(r.section_id, {
         sortOrder: r.section_sort,
         titleAr: r.title_ar?.trim() ? r.title_ar.trim() : null,
+        studyPhaseMs: r.study_phase_ms,
         items: [],
       });
       sectionOrder.push(r.section_id);
@@ -361,7 +374,6 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
       sortOrder: r.sort_order,
       questionId: r.question_id,
       answerMs: r.answer_ms,
-      studyCardMs: r.study_card_ms,
       promptPreview: r.prompt.length > 180 ? `${r.prompt.slice(0, 180)}…` : r.prompt,
       hasStudyBody: Boolean(r.study_body?.trim()),
       lessonOwned,
@@ -382,6 +394,7 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
       id: sid,
       sortOrder: s.sortOrder,
       titleAr: s.titleAr,
+      studyPhaseMs: s.studyPhaseMs,
       items: s.items,
     };
   });
@@ -483,8 +496,37 @@ export type LessonItemReplaceRow = {
 
 export type LessonSectionReplaceInput = {
   titleAr?: string | null;
+  studyPhaseMs?: number | null;
   items: LessonItemReplaceRow[];
 };
+
+function clampResolvedStudyPhaseMs(ms: number): number {
+  return Math.min(300_000, Math.max(5_000, ms));
+}
+
+function legacySectionStudyPhaseMs(
+  sectionRows: Array<{ study_body: string | null; study_card_ms: number | null }>,
+  defaultStudyCardMs: number,
+): number {
+  let sum = 0;
+  for (const r of sectionRows) {
+    if (r.study_body?.trim()) sum += r.study_card_ms ?? defaultStudyCardMs;
+  }
+  return clampResolvedStudyPhaseMs(sum > 0 ? sum : defaultStudyCardMs);
+}
+
+/** يوزّع إجمالي القسم على بطاقات المذاكرة بحيث يبقى المجموع = الإجمالي بعد الضغط. */
+function distributeStudyPhaseMsToCardSlots(totalMs: number, cardCount: number): number[] {
+  if (cardCount <= 0) return [];
+  const t = clampResolvedStudyPhaseMs(totalMs);
+  const base = Math.floor(t / cardCount);
+  let rem = t - base * cardCount;
+  const out: number[] = [];
+  for (let i = 0; i < cardCount; i++) {
+    out.push(base + (i < rem ? 1 : 0));
+  }
+  return out;
+}
 
 /** يستبدل أقسام الدرس وعناصره بالكامل. مصفوفة فارغة = حذف كل العناصر والأقسام. */
 export async function replaceLessonSections(lessonId: number, sections: LessonSectionReplaceInput[]): Promise<void> {
@@ -497,10 +539,15 @@ export async function replaceLessonSections(lessonId: number, sections: LessonSe
     let secIdx = 0;
     for (const sec of sections) {
       const ins = await client.query<{ id: number }>(
-        `INSERT INTO lesson_sections (lesson_id, sort_order, title_ar)
-         VALUES ($1, $2, $3)
+        `INSERT INTO lesson_sections (lesson_id, sort_order, title_ar, study_phase_ms)
+         VALUES ($1, $2, $3, $4)
          RETURNING id`,
-        [lessonId, secIdx++, sec.titleAr?.trim() ? sec.titleAr.trim() : null],
+        [
+          lessonId,
+          secIdx++,
+          sec.titleAr?.trim() ? sec.titleAr.trim() : null,
+          sec.studyPhaseMs != null ? sec.studyPhaseMs : null,
+        ],
       );
       const sectionId = ins.rows[0]?.id;
       if (sectionId == null) throw new Error("insert_lesson_section_failed");
@@ -508,8 +555,8 @@ export async function replaceLessonSections(lessonId: number, sections: LessonSe
       for (const row of sec.items) {
         await client.query(
           `INSERT INTO lesson_items (lesson_id, lesson_section_id, question_id, sort_order, answer_ms, study_card_ms)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [lessonId, sectionId, row.questionId, itemSort++, row.answerMs ?? null, row.studyCardMs ?? null],
+           VALUES ($1, $2, $3, $4, $5, NULL)`,
+          [lessonId, sectionId, row.questionId, itemSort++, row.answerMs ?? null],
         );
       }
     }
@@ -615,6 +662,7 @@ async function loadLessonPlaybackRows(
     section_id: number;
     section_sort: number;
     title_ar: string | null;
+    study_phase_ms: number | null;
     sort_order: number;
     question_id: number;
     answer_ms: number | null;
@@ -625,6 +673,7 @@ async function loadLessonPlaybackRows(
     study_body: string | null;
   }>(
     `SELECT ls.id AS section_id, ls.sort_order AS section_sort, ls.title_ar,
+            ls.study_phase_ms,
             li.sort_order, li.question_id, li.answer_ms, li.study_card_ms,
             q.prompt, q.options, q.correct_index, q.study_body
      FROM lesson_sections ls
@@ -636,43 +685,57 @@ async function loadLessonPlaybackRows(
   );
 
   const sectionIds: number[] = [];
-  const stepsBySection = new Map<number, LessonPlaybackStep[]>();
+  const sectionSeen = new Set<number>();
   for (const it of rows.rows) {
-    if (!stepsBySection.has(it.section_id)) {
+    if (!sectionSeen.has(it.section_id)) {
+      sectionSeen.add(it.section_id);
       sectionIds.push(it.section_id);
-      stepsBySection.set(it.section_id, []);
-    }
-    const effectiveAnswerMs = it.answer_ms ?? lesson.default_answer_ms;
-    const effectiveStudyCardMs = it.study_card_ms ?? lesson.default_study_card_ms;
-    stepsBySection.get(it.section_id)!.push({
-      sortOrder: it.sort_order,
-      questionId: it.question_id,
-      prompt: it.prompt,
-      options: parseOptions(it.options),
-      correctIndex: it.correct_index,
-      studyBody: it.study_body?.trim() ? it.study_body.trim() : null,
-      effectiveAnswerMs,
-      effectiveStudyCardMs,
-    });
-  }
-
-  const sectionMeta = new Map<number, { sort: number; titleAr: string | null }>();
-  for (const it of rows.rows) {
-    if (!sectionMeta.has(it.section_id)) {
-      sectionMeta.set(it.section_id, {
-        sort: it.section_sort,
-        titleAr: it.title_ar?.trim() ? it.title_ar.trim() : null,
-      });
     }
   }
 
   const sections: LessonPlaybackSection[] = sectionIds.map((sid) => {
-    const m = sectionMeta.get(sid)!;
+    const secRows = rows.rows.filter((r) => r.section_id === sid);
+    const first = secRows[0];
+    const steps: LessonPlaybackStep[] = [];
+    const studyIndices: number[] = [];
+    for (const it of secRows) {
+      const effectiveAnswerMs = it.answer_ms ?? lesson.default_answer_ms;
+      const studyBody = it.study_body?.trim() ? it.study_body.trim() : null;
+      const idx = steps.length;
+      steps.push({
+        sortOrder: it.sort_order,
+        questionId: it.question_id,
+        prompt: it.prompt,
+        options: parseOptions(it.options),
+        correctIndex: it.correct_index,
+        studyBody,
+        effectiveAnswerMs,
+        effectiveStudyCardMs: 0,
+      });
+      if (studyBody) studyIndices.push(idx);
+    }
+
+    let resolved: number;
+    if (first?.study_phase_ms != null) {
+      resolved = clampResolvedStudyPhaseMs(first.study_phase_ms);
+    } else {
+      resolved = legacySectionStudyPhaseMs(secRows, lesson.default_study_card_ms);
+    }
+
+    const n = studyIndices.length;
+    if (n > 0) {
+      const parts = distributeStudyPhaseMsToCardSlots(resolved, n);
+      for (let i = 0; i < n; i++) {
+        steps[studyIndices[i]].effectiveStudyCardMs = parts[i]!;
+      }
+    }
+
     return {
       id: sid,
-      sortOrder: m.sort,
-      titleAr: m.titleAr,
-      steps: stepsBySection.get(sid) ?? [],
+      sortOrder: first?.section_sort ?? 0,
+      titleAr: first?.title_ar?.trim() ? first.title_ar.trim() : null,
+      studyPhaseMs: resolved,
+      steps,
     };
   });
 

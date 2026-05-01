@@ -716,7 +716,15 @@ export class Match {
     const sections =
       playback.sections.length > 0
         ? playback.sections
-        : [{ id: 0, sortOrder: 0, titleAr: null as string | null, steps: playback.steps }];
+        : [
+            {
+              id: 0,
+              sortOrder: 0,
+              titleAr: null as string | null,
+              studyPhaseMs: lessonStudyPhaseTotalMsForSteps(playback.steps),
+              steps: playback.steps,
+            },
+          ];
 
     const sectionCount = sections.length;
 
@@ -733,7 +741,7 @@ export class Match {
       };
 
       const studyCards = lessonPlaybackToStudyCardsFromSteps(sec.steps);
-      const phaseMs = lessonStudyPhaseTotalMsForSteps(sec.steps);
+      const phaseMs = sec.studyPhaseMs ?? lessonStudyPhaseTotalMsForSteps(sec.steps);
       if (studyCards.length > 0) {
         await this.runLessonStudyPhase(studyCards, phaseMs, sectionMeta);
         if (this.finished) return;

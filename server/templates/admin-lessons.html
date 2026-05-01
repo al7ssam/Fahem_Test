@@ -23,7 +23,15 @@
       .list { border:1px solid var(--border); border-radius:.75rem; max-height:280px; overflow:auto; }
       .list-item { padding:.45rem .55rem; border-bottom:1px solid rgba(223,187,106,.1); cursor:pointer; }
       .list-item:hover { background:rgba(255,255,255,.04); } .list-item.active { border-inline-end:3px solid var(--amber); }
-      .item-row { display:grid; grid-template-columns:1.5rem minmax(0,1fr) 100px 100px auto minmax(4.5rem,auto); gap:.35rem; align-items:center; padding:.35rem; border-bottom:1px solid rgba(223,187,106,.08); font-size:.88rem; }
+      .item-row { display:grid; grid-template-columns:1.25rem 1.5rem minmax(0,1fr) 100px auto minmax(4.5rem,auto); gap:.35rem; align-items:center; padding:.35rem; border-bottom:1px solid rgba(223,187,106,.08); font-size:.88rem; }
+      .drag-hint { cursor:grab; color:var(--muted); font-size:1rem; user-select:none; }
+      .item-row.dragging { opacity:.45; }
+      .sec-drop-zone { padding:.35rem .4rem; margin:.25rem 0 .4rem; border-radius:.5rem; border:1px dashed rgba(223,187,106,.22); font-size:.8rem; color:var(--muted); text-align:center; }
+      .sec-drop-zone.sec-drop-active { border-color:var(--amber); color:var(--amber); background:rgba(232,190,102,.06); }
+      .sec-block-tone-0 { background:linear-gradient(135deg, rgba(12,18,40,.75), rgba(8,12,28,.5)); }
+      .sec-block-tone-1 { background:linear-gradient(135deg, rgba(18,14,32,.75), rgba(10,8,24,.5)); }
+      .sec-block-tone-2 { background:linear-gradient(135deg, rgba(10,22,28,.75), rgba(6,14,20,.5)); }
+      .sec-block-tone-3 { background:linear-gradient(135deg, rgba(22,16,12,.72), rgba(14,10,8,.48)); }
       @media (max-width:700px) {
         .item-row { display:flex; flex-direction:column; align-items:stretch; gap:.4rem; padding:.5rem .35rem; border-bottom:1px solid rgba(223,187,106,.12); }
         .item-row input[type="number"] { width:100%; max-width:100%; }
@@ -41,7 +49,7 @@
       .lesson-adv-toggle { width:100%; text-align:right; cursor:pointer; font-size:.86rem; padding:.25rem 0 .4rem; font-weight:700; font-family:inherit; background:none; border:none; color:var(--muted); display:flex; align-items:center; justify-content:space-between; gap:.35rem; }
       .lesson-adv-toggle:focus-visible { outline:2px solid var(--amber); outline-offset:2px; border-radius:.35rem; }
       .lesson-adv-inner { padding-top:.35rem; }
-      .sec-block { margin:.55rem 0; padding:.55rem .65rem; background:rgba(6,10,22,.45); border:1px solid rgba(223,187,106,.14); border-radius:.75rem; }
+      .sec-block { margin:.55rem 0; padding:.55rem .65rem; border:1px solid rgba(223,187,106,.18); border-radius:.75rem; color:var(--text); }
       @media (max-width:1100px) { .split { grid-template-columns:1fr; } }
     </style>
   </head>
@@ -113,7 +121,7 @@
         <hr style="border-color:var(--border);margin:.75rem 0" />
 
         <strong>تسلسل الأسئلة والأقسام</strong>
-        <p class="muted" style="margin:.35rem 0">أنشئ أسئلة خاصة بهذا الدرس، أو اربط أسئلة من البنك. أعد الترتيب بالأسهم ثم احفظ التسلسل. يمكن ترك حقول الوقت فارغة لاستخدام افتراضيات الدرس.</p>
+        <p class="muted" style="margin:.35rem 0">أنشئ أسئلة خاصة بهذا الدرس، أو اربط أسئلة من البنك. اسحب الصفوف لإعادة الترتيب أو النقل بين الأقسام، أو استخدم الأسهم. زمن المذاكرة يُضبط لكل قسم؛ يمكن ترك وقت الإجابة لكل سؤال فارغاً لاستخدام افتراضي الدرس.</p>
 
         <section class="lesson-create-panel" id="lesson-create-panel" aria-labelledby="lesson-create-heading">
           <h2 class="lesson-section-heading" id="lesson-create-heading">إنشاء سؤال خاص بالدرس</h2>
@@ -153,13 +161,11 @@
                   <option value="hard">صعب</option>
                 </select>
               </div>
-              <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة (اختياري)</label>
-              <textarea id="new-q-study" rows="2" style="width:100%" placeholder="نص البطاقة"></textarea>
+              <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة</label>
+              <textarea id="new-q-study" rows="2" style="width:100%" placeholder="نص البطاقة (مطلوب)"></textarea>
               <div class="row" style="margin-top:.45rem">
                 <label class="muted">وقت الإجابة (مللي)</label>
                 <input id="new-q-ans-ms" type="number" min="3000" max="120000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
-                <label class="muted">وقت بطاقة المذاكرة (مللي)</label>
-                <input id="new-q-study-ms" type="number" min="2000" max="300000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
               </div>
             </div>
           </div>
@@ -233,8 +239,9 @@
         let lessons = [];
         let selectedLessonId = null;
         let detail = null;
-        /** @type {{ titleAr: string, items: { questionId: number, answerMs: string, studyCardMs: string, preview: string, lessonOwned?: boolean, prompt?: string, options?: string[], correctIndex?: number, studyBody?: string, difficulty?: string }[] }[]} */
+        /** @type {{ titleAr: string, studyPhaseMs: string, items: { questionId: number, answerMs: string, preview: string, lessonOwned?: boolean, prompt?: string, options?: string[], correctIndex?: number, studyBody?: string, difficulty?: string }[] }[]} */
         let draftSections = [];
+        let dragLessonItem = /** @type {{ si: number, ii: number } | null} */ (null);
         let addQuestionTargetSection = 0;
         /** @type {{ si: number, ii: number } | null} */
         let editOwnedTarget = null;
@@ -247,6 +254,21 @@
         }
         function clearDraftDirty() {
           draftDirty = false;
+        }
+
+        function moveLessonItemInDraft(fromSi, fromIi, toSi, insertBeforeIdx) {
+          const fromSec = draftSections[fromSi];
+          const toSec = draftSections[toSi];
+          if (!fromSec || !toSec) return;
+          if (fromIi < 0 || fromIi >= fromSec.items.length) return;
+          const [it] = fromSec.items.splice(fromIi, 1);
+          if (!it) return;
+          let at = insertBeforeIdx;
+          if (fromSi === toSi && fromIi < at) at -= 1;
+          at = Math.max(0, Math.min(at, toSec.items.length));
+          toSec.items.splice(at, 0, it);
+          markDraftDirty();
+          renderItems();
         }
 
         window.addEventListener("beforeunload", function (ev) {
@@ -492,11 +514,11 @@
             if (d.sections && d.sections.length) {
               draftSections = d.sections.map((sec) => ({
                 titleAr: sec.titleAr || "",
+                studyPhaseMs: sec.studyPhaseMs != null && sec.studyPhaseMs !== undefined ? String(sec.studyPhaseMs) : "",
                 items: (sec.items || []).map((it) => {
                   const row = {
                     questionId: it.questionId,
                     answerMs: it.answerMs != null ? String(it.answerMs) : "",
-                    studyCardMs: it.studyCardMs != null ? String(it.studyCardMs) : "",
                     preview: it.promptPreview || "",
                     lessonOwned: !!it.lessonOwned,
                   };
@@ -511,7 +533,7 @@
                 }),
               }));
             } else {
-              draftSections = [{ titleAr: "", items: [] }];
+              draftSections = [{ titleAr: "", studyPhaseMs: "", items: [] }];
             }
             addQuestionTargetSection = Math.max(0, draftSections.length - 1);
             if (myTok !== loadDetailToken) return;
@@ -534,14 +556,24 @@
           </div>`;
 
           draftSections.forEach((sec, si) => {
-            html += `<div class="sec-block" data-sec-block="${si}">
+            const tone = si % 4;
+            html += `<div class="sec-block sec-block-tone-${tone}" data-sec-block="${si}">
               <div class="row" style="justify-content:space-between;align-items:center">
                 <strong>القسم ${si + 1}</strong>
-                ${draftSections.length > 1 ? `<button type="button" class="btn btn-danger" style="padding:.25rem .5rem;font-size:.78rem" data-sec-del="${si}">حذف القسم ودمج أسئلته مع السابق</button>` : ""}
+                ${draftSections.length > 1 ? `<button type="button" class="btn btn-danger" style="padding:.25rem .5rem;font-size:.78rem" data-sec-del="${si}">حذف القسم</button>` : ""}
               </div>
               <label class="muted" style="display:block;margin-top:.35rem">عنوان القسم (اختياري)</label>
               <input type="text" data-sec-title="${si}" value="${escapeHtml(sec.titleAr)}" placeholder="مثال: المفاهيم الأساسية" style="width:100%;margin:.25rem 0" />
-              <p class="muted" style="margin:.2rem 0;font-size:.82rem">${sec.items.length} سؤالاً في هذا القسم</p>`;
+              <div class="row" style="margin:.35rem 0;flex-wrap:wrap;align-items:end;gap:.5rem">
+                <div>
+                  <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">زمن مرحلة المذاكرة لهذا القسم (مللي)</label>
+                  <input type="number" data-sec-phase="${si}" min="2000" max="300000" step="500" placeholder="فارغ = احتساب تلقائي من البيانات القديمة" style="width:220px"
+                    value="${escapeHtml(sec.studyPhaseMs)}" />
+                </div>
+                <span class="muted" style="font-size:.78rem">يُوزَّع هذا الزمن على بطاقات المذاكرة داخل القسم في التطبيق والمباراة.</span>
+              </div>
+              <p class="muted" style="margin:.2rem 0;font-size:.82rem">${sec.items.length} سؤالاً في هذا القسم</p>
+              <div class="sec-drop-zone" data-sec-drop="${si}" tabindex="-1">أفلت سؤالاً هنا لوضعه في بداية القسم</div>`;
             if (!sec.items.length) {
               html += '<div class="muted" style="padding:.35rem">لا أسئلة — أنشئ سؤالاً أو أضف من البنك.</div>';
             } else {
@@ -552,11 +584,11 @@
                 const editBtn = it.lessonOwned && it.prompt
                   ? `<button type="button" class="btn btn-secondary" style="padding:.2rem .45rem;font-size:.75rem" data-edit-owned="${si}:${idx}">تحرير</button>`
                   : '<span class="muted" style="font-size:.75rem">—</span>';
-                html += `<div class="item-row">
+                html += `<div class="item-row" draggable="true" data-drag-row="1" data-si="${si}" data-ii="${idx}">
+                  <span class="drag-hint" title="سحب لإعادة الترتيب أو النقل">⠿</span>
                   <span class="muted">${idx + 1}.</span>
                   <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;display:flex;align-items:center;gap:.35rem">${ownTag}<span style="overflow:hidden;text-overflow:ellipsis">${escapeHtml(it.preview)}</span></span>
                   <input type="number" data-si="${si}" data-ii="${idx}" data-f="answer" placeholder="إجابة ms" style="width:100px" value="${escapeHtml(it.answerMs)}" />
-                  <input type="number" data-si="${si}" data-ii="${idx}" data-f="study" placeholder="بطاقة ms" style="width:100px" value="${escapeHtml(it.studyCardMs)}" />
                   <span class="row" style="gap:.2rem">
                     <button type="button" class="btn btn-secondary btn-xs" data-up="${si}:${idx}">↑</button>
                     <button type="button" class="btn btn-secondary btn-xs" data-down="${si}:${idx}">↓</button>
@@ -573,20 +605,30 @@
 
           document.getElementById("sec-add")?.addEventListener("click", () => {
             markDraftDirty();
-            draftSections.push({ titleAr: "", items: [] });
+            draftSections.push({ titleAr: "", studyPhaseMs: "", items: [] });
             addQuestionTargetSection = draftSections.length - 1;
             renderItems();
           });
           wrap.querySelectorAll("[data-sec-del]").forEach((b) => {
             b.addEventListener("click", () => {
-              const si = Number(b.getAttribute("data-sec-del"));
-              if (si <= 0 || draftSections.length < 2) return;
-              if (!confirm("دمج أسئلة هذا القسم مع القسم السابق؟")) return;
-              markDraftDirty();
-              draftSections[si - 1].items.push(...draftSections[si].items);
-              draftSections.splice(si, 1);
-              addQuestionTargetSection = Math.min(addQuestionTargetSection, draftSections.length - 1);
-              renderItems();
+              void (async function () {
+                const si = Number(b.getAttribute("data-sec-del"));
+                if (si < 0 || draftSections.length < 2) return;
+                if (!window.confirm("حذف هذا القسم من المسودة؟ ستُزال الأسئلة المربوطة من التسلسل، ويُحذف من الخادم كل سؤال «خاص بالدرس» داخل هذا القسم نهائياً.")) return;
+                const sec = draftSections[si];
+                const ownedIds = sec && Array.isArray(sec.items) ? sec.items.filter(function (x) { return x.lessonOwned; }).map(function (x) { return x.questionId; }) : [];
+                try {
+                  for (let j = 0; j < ownedIds.length; j++) {
+                    await api("/api/admin/lessons/" + selectedLessonId + "/questions/" + ownedIds[j], { method: "DELETE" });
+                  }
+                } catch (_) {
+                  return;
+                }
+                markDraftDirty();
+                draftSections.splice(si, 1);
+                addQuestionTargetSection = Math.min(addQuestionTargetSection, Math.max(0, draftSections.length - 1));
+                renderItems();
+              })();
             });
           });
           wrap.querySelectorAll("input[data-sec-title]").forEach((inp) => {
@@ -596,16 +638,67 @@
               if (draftSections[si]) draftSections[si].titleAr = inp.value;
             });
           });
+          wrap.querySelectorAll("input[data-sec-phase]").forEach((inp) => {
+            inp.addEventListener("change", () => {
+              markDraftDirty();
+              const si = Number(inp.getAttribute("data-sec-phase"));
+              if (draftSections[si]) draftSections[si].studyPhaseMs = inp.value.trim();
+            });
+          });
           wrap.querySelectorAll("input[data-f]").forEach((inp) => {
             inp.addEventListener("change", () => {
               markDraftDirty();
               const si = Number(inp.getAttribute("data-si"));
               const ii = Number(inp.getAttribute("data-ii"));
-              const f = inp.getAttribute("data-f");
               const it = draftSections[si]?.items[ii];
               if (!it) return;
-              if (f === "answer") it.answerMs = inp.value.trim();
-              else it.studyCardMs = inp.value.trim();
+              it.answerMs = inp.value.trim();
+            });
+          });
+          wrap.querySelectorAll("[data-drag-row]").forEach((row) => {
+            row.addEventListener("dragstart", function (ev) {
+              dragLessonItem = { si: Number(row.getAttribute("data-si")), ii: Number(row.getAttribute("data-ii")) };
+              row.classList.add("dragging");
+              try {
+                ev.dataTransfer.setData("text/plain", "move");
+              } catch (_) {}
+              ev.dataTransfer.effectAllowed = "move";
+            });
+            row.addEventListener("dragend", function () {
+              row.classList.remove("dragging");
+              dragLessonItem = null;
+              wrap.querySelectorAll(".sec-drop-zone").forEach((z) => z.classList.remove("sec-drop-active"));
+            });
+            row.addEventListener("dragover", function (ev) {
+              if (!dragLessonItem) return;
+              ev.preventDefault();
+              ev.dataTransfer.dropEffect = "move";
+            });
+            row.addEventListener("drop", function (ev) {
+              ev.preventDefault();
+              if (!dragLessonItem) return;
+              const tSi = Number(row.getAttribute("data-si"));
+              const tIi = Number(row.getAttribute("data-ii"));
+              if (dragLessonItem.si === tSi && dragLessonItem.ii === tIi) return;
+              moveLessonItemInDraft(dragLessonItem.si, dragLessonItem.ii, tSi, tIi);
+            });
+          });
+          wrap.querySelectorAll(".sec-drop-zone").forEach(function (zone) {
+            zone.addEventListener("dragover", function (ev) {
+              if (!dragLessonItem) return;
+              ev.preventDefault();
+              zone.classList.add("sec-drop-active");
+              ev.dataTransfer.dropEffect = "move";
+            });
+            zone.addEventListener("dragleave", function () {
+              zone.classList.remove("sec-drop-active");
+            });
+            zone.addEventListener("drop", function (ev) {
+              ev.preventDefault();
+              zone.classList.remove("sec-drop-active");
+              if (!dragLessonItem) return;
+              const tSi = Number(zone.getAttribute("data-sec-drop"));
+              moveLessonItemInDraft(dragLessonItem.si, dragLessonItem.ii, tSi, 0);
             });
           });
           wrap.querySelectorAll("[data-up]").forEach((b) => {
@@ -682,12 +775,16 @@
           }
           const difficulty = document.getElementById("new-q-diff").value;
           const studyRaw = document.getElementById("new-q-study").value.trim();
+          if (!studyRaw) {
+            setMsg("بطاقة المذاكرة مطلوبة.", false);
+            return;
+          }
           const body = {
             prompt: prompt,
             options: options,
             correctIndex: correctIndex,
             difficulty: difficulty,
-            studyBody: studyRaw ? studyRaw : undefined,
+            studyBody: studyRaw,
           };
           try {
             const res = await api("/api/admin/lessons/" + selectedLessonId + "/questions", {
@@ -699,11 +796,9 @@
             if (!sec) return;
             const preview = prompt.length > 180 ? prompt.slice(0, 180) + "…" : prompt;
             const ansMs = document.getElementById("new-q-ans-ms").value.trim();
-            const stMs = document.getElementById("new-q-study-ms").value.trim();
             sec.items.push({
               questionId: res.id,
               answerMs: ansMs,
-              studyCardMs: stMs,
               preview: preview,
               lessonOwned: true,
               prompt: prompt,
@@ -720,7 +815,6 @@
             document.getElementById("new-q-o3").value = "";
             document.getElementById("new-q-study").value = "";
             document.getElementById("new-q-ans-ms").value = "";
-            document.getElementById("new-q-study-ms").value = "";
             setMsg("أُضيف السؤال للمسودة — اضغط «حفظ التسلسل» لإنهاء.", true);
             renderItems();
           } catch (_) {}
@@ -749,12 +843,17 @@
             setMsg("اختر إجابة صحيحة ضمن نطاق الخيارات.", false);
             return;
           }
+          const studyTrim = document.getElementById("own-study").value.trim();
+          if (!studyTrim) {
+            setMsg("بطاقة المذاكرة مطلوبة.", false);
+            return;
+          }
           const body = {
             prompt: prompt,
             options: options,
             correctIndex: ciOwn,
             difficulty: document.getElementById("own-diff").value,
-            studyBody: document.getElementById("own-study").value.trim() || null,
+            studyBody: studyTrim,
           };
           try {
             await api("/api/admin/lessons/" + selectedLessonId + "/questions/" + it.questionId, {
@@ -765,7 +864,7 @@
             it.options = options;
             it.correctIndex = body.correctIndex;
             it.difficulty = body.difficulty;
-            it.studyBody = body.studyBody || "";
+            it.studyBody = studyTrim;
             it.preview = prompt.length > 180 ? prompt.slice(0, 180) + "…" : prompt;
             closeOwnedEditor();
             markDraftDirty();
@@ -854,6 +953,10 @@
                 ev.stopPropagation();
                 const id = Number(b.getAttribute("data-add-q"));
                 const row = data.items.find((x) => x.id === id);
+                if (row && row.hasStudyCards === false) {
+                  setMsg("لا يمكن ربط سؤال من البنك بلا بطاقة مذاكرة. أضف نص مذاكرة للسؤال أولاً من إدارة الأسئلة.", false);
+                  return;
+                }
                 const preview = row ? String(row.promptPreview || "").slice(0, 180) : "#" + id;
                 const ts = Number(document.getElementById("target-sec-for-add")?.value ?? addQuestionTargetSection) || 0;
                 const sec = draftSections[ts] || draftSections[0];
@@ -864,7 +967,7 @@
                   return;
                 }
                 markDraftDirty();
-                sec.items.push({ questionId: id, answerMs: "", studyCardMs: "", preview, lessonOwned: false });
+                sec.items.push({ questionId: id, answerMs: "", preview, lessonOwned: false });
                 renderItems();
                 setMsg("أُضيف للمسودة — احفظ التسلسل.", true);
               });
@@ -876,10 +979,10 @@
           if (!selectedLessonId) return;
           const sections = draftSections.map((sec) => ({
             titleAr: sec.titleAr.trim() === "" ? null : sec.titleAr.trim(),
+            studyPhaseMs: sec.studyPhaseMs.trim() === "" ? null : Number(sec.studyPhaseMs),
             items: sec.items.map((it) => ({
               questionId: it.questionId,
               answerMs: it.answerMs.trim() === "" ? null : Number(it.answerMs),
-              studyCardMs: it.studyCardMs.trim() === "" ? null : Number(it.studyCardMs),
             })),
           }));
           const flat = sections.flatMap((s) => s.items);
@@ -892,8 +995,10 @@
               setMsg("وقت الإجابة يجب بين 3000 و 120000 أو فارغ.", false);
               return;
             }
-            if (x.studyCardMs != null && (!Number.isFinite(x.studyCardMs) || x.studyCardMs < 2000 || x.studyCardMs > 300000)) {
-              setMsg("وقت البطاقة يجب بين 2000 و 300000 أو فارغ.", false);
+          }
+          for (const sec of sections) {
+            if (sec.studyPhaseMs != null && (!Number.isFinite(sec.studyPhaseMs) || sec.studyPhaseMs < 2000 || sec.studyPhaseMs > 300000)) {
+              setMsg("زمن مرحلة المذاكرة لكل قسم يجب بين 2000 و 300000 مللي أو يُترك فارغاً.", false);
               return;
             }
           }

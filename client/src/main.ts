@@ -34,6 +34,8 @@ type LessonPlaybackSection = {
   id: number;
   sortOrder: number;
   titleAr: string | null;
+  /** زمن طور المذاكرة الإجمالي للقسم (مللي)، يعبّئه الخادم عند تقسيم effectiveStudyCardMs */
+  studyPhaseMs?: number;
   steps: LessonPlaybackStep[];
 };
 

@@ -89,6 +89,16 @@ import {
   simpleContentErrorKindHintAr,
 } from "../services/simpleContent/errorKind";
 
+function mergedStudyBody(data: {
+  studyBody?: string | null;
+  study_body?: string | null;
+}): string | null {
+  const v = data.studyBody ?? data.study_body;
+  if (v === null || v === undefined) return null;
+  const t = String(v).trim();
+  return t.length === 0 ? null : t;
+}
+
 const questionDifficultySchema = z.enum(["easy", "medium", "hard"]);
 const questionOptionsSchema = z
   .array(z.string().trim().min(1).max(500))
@@ -111,6 +121,15 @@ const questionBodySchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["correctIndex"],
       message: "correctIndex must be within options range",
+    });
+  }
+}).superRefine((d, ctx) => {
+  const sb = mergedStudyBody(d as { studyBody?: string | null; study_body?: string | null });
+  if (!sb?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["studyBody"],
+      message: "بطاقة المذاكرة مطلوبة ولا يمكن أن تكون فارغة",
     });
   }
 });
@@ -140,12 +159,22 @@ const importItemSchema = z
       });
     }
   })
+  .superRefine((d, ctx) => {
+    const t = mergedStudyBody(d as { studyBody?: string | null; study_body?: string | null });
+    if (!t?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["studyBody"],
+        message: "بطاقة المذاكرة مطلوبة ولا يمكن أن تكون فارغة",
+      });
+    }
+  })
   .transform((d) => ({
     prompt: d.prompt,
     options: d.options,
     correctIndex: (d.correctIndex ?? d.correct_index) as number,
     difficulty: d.difficulty,
-    studyBody: (d.studyBody ?? d.study_body)?.trim() || null,
+    studyBody: mergedStudyBody(d as { studyBody?: string | null; study_body?: string | null }) as string,
     subcategoryKey: (d.subcategoryKey ?? d.subcategory_key)?.trim() || null,
   }));
 
@@ -420,6 +449,7 @@ const lessonItemsPutSchema = z.union([
       .array(
         z.object({
           titleAr: z.string().max(500).nullable().optional(),
+          studyPhaseMs: z.number().int().min(2000).max(300000).nullable().optional(),
           items: z.array(lessonItemReplaceBodySchema).min(1).max(50),
         }),
       )
@@ -613,16 +643,6 @@ function parseAnalyticsFilters(req: Request): { subject?: string; modelId?: stri
     from,
     to,
   };
-}
-
-function mergedStudyBody(data: {
-  studyBody?: string | null;
-  study_body?: string | null;
-}): string | null {
-  const v = data.studyBody ?? data.study_body;
-  if (v === null || v === undefined) return null;
-  const t = String(v).trim();
-  return t.length === 0 ? null : t;
 }
 
 async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Array<{
@@ -3113,8 +3133,9 @@ export function registerAdminRoutes(app: Express): void {
         difficulty: string | null;
         study_body: string | null;
         subcategory_key: string;
+        lesson_id: number | null;
       }>(
-        `SELECT prompt, options, correct_index, difficulty, study_body, subcategory_key FROM questions WHERE id = $1`,
+        `SELECT prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id FROM questions WHERE id = $1`,
         [id],
       );
       const row = cur.rows[0];
@@ -3159,6 +3180,15 @@ export function registerAdminRoutes(app: Express): void {
           const t = String(raw).trim();
           nextStudy = t.length === 0 ? null : t;
         }
+      }
+
+      if (row.lesson_id == null && studyPatchProvided && (!nextStudy || !String(nextStudy).trim())) {
+        res.status(400).json({
+          ok: false,
+          error: "invalid_body",
+          message: "بطاقة المذاكرة مطلوبة لأسئلة البنك ولا يمكن مسحها",
+        });
+        return;
       }
 
       await pool.query(
@@ -3582,6 +3612,15 @@ export function registerAdminRoutes(app: Express): void {
         }
       }
 
+      if (!nextStudy || !String(nextStudy).trim()) {
+        res.status(400).json({
+          ok: false,
+          error: "invalid_body",
+          message: "بطاقة المذاكرة مطلوبة لأسئلة الدرس",
+        });
+        return;
+      }
+
       await pool.query(
         `UPDATE questions
          SET prompt = $1, options = $2::jsonb, correct_index = $3,
@@ -3601,6 +3640,27 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true });
     } catch {
       res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.delete("/api/admin/lessons/:lessonId/questions/:questionId", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const lessonId = Number(req.params.lessonId);
+    const questionId = Number(req.params.questionId);
+    if (!Number.isInteger(lessonId) || lessonId < 1 || !Number.isInteger(questionId) || questionId < 1) {
+      res.status(400).json({ ok: false, error: "invalid_id" });
+      return;
+    }
+    try {
+      const pool = getPool();
+      const del = await pool.query(`DELETE FROM questions WHERE id = $1 AND lesson_id = $2`, [questionId, lessonId]);
+      if ((del.rowCount ?? 0) === 0) {
+        res.status(404).json({ ok: false, error: "not_found" });
+        return;
+      }
+      res.json({ ok: true });
+    } catch {
+      res.status(500).json({ ok: false, error: "delete_failed" });
     }
   });
 
@@ -3695,20 +3755,20 @@ export function registerAdminRoutes(app: Express): void {
       "sections" in parsed.data
         ? parsed.data.sections.map((sec) => ({
             titleAr: sec.titleAr ?? null,
+            studyPhaseMs: sec.studyPhaseMs ?? null,
             items: sec.items.map((x) => ({
               questionId: x.questionId,
               answerMs: x.answerMs,
-              studyCardMs: x.studyCardMs,
             })),
           }))
         : parsed.data.items.length
           ? [
               {
                 titleAr: null as string | null,
+                studyPhaseMs: null,
                 items: parsed.data.items.map((x) => ({
                   questionId: x.questionId,
                   answerMs: x.answerMs,
-                  studyCardMs: x.studyCardMs,
                 })),
               },
             ]
