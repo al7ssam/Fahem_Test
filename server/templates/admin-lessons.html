@@ -16,6 +16,7 @@
       input,select,textarea { background:rgba(0,0,0,.25); border:1px solid var(--border); color:var(--text); border-radius:.55rem; padding:.45rem .55rem; font-family:inherit; }
       .btn { border:none; border-radius:.55rem; padding:.5rem .85rem; font-weight:700; cursor:pointer; font-family:inherit; background:linear-gradient(to left,#e8be66,#a8792f); color:#120b02; }
       .btn-secondary { background:rgba(255,255,255,.1); color:var(--text); border:1px solid var(--border); } .btn-danger { background:rgba(248,113,113,.14); color:#fecaca; border:1px solid rgba(248,113,113,.45); }
+      .btn.btn-xs { padding:.22rem .42rem; font-size:.72rem; font-weight:700; }
       .btn:disabled { opacity:.5; cursor:not-allowed; } .msg { min-height:1.2rem; flex-basis:100%; font-size:.88rem; } .ok { color:var(--ok); } .err { color:#fca5a5; }
       .card { margin-top:.65rem; padding:.7rem; background:var(--card); border:1px solid var(--border); border-radius:.9rem; }
       .row { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; } .split { display:grid; grid-template-columns:1fr 1.2fr; gap:.7rem; }
@@ -23,10 +24,24 @@
       .list-item { padding:.45rem .55rem; border-bottom:1px solid rgba(223,187,106,.1); cursor:pointer; }
       .list-item:hover { background:rgba(255,255,255,.04); } .list-item.active { border-inline-end:3px solid var(--amber); }
       .item-row { display:grid; grid-template-columns:1.5rem minmax(0,1fr) 100px 100px auto minmax(4.5rem,auto); gap:.35rem; align-items:center; padding:.35rem; border-bottom:1px solid rgba(223,187,106,.08); font-size:.88rem; }
+      @media (max-width:700px) {
+        .item-row { display:flex; flex-direction:column; align-items:stretch; gap:.4rem; padding:.5rem .35rem; border-bottom:1px solid rgba(223,187,106,.12); }
+        .item-row input[type="number"] { width:100%; max-width:100%; }
+      }
       .muted { color:var(--muted); font-size:.82rem; }
       .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.58); z-index:100; display:flex; align-items:center; justify-content:center; padding:1rem; }
       .modal-panel { max-width:36rem; width:100%; max-height:92vh; overflow:auto; }
       table { width:100%; border-collapse:collapse; font-size:.88rem; } th,td { padding:.4rem; border-bottom:1px solid var(--border); text-align:right; }
+      .lesson-create-details { margin:.65rem 0; border:1px solid var(--border); border-radius:.9rem; background:rgba(8,12,28,.55); overflow:hidden; }
+      .lesson-create-details > summary { cursor:pointer; list-style:none; padding:.65rem .9rem; font-weight:800; color:var(--amber); background:rgba(0,0,0,.22); display:flex; justify-content:space-between; align-items:center; gap:.5rem; user-select:none; }
+      .lesson-create-details > summary::-webkit-details-marker { display:none; }
+      .lesson-create-details .lesson-caret { opacity:.75; font-size:.72rem; }
+      .lesson-create-details .lesson-create-details-inner { padding:.75rem .9rem 1rem; border-top:1px solid rgba(223,187,106,.12); }
+      .lesson-adv-details { margin-top:.55rem; border:1px dashed rgba(223,187,106,.28); border-radius:.65rem; padding:.4rem .55rem .65rem; background:rgba(0,0,0,.18); }
+      .lesson-adv-details > summary { cursor:pointer; font-size:.86rem; color:var(--muted); padding:.2rem 0 .35rem; list-style:none; font-weight:700; }
+      .lesson-adv-details > summary::-webkit-details-marker { display:none; }
+      .lesson-adv-details .lesson-adv-inner { padding-top:.35rem; }
+      .sec-block { margin:.55rem 0; padding:.55rem .65rem; background:rgba(6,10,22,.45); border:1px solid rgba(223,187,106,.14); border-radius:.75rem; }
       @media (max-width:1100px) { .split { grid-template-columns:1fr; } }
     </style>
   </head>
@@ -100,45 +115,55 @@
         <strong>تسلسل الأسئلة والأقسام</strong>
         <p class="muted" style="margin:.35rem 0">أنشئ أسئلة خاصة بهذا الدرس، أو اربط أسئلة من البنك. أعد الترتيب بالأسهم ثم احفظ التسلسل. يمكن ترك حقول الوقت فارغة لاستخدام افتراضيات الدرس.</p>
 
-        <div class="card" style="margin:.65rem 0;padding:.75rem">
-          <strong>إنشاء سؤال للدرس</strong>
-          <p class="muted" style="margin:.35rem 0;font-size:.82rem">يُخزَّن السؤال ويُربط بهذا الدرس فقط ولا يظهر في بحث البنك العام.</p>
-          <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
-          <textarea id="new-q-prompt" rows="2" placeholder="صياغة السؤال" style="width:100%;margin:.2rem 0"></textarea>
-          <div class="row" style="margin-top:.45rem">
-            <label class="muted">عدد الخيارات</label>
-            <select id="new-q-opt-count">
-              <option value="4" selected>4</option>
-              <option value="2">2</option>
-            </select>
-            <label class="muted">الصعوبة</label>
-            <select id="new-q-diff">
-              <option value="easy">easy</option>
-              <option value="medium" selected>medium</option>
-              <option value="hard">hard</option>
-            </select>
+        <details class="lesson-create-details" id="lesson-create-details" open>
+          <summary>إنشاء سؤال خاص بالدرس <span class="lesson-caret" aria-hidden="true">▼</span></summary>
+          <div class="lesson-create-details-inner">
+            <p class="muted" style="margin:0 0 .5rem;font-size:.82rem">يُخزَّن السؤال ويُربط بهذا الدرس فقط ولا يظهر في بحث البنك العام.</p>
+            <div id="lesson-create-target-slot"></div>
+            <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
+            <textarea id="new-q-prompt" rows="2" placeholder="صياغة السؤال" style="width:100%;margin:.2rem 0"></textarea>
+            <div class="row" style="margin-top:.45rem">
+              <label class="muted">عدد الخيارات</label>
+              <select id="new-q-opt-count">
+                <option value="4" selected>4 خيارات</option>
+                <option value="2">خياران</option>
+              </select>
+            </div>
+            <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
+            <div id="new-q-opts-grid" style="display:grid;gap:.35rem;margin:.25rem 0">
+              <input id="new-q-o0" type="text" placeholder="خيار 1" />
+              <input id="new-q-o1" type="text" placeholder="خيار 2" />
+              <input id="new-q-o2" type="text" placeholder="خيار 3" />
+              <input id="new-q-o3" type="text" placeholder="خيار 4" />
+            </div>
+            <div class="row" style="margin-top:.35rem;align-items:center">
+              <label class="muted">الإجابة الصحيحة</label>
+              <select id="new-q-correct" aria-label="فهرس الإجابة الصحيحة"></select>
+            </div>
+            <details class="lesson-adv-details">
+              <summary>خيارات متقدمة (صعوبة، مذاكرة، أوقات)</summary>
+              <div class="lesson-adv-inner">
+                <div class="row" style="margin-top:.35rem">
+                  <label class="muted">الصعوبة</label>
+                  <select id="new-q-diff">
+                    <option value="easy">سهل</option>
+                    <option value="medium" selected>متوسط</option>
+                    <option value="hard">صعب</option>
+                  </select>
+                </div>
+                <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة (اختياري)</label>
+                <textarea id="new-q-study" rows="2" style="width:100%" placeholder="نص البطاقة"></textarea>
+                <div class="row" style="margin-top:.45rem">
+                  <label class="muted">وقت الإجابة (مللي)</label>
+                  <input id="new-q-ans-ms" type="number" min="3000" max="120000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
+                  <label class="muted">وقت بطاقة المذاكرة (مللي)</label>
+                  <input id="new-q-study-ms" type="number" min="2000" max="300000" step="500" placeholder="افتراضي الدرس" style="width:140px" />
+                </div>
+              </div>
+            </details>
+            <button type="button" class="btn" id="new-q-submit" style="margin-top:.65rem">إضافة السؤال إلى القسم المحدد</button>
           </div>
-          <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
-          <div id="new-q-opts-grid" style="display:grid;gap:.35rem;margin:.25rem 0">
-            <input id="new-q-o0" type="text" placeholder="خيار 1" />
-            <input id="new-q-o1" type="text" placeholder="خيار 2" />
-            <input id="new-q-o2" type="text" placeholder="خيار 3" />
-            <input id="new-q-o3" type="text" placeholder="خيار 4" />
-          </div>
-          <div class="row" style="margin-top:.35rem;align-items:center">
-            <label class="muted">الإجابة الصحيحة (الفهرس)</label>
-            <select id="new-q-correct"></select>
-          </div>
-          <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة (اختياري)</label>
-          <textarea id="new-q-study" rows="2" style="width:100%" placeholder="نص البطاقة"></textarea>
-          <div class="row" style="margin-top:.45rem">
-            <label class="muted">وقت الإجابة لهذا الموضع (مللي)</label>
-            <input id="new-q-ans-ms" type="number" min="3000" max="120000" step="500" placeholder="فارغ = افتراضي الدرس" style="width:140px" />
-            <label class="muted">وقت بطاقة المذاكرة (مللي)</label>
-            <input id="new-q-study-ms" type="number" min="2000" max="300000" step="500" placeholder="فارغ = افتراضي الدرس" style="width:140px" />
-          </div>
-          <button type="button" class="btn" id="new-q-submit" style="margin-top:.55rem">إضافة إلى القسم المختار أدناه</button>
-        </div>
+        </details>
 
         <strong style="display:block;margin-top:.5rem">ربط سؤال من البنك</strong>
         <p class="muted" style="margin:.25rem 0;font-size:.82rem">البحث يعرض أسئلة البنك العامة فقط.</p>
@@ -153,9 +178,9 @@
           <button class="btn" id="l-save-items" type="button">حفظ التسلسل</button>
         </div>
 
-        <div id="owned-modal" class="modal-backdrop" hidden>
+        <div id="owned-modal" class="modal-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="owned-modal-title">
           <div class="card modal-panel">
-            <strong>تحرير سؤال خاص بالدرس</strong>
+            <strong id="owned-modal-title">تحرير سؤال خاص بالدرس</strong>
             <p class="muted" style="font-size:.82rem;margin:.35rem 0">التعديل يخص هذا الدرس فقط.</p>
             <label class="muted" style="display:block;margin-top:.35rem">نص السؤال</label>
             <textarea id="own-prompt" rows="2" style="width:100%"></textarea>
@@ -163,7 +188,11 @@
               <label class="muted">عدد الخيارات</label>
               <select id="own-opt-count"><option value="4">4</option><option value="2">2</option></select>
               <label class="muted">الصعوبة</label>
-              <select id="own-diff"><option value="easy">easy</option><option value="medium">medium</option><option value="hard">hard</option></select>
+              <select id="own-diff">
+                <option value="easy">سهل</option>
+                <option value="medium">متوسط</option>
+                <option value="hard">صعب</option>
+              </select>
             </div>
             <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
             <div style="display:grid;gap:.35rem;margin:.25rem 0">
@@ -210,6 +239,22 @@
         let addQuestionTargetSection = 0;
         /** @type {{ si: number, ii: number } | null} */
         let editOwnedTarget = null;
+        let draftDirty = false;
+        /** @type {Element | null} */
+        let modalFocusBefore = null;
+
+        function markDraftDirty() {
+          draftDirty = true;
+        }
+        function clearDraftDirty() {
+          draftDirty = false;
+        }
+
+        window.addEventListener("beforeunload", function (ev) {
+          if (!draftDirty) return;
+          ev.preventDefault();
+          ev.returnValue = "";
+        });
 
         function fillCorrectSelect(sel, n) {
           sel.innerHTML = Array.from({ length: n }, (_, i) => "<option value=\"" + i + "\">" + i + "</option>").join("");
@@ -231,30 +276,73 @@
 
         function openOwnedEditor(si, ii) {
           const it = draftSections[si]?.items[ii];
-          if (!it || !it.lessonOwned || !it.prompt || !it.options) return;
+          if (!it || !it.lessonOwned || !it.prompt) return;
+          const raw = Array.isArray(it.options) ? it.options.slice() : [];
+          const twoMode = raw.length === 2;
+          let pad = raw.length ? raw.slice() : ["", "", "", ""];
+          if (!twoMode) {
+            while (pad.length < 4) pad.push("");
+            pad = pad.slice(0, 4);
+          }
           editOwnedTarget = { si, ii };
           document.getElementById("own-prompt").value = it.prompt;
-          document.getElementById("own-o0").value = it.options[0] || "";
-          document.getElementById("own-o1").value = it.options[1] || "";
-          document.getElementById("own-o2").value = it.options[2] || "";
-          document.getElementById("own-o3").value = it.options[3] || "";
-          const oc = it.options.length === 2 ? "2" : "4";
-          document.getElementById("own-opt-count").value = oc;
+          document.getElementById("own-opt-count").value = twoMode ? "2" : "4";
           syncOwnModalOpts();
-          const maxCi = (oc === "2" ? 2 : 4) - 1;
+          document.getElementById("own-o0").value = pad[0] || "";
+          document.getElementById("own-o1").value = pad[1] || "";
+          document.getElementById("own-o2").value = pad[2] || "";
+          document.getElementById("own-o3").value = pad[3] || "";
+          const nChoice = twoMode ? 2 : 4;
+          const maxCi = nChoice - 1;
           const ci = Math.min(Math.max(Number(it.correctIndex) || 0, 0), maxCi);
           document.getElementById("own-correct").value = String(ci);
           document.getElementById("own-diff").value = it.difficulty && /^easy|medium|hard$/.test(it.difficulty) ? it.difficulty : "medium";
           document.getElementById("own-study").value = it.studyBody || "";
-          document.getElementById("owned-modal").hidden = false;
+          const modal = document.getElementById("owned-modal");
+          modalFocusBefore = document.activeElement;
+          modal.hidden = false;
+          setTimeout(function () {
+            document.getElementById("own-prompt").focus();
+          }, 0);
         }
 
         function closeOwnedEditor() {
           editOwnedTarget = null;
           document.getElementById("owned-modal").hidden = true;
+          if (modalFocusBefore && typeof modalFocusBefore.focus === "function") {
+            try {
+              modalFocusBefore.focus();
+            } catch (_) {}
+          }
+          modalFocusBefore = null;
         }
 
-        document.getElementById("go-admin").onclick = () => { window.location.href = "/admin"; };
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key !== "Escape") return;
+          const modal = document.getElementById("owned-modal");
+          if (!modal.hidden) {
+            closeOwnedEditor();
+            ev.preventDefault();
+          }
+        });
+
+        document.getElementById("go-admin").onclick = function () {
+          if (draftDirty && !window.confirm("تسلسل الأسئلة غير محفوظ على الخادم. المتابعة إلى اللوحة الرئيسية؟")) return;
+          window.location.href = "/admin";
+        };
+
+        function formatApiIssues(data) {
+          const issues = data && data.issues;
+          if (!Array.isArray(issues) || issues.length === 0) return "";
+          const first = issues[0];
+          if (typeof first === "string") return first;
+          if (first && typeof first === "object") {
+            const p = first.path != null ? (Array.isArray(first.path) ? first.path.join(".") : String(first.path)) : "";
+            const m = first.message ? String(first.message) : "";
+            return [p, m].filter(Boolean).join(": ") || m;
+          }
+          return String(first);
+        }
 
         async function api(path, opts) {
           const s = secret();
@@ -262,10 +350,42 @@
           const res = await fetch(path, { ...opts, headers: { ...hdr(), ...(opts && opts.headers) } });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.ok === false) {
-            setMsg(data.message || data.error || "فشل الطلب", false);
+            let errLine = data.message || data.error || "فشل الطلب";
+            const issText = formatApiIssues(data);
+            if (issText) errLine = errLine + " — " + issText;
+            setMsg(errLine, false);
             throw new Error(data.error || "api");
           }
           return data;
+        }
+
+        function renderLessonTargetSectionSelect() {
+          const slot = document.getElementById("lesson-create-target-slot");
+          if (!slot) return;
+          if (draftSections.length === 0) {
+            slot.innerHTML = '<p class="muted" style="margin:0;font-size:.82rem">لا أقسام بعد — انتقل إلى كتلة «تسلسل الأسئلة والأقسام» أسفل هذا النموذج واضغط «قسم جديد».</p>';
+            return;
+          }
+          if (addQuestionTargetSection >= draftSections.length) {
+            addQuestionTargetSection = Math.max(0, draftSections.length - 1);
+          }
+          const opts = draftSections
+            .map(
+              (sec, si) =>
+                `<option value="${si}"${si === addQuestionTargetSection ? " selected" : ""}>القسم ${si + 1} (${sec.items.length} سؤال)</option>`,
+            )
+            .join("");
+          slot.innerHTML =
+            `<div class="row" style="margin:0 0 .45rem;align-items:center;flex-wrap:wrap;gap:.5rem">
+              <label class="muted" for="target-sec-for-add">إضافة السؤال إلى</label>
+              <select id="target-sec-for-add" class="muted" style="min-width:13rem">${opts}</select>
+            </div>`;
+          const sel = document.getElementById("target-sec-for-add");
+          if (sel) {
+            sel.addEventListener("change", () => {
+              addQuestionTargetSection = Number(sel.value) || 0;
+            });
+          }
         }
 
         function renderCats() {
@@ -310,7 +430,10 @@
           ).join("") || '<div class="muted" style="padding:.5rem">لا دروس</div>';
           el.querySelectorAll(".list-item").forEach((row) => {
             row.addEventListener("click", async () => {
-              selectedLessonId = Number(row.getAttribute("data-id"));
+              const nid = Number(row.getAttribute("data-id"));
+              if (nid === selectedLessonId) return;
+              if (draftDirty && !window.confirm("تسلسل الأسئلة غير محفوظ. المتابعة وفقدان التعديلات على التسلسل؟")) return;
+              selectedLessonId = nid;
               renderLessons();
               await loadDetail(selectedLessonId);
             });
@@ -360,10 +483,10 @@
                     preview: it.promptPreview || "",
                     lessonOwned: !!it.lessonOwned,
                   };
-                  if (it.lessonOwned && it.prompt && Array.isArray(it.options)) {
+                  if (it.lessonOwned && it.prompt) {
                     row.prompt = it.prompt;
-                    row.options = it.options;
-                    row.correctIndex = it.correctIndex;
+                    row.options = Array.isArray(it.options) ? it.options : [];
+                    row.correctIndex = typeof it.correctIndex === "number" ? it.correctIndex : 0;
                     row.studyBody = it.studyBody != null ? it.studyBody : "";
                     row.difficulty = it.difficulty || "medium";
                   }
@@ -375,23 +498,23 @@
             }
             addQuestionTargetSection = Math.max(0, draftSections.length - 1);
             renderItems();
-          } catch (_) {}
+            clearDraftDirty();
+          } catch (_) {
+            if (!msg.classList.contains("err")) {
+              setMsg("تعذّر تحميل تفاصيل الدرس (تحقق من الشبكة أو مفتاح الإدارة).", false);
+            }
+          }
         }
 
         function renderItems() {
           const wrap = document.getElementById("items-wrap");
-          let html = `<div class="row" style="margin:.35rem 0;align-items:end">
-            <div><label class="muted" for="target-sec-for-add">إضافة سؤال إلى</label>
-            <select id="target-sec-for-add" class="muted" style="min-width:8rem;margin-top:.2rem">`;
-          draftSections.forEach((sec, si) => {
-            html += `<option value="${si}"${si === addQuestionTargetSection ? " selected" : ""}>القسم ${si + 1} (${sec.items.length})</option>`;
-          });
-          html += `</select></div>
+          let html = `<div class="row" style="margin:.35rem 0 .55rem;align-items:center">
             <button type="button" class="btn btn-secondary" id="sec-add">قسم جديد</button>
-            </div>`;
+            <span class="muted" style="font-size:.82rem">يُضاف القسم إلى نهاية التسلسل.</span>
+          </div>`;
 
           draftSections.forEach((sec, si) => {
-            html += `<div class="card" style="margin:.55rem 0;padding:.55rem" data-sec-block="${si}">
+            html += `<div class="sec-block" data-sec-block="${si}">
               <div class="row" style="justify-content:space-between;align-items:center">
                 <strong>القسم ${si + 1}</strong>
                 ${draftSections.length > 1 ? `<button type="button" class="btn btn-danger" style="padding:.25rem .5rem;font-size:.78rem" data-sec-del="${si}">حذف القسم ودمج أسئلته مع السابق</button>` : ""}
@@ -406,7 +529,7 @@
                 const ownTag = it.lessonOwned
                   ? '<span class="muted" style="font-size:.72rem;color:var(--ok)">درس</span>'
                   : '<span class="muted" style="font-size:.72rem">بنك</span>';
-                const editBtn = it.lessonOwned
+                const editBtn = it.lessonOwned && it.prompt
                   ? `<button type="button" class="btn btn-secondary" style="padding:.2rem .45rem;font-size:.75rem" data-edit-owned="${si}:${idx}">تحرير</button>`
                   : '<span class="muted" style="font-size:.75rem">—</span>';
                 html += `<div class="item-row">
@@ -428,13 +551,8 @@
 
           wrap.innerHTML = html || '<div class="muted" style="padding:.5rem">لا أقسام</div>';
 
-          const sel = document.getElementById("target-sec-for-add");
-          if (sel) {
-            sel.addEventListener("change", () => {
-              addQuestionTargetSection = Number(sel.value) || 0;
-            });
-          }
           document.getElementById("sec-add")?.addEventListener("click", () => {
+            markDraftDirty();
             draftSections.push({ titleAr: "", items: [] });
             addQuestionTargetSection = draftSections.length - 1;
             renderItems();
@@ -444,6 +562,7 @@
               const si = Number(b.getAttribute("data-sec-del"));
               if (si <= 0 || draftSections.length < 2) return;
               if (!confirm("دمج أسئلة هذا القسم مع القسم السابق؟")) return;
+              markDraftDirty();
               draftSections[si - 1].items.push(...draftSections[si].items);
               draftSections.splice(si, 1);
               addQuestionTargetSection = Math.min(addQuestionTargetSection, draftSections.length - 1);
@@ -452,12 +571,14 @@
           });
           wrap.querySelectorAll("input[data-sec-title]").forEach((inp) => {
             inp.addEventListener("change", () => {
+              markDraftDirty();
               const si = Number(inp.getAttribute("data-sec-title"));
               if (draftSections[si]) draftSections[si].titleAr = inp.value;
             });
           });
           wrap.querySelectorAll("input[data-f]").forEach((inp) => {
             inp.addEventListener("change", () => {
+              markDraftDirty();
               const si = Number(inp.getAttribute("data-si"));
               const ii = Number(inp.getAttribute("data-ii"));
               const f = inp.getAttribute("data-f");
@@ -469,6 +590,7 @@
           });
           wrap.querySelectorAll("[data-up]").forEach((b) => {
             b.addEventListener("click", () => {
+              markDraftDirty();
               const [ssi, iix] = (b.getAttribute("data-up") || "0:0").split(":").map(Number);
               const arr = draftSections[ssi]?.items;
               if (!arr || iix <= 0) return;
@@ -478,6 +600,7 @@
           });
           wrap.querySelectorAll("[data-down]").forEach((b) => {
             b.addEventListener("click", () => {
+              markDraftDirty();
               const [ssi, iix] = (b.getAttribute("data-down") || "0:0").split(":").map(Number);
               const arr = draftSections[ssi]?.items;
               if (!arr || iix >= arr.length - 1) return;
@@ -487,6 +610,7 @@
           });
           wrap.querySelectorAll("[data-rm]").forEach((b) => {
             b.addEventListener("click", () => {
+              markDraftDirty();
               const [ssi, iix] = (b.getAttribute("data-rm") || "0:0").split(":").map(Number);
               draftSections[ssi]?.items.splice(iix, 1);
               renderItems();
@@ -499,6 +623,7 @@
               openOwnedEditor(ssi, iix);
             });
           });
+          renderLessonTargetSectionSelect();
         }
 
         document.getElementById("new-q-opt-count").addEventListener("change", syncNewQForm);
@@ -519,6 +644,10 @@
             return;
           }
           const correctIndex = Number(document.getElementById("new-q-correct").value);
+          if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= nOpt) {
+            setMsg("اختر إجابة صحيحة ضمن نطاق الخيارات.", false);
+            return;
+          }
           const difficulty = document.getElementById("new-q-diff").value;
           const studyRaw = document.getElementById("new-q-study").value.trim();
           const body = {
@@ -551,6 +680,7 @@
               studyBody: studyRaw,
               difficulty: difficulty,
             });
+            markDraftDirty();
             document.getElementById("new-q-prompt").value = "";
             document.getElementById("new-q-o0").value = "";
             document.getElementById("new-q-o1").value = "";
@@ -585,10 +715,15 @@
             setMsg("أكمل نص السؤال وجميع الخيارات.", false);
             return;
           }
+          const ciOwn = Number(document.getElementById("own-correct").value);
+          if (!Number.isInteger(ciOwn) || ciOwn < 0 || ciOwn >= nOpt) {
+            setMsg("اختر إجابة صحيحة ضمن نطاق الخيارات.", false);
+            return;
+          }
           const body = {
             prompt: prompt,
             options: options,
-            correctIndex: Number(document.getElementById("own-correct").value),
+            correctIndex: ciOwn,
             difficulty: document.getElementById("own-diff").value,
             studyBody: document.getElementById("own-study").value.trim() || null,
           };
@@ -604,6 +739,7 @@
             it.studyBody = body.studyBody || "";
             it.preview = prompt.length > 180 ? prompt.slice(0, 180) + "…" : prompt;
             closeOwnedEditor();
+            markDraftDirty();
             setMsg("تم تحديث السؤال.", true);
             renderItems();
           } catch (_) {}
@@ -624,6 +760,7 @@
         };
 
         document.getElementById("lesson-new").onclick = async () => {
+          if (draftDirty && !window.confirm("تسلسل الأسئلة غير محفوظ. إنشاء درس جديد قد يُضاع عليك التعديل الحالي إن لم تحفظ. المتابعة؟")) return;
           try {
             const res = await api("/api/admin/lessons", {
               method: "POST",
@@ -662,6 +799,7 @@
             await api("/api/admin/lessons/" + selectedLessonId, { method: "DELETE" });
             selectedLessonId = null;
             detail = null;
+            clearDraftDirty();
             document.getElementById("editor-card").hidden = true;
             setMsg("تم الحذف.", true);
             await loadAll();
@@ -695,6 +833,7 @@
                   setMsg("السؤال موجود بالفعل في أحد الأقسام.", false);
                   return;
                 }
+                markDraftDirty();
                 sec.items.push({ questionId: id, answerMs: "", studyCardMs: "", preview, lessonOwned: false });
                 renderItems();
                 setMsg("أُضيف للمسودة — احفظ التسلسل.", true);
