@@ -48,7 +48,7 @@ type LessonPlaybackPayload = {
   sections?: LessonPlaybackSection[];
   steps: LessonPlaybackStep[];
 };
-type NameFlowStep = "mode" | "main_categories" | "sub_categories" | "difficulty" | "lesson_pick";
+type NameFlowStep = "mode" | "main_categories" | "sub_categories" | "difficulty";
 type JoinKind = "public" | "solo" | "private_create" | "private_join";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -565,20 +565,6 @@ function render(): void {
     const isPrivateEntryFlow = Boolean(pendingJoinRoomCode);
     const renderModePicker = !isPrivateEntryFlow && nameFlowStep === "mode";
     const renderDifficultyPicker = !isPrivateEntryFlow && nameFlowStep === "difficulty";
-    const renderLessonMatchPicker = !isPrivateEntryFlow && nameFlowStep === "lesson_pick";
-    const lessonMatchPickCards = lessonBrowseLessons
-      .map(
-        (l) => `
-        <button type="button" class="mode-option-btn text-right w-full flex flex-col items-stretch gap-1 py-3 px-4 ${
-          selectedLessonMatchId === l.id ? "mode-option-btn--selected" : ""
-        }" data-lesson-match-id="${l.id}" aria-pressed="${selectedLessonMatchId === l.id ? "true" : "false"}">
-          <span class="mode-option-title">${escapeHtml(l.title)}</span>
-          <span class="mode-option-desc text-slate-400">${escapeHtml(
-            l.category ? `${l.category.icon} ${l.category.nameAr}` : "بدون تصنيف",
-          )} — ${l.itemCount} سؤالاً</span>
-        </button>`,
-      )
-      .join("");
     const selectedMain = categoriesState.find((c) => c.id === selectedMainCategoryId) ?? null;
     const subItems = selectedMain?.subcategories ?? [];
     const mainCards = categoriesState
@@ -629,9 +615,7 @@ function render(): void {
                   ? `الانضمام للغرفة الخاصة (${pendingJoinRoomCode})`
                   : renderModePicker
                   ? "اختر نمط اللعب"
-                  : nameFlowStep === "lesson_pick"
-                    ? "اختر درساً للعب — مراجعة بطاقات ثم أسئلة الدرس"
-                    : nameFlowStep === "main_categories"
+                  : nameFlowStep === "main_categories"
                       ? "اختر التصنيف الرئيسي"
                       : nameFlowStep === "sub_categories"
                         ? "اختر التصنيف الفرعي"
@@ -664,17 +648,9 @@ function render(): void {
                 <button type="button" class="mode-option-btn" data-flow="lessons">
                   <span class="mode-option-icon" aria-hidden="true">📖</span>
                   <span class="mode-option-title">دروس منظمة</span>
-                  <span class="mode-option-desc">تسلسل تعليمي مرتب يعيد استخدام أسئلة البنك — بدون تحدٍ عشوائي</span>
-                </button>
-                <button type="button" class="mode-option-btn" data-mode="lesson">
-                  <span class="mode-option-icon" aria-hidden="true">🎯</span>
-                  <span class="mode-option-title">درس في تحدٍ</span>
-                  <span class="mode-option-desc">مباراة على درس منشور: مهلة مراجعة واحدة ثم أسئلة الدرس بالترتيب</span>
+                  <span class="mode-option-desc">اختر درساً ثم تعلّم فردياً أو تحدّ عاماً أو غرفة خاصة</span>
                 </button>
                 `
-                    : renderLessonMatchPicker
-                      ? lessonMatchPickCards ||
-                        `<p class="text-slate-400 text-sm text-center py-4 m-0">لا توجد دروس منشورة. جرّب لاحقاً أو عد للخلف.</p>`
                     : nameFlowStep === "main_categories"
                       ? mainCards
                       : nameFlowStep === "sub_categories"
@@ -685,26 +661,24 @@ function render(): void {
               <div class="flex gap-2">
                 <button id="back-mode-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg ${
                   renderModePicker || isPrivateEntryFlow ? "hidden" : ""
-                }">${renderLessonMatchPicker ? "العودة لأنماط اللعب" : "رجوع"}</button>
+                }">رجوع</button>
                 <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg ${
-                  isPrivateEntryFlow || renderModePicker || renderDifficultyPicker || renderLessonMatchPicker
-                    ? ""
-                    : "hidden"
+                  isPrivateEntryFlow || renderModePicker || renderDifficultyPicker ? "" : "hidden"
                 }">${
                   isPrivateEntryFlow
                     ? "انضمام للغرفة"
-                    : renderModePicker || renderDifficultyPicker || renderLessonMatchPicker
-                    ? "ابدأ التحدي"
-                    : nameFlowStep === "main_categories"
-                      ? "التالي"
-                      : "التالي"
+                    : renderModePicker || renderDifficultyPicker
+                      ? "ابدأ التحدي"
+                      : nameFlowStep === "main_categories"
+                        ? "التالي"
+                        : "التالي"
                 }</button>
               </div>
               <button id="solo-learning-btn" class="ui-btn ui-btn--primary w-full py-3 text-lg ${
-                (renderDifficultyPicker || renderLessonMatchPicker) && !isPrivateEntryFlow ? "" : "hidden"
+                renderDifficultyPicker && !isPrivateEntryFlow ? "" : "hidden"
               }">التعلم الفردي</button>
               <div class="${
-                (renderDifficultyPicker || renderLessonMatchPicker) && !isPrivateEntryFlow ? "space-y-2" : "hidden"
+                renderDifficultyPicker && !isPrivateEntryFlow ? "space-y-2" : "hidden"
               }">
                 <button id="create-private-room-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg">إنشاء غرفة خاصة</button>
                 <div class="flex gap-2">
@@ -762,20 +736,6 @@ function render(): void {
         err.textContent = "تعذر تحميل التصنيفات.";
       }
     };
-    const goToLessonMatchPick = async () => {
-      err.textContent = "";
-      playerNameDraft = input.value;
-      selectedModeInName = "lesson";
-      selectedLessonMatchId = null;
-      try {
-        await fetchLessonBrowse();
-        nameFlowStep = "lesson_pick";
-        render();
-      } catch {
-        err.textContent = "تعذر تحميل الدروس.";
-        render();
-      }
-    };
     if (renderModePicker) {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
@@ -784,6 +744,7 @@ function render(): void {
             err.textContent = "";
             lessonBrowseMsg = "جاري تحميل الدروس…";
             lessonBrowseFilterCategoryId = null;
+            selectedLessonMatchId = null;
             phase = "lesson_menu";
             render();
             void fetchLessonBrowse()
@@ -797,10 +758,6 @@ function render(): void {
               });
             return;
           }
-          if (b.dataset.mode === "lesson") {
-            void goToLessonMatchPick();
-            return;
-          }
           selectedModeInName =
             b.dataset.mode === "study_then_quiz" ? "study_then_quiz" : "direct";
           modeBtns.forEach((x) => {
@@ -811,19 +768,6 @@ function render(): void {
           if (selectedModeInName === "study_then_quiz") {
             void goToStudyCategories();
           }
-        });
-      });
-    } else if (renderLessonMatchPicker) {
-      app.querySelectorAll<HTMLButtonElement>("[data-lesson-match-id]").forEach((b) => {
-        b.addEventListener("click", () => {
-          const id = Number(b.dataset.lessonMatchId);
-          if (!Number.isInteger(id) || id < 1) return;
-          selectedLessonMatchId = id;
-          app.querySelectorAll<HTMLButtonElement>("[data-lesson-match-id]").forEach((x) => {
-            const on = x === b;
-            x.classList.toggle("mode-option-btn--selected", on);
-            x.setAttribute("aria-pressed", on ? "true" : "false");
-          });
         });
       });
     } else if (nameFlowStep === "main_categories") {
@@ -868,10 +812,7 @@ function render(): void {
     }
     backBtn?.addEventListener("click", () => {
       if (isPrivateEntryFlow) return;
-      if (nameFlowStep === "lesson_pick") {
-        nameFlowStep = "mode";
-        selectedLessonMatchId = null;
-      } else if (nameFlowStep === "difficulty") {
+      if (nameFlowStep === "difficulty") {
         nameFlowStep = selectedModeInName === "direct" ? "mode" : "sub_categories";
       } else if (nameFlowStep === "sub_categories") {
         nameFlowStep = "main_categories";
@@ -953,20 +894,6 @@ function render(): void {
         render();
         return;
       }
-      if (nameFlowStep === "lesson_pick") {
-        if (!selectedLessonMatchId) {
-          btn.disabled = false;
-          btn.classList.remove("btn-pending");
-          err.textContent = "اختر درساً من القائمة.";
-          return;
-        }
-        btn.textContent = "جاري الدخول...";
-        phase = "matchmaking";
-        lobbyNotice = "جاري الاتصال بالخادم والبحث عن منافسين لنفس الدرس…";
-        render();
-        connectSocket(name, "lesson", null, "mix", "public", undefined, selectedLessonMatchId);
-        return;
-      }
       btn.textContent = "جاري الدخول...";
       phase = "matchmaking";
       if (selectedModeInName === "direct") {
@@ -991,10 +918,6 @@ function render(): void {
         err.textContent = "اختر تصنيفًا فرعيًا أولاً.";
         return;
       }
-      if (selectedModeInName === "lesson" && !selectedLessonMatchId) {
-        err.textContent = "اختر درساً من القائمة أولاً.";
-        return;
-      }
       storePlayerName(name);
       playerNameDraft = name;
       soloBtn.disabled = true;
@@ -1006,26 +929,19 @@ function render(): void {
       lobbyNotice =
         selectedModeInName === "direct"
           ? `جاري بدء التعلم الفردي... (${difficultyModeLabelAr(selectedDifficultyMode)})`
-          : selectedModeInName === "lesson"
-            ? "جاري بدء التعلم الفردي على الدرس…"
-            : `جاري بدء التعلم الفردي... (${selectedSubcategoryLabel ?? selectedSubcategoryKey} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
+          : `جاري بدء التعلم الفردي... (${selectedSubcategoryLabel ?? selectedSubcategoryKey} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
       render();
       connectSoloSocket(
         name,
         selectedModeInName,
         selectedModeInName === "study_then_quiz" ? selectedSubcategoryKey : null,
         selectedDifficultyMode,
-        selectedModeInName === "lesson" ? selectedLessonMatchId : null,
       );
     });
     createPrivateBtn?.addEventListener("click", () => {
       const name = input.value.trim();
       if (!name) {
         err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
-        return;
-      }
-      if (selectedModeInName === "lesson" && !selectedLessonMatchId) {
-        err.textContent = "اختر درساً من القائمة قبل إنشاء الغرفة.";
         return;
       }
       storePlayerName(name);
@@ -1044,8 +960,6 @@ function render(): void {
         selectedModeInName === "study_then_quiz" ? selectedSubcategoryKey : null,
         selectedDifficultyMode,
         "private_create",
-        undefined,
-        selectedModeInName === "lesson" ? selectedLessonMatchId : null,
       );
     });
     joinPrivateBtn?.addEventListener("click", () => {
@@ -1111,13 +1025,25 @@ function render(): void {
             <button type="button" id="lesson-back-home" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">الرئيسية</button>
             <h1 class="text-xl font-extrabold text-amber-300">دروس منظمة</h1>
           </div>
-          <p class="text-slate-300 text-sm text-right m-0">تسلسل تعليمي مرتب — اختر درساً للبدء.</p>
+          <p class="text-slate-300 text-sm text-right m-0">اختر درساً ثم طريقة اللعب: تعلّم فردي محلياً، أو تحدٍ عام، أو غرفة خاصة.</p>
           <div class="flex flex-wrap gap-2 items-center">
             <label class="text-slate-400 text-sm">التصنيف</label>
             <select id="lesson-cat-filter" class="app-input flex-1 min-w-[160px] px-3 py-2 text-right">${catOptions}</select>
           </div>
           <p id="lesson-browse-msg" class="text-amber-200 text-sm min-h-[1.25rem] m-0">${escapeHtml(lessonBrowseMsg)}</p>
-          <div id="lesson-list-root" class="flex flex-col gap-2 flex-1 overflow-y-auto pb-4"></div>
+          <div id="lesson-list-root" class="flex flex-col gap-2 flex-1 overflow-y-auto max-h-[40vh] sm:max-h-none"></div>
+          <div class="app-card p-4 space-y-3 shrink-0">
+            <label class="block text-right text-sm text-slate-400">اسمك في اللعبة (للتحدي أو الغرفة)</label>
+            <input id="lesson-menu-name" maxlength="32" type="text" placeholder="مثال: سارة" class="app-input w-full px-4 py-3 text-right text-lg" />
+            <button type="button" id="lesson-menu-rest" class="ui-btn ui-btn--primary w-full py-3">التعلم الفردي</button>
+            <button type="button" id="lesson-menu-public" class="ui-btn ui-btn--cta w-full py-3">ابدأ التحدي</button>
+            <button type="button" id="lesson-menu-create-private" class="ui-btn ui-btn--ghost w-full py-3">إنشاء غرفة خاصة</button>
+            <div class="flex gap-2">
+              <input id="lesson-menu-room-code" type="text" placeholder="كود الغرفة" class="app-input w-full px-3 py-2 text-right" />
+              <button type="button" id="lesson-menu-join-private" class="ui-btn ui-btn--cta px-4 py-2 shrink-0">انضمام</button>
+            </div>
+            <p id="lesson-menu-err" class="text-red-400 text-sm min-h-[1.25rem] m-0"></p>
+          </div>
         </div>
       `),
     );
@@ -1131,6 +1057,22 @@ function render(): void {
         render();
       });
     }
+    const nameMenuInput = app.querySelector<HTMLInputElement>("#lesson-menu-name");
+    const storedNm = getStoredPlayerName();
+    if (nameMenuInput && (playerNameDraft || storedNm)) {
+      nameMenuInput.value = playerNameDraft || storedNm;
+    }
+    nameMenuInput?.addEventListener("input", () => {
+      if (nameMenuInput) playerNameDraft = nameMenuInput.value;
+    });
+    const roomMenuInput = app.querySelector<HTMLInputElement>("#lesson-menu-room-code");
+    if (roomMenuInput) {
+      roomMenuInput.value = pendingJoinRoomCode;
+      roomMenuInput.addEventListener("input", () => {
+        pendingJoinRoomCode = roomMenuInput.value.trim().toUpperCase();
+      });
+    }
+    const menuErr = app.querySelector<HTMLParagraphElement>("#lesson-menu-err");
     const root = app.querySelector<HTMLDivElement>("#lesson-list-root");
     if (root) {
       if (filtered.length === 0) {
@@ -1142,6 +1084,9 @@ function render(): void {
           btn.type = "button";
           btn.className =
             "mode-option-btn text-right w-full flex flex-col items-stretch gap-1 py-3 px-4";
+          if (selectedLessonMatchId === l.id) {
+            btn.classList.add("mode-option-btn--selected");
+          }
           const catLabel = l.category
             ? `${l.category.icon} ${l.category.nameAr}`
             : "بدون تصنيف";
@@ -1150,14 +1095,106 @@ function render(): void {
             <span class="mode-option-desc text-slate-400">${escapeHtml(catLabel)} — ${l.itemCount} سؤالاً</span>
           `;
           btn.addEventListener("click", () => {
-            void openLessonById(l.id);
+            selectedLessonMatchId = l.id;
+            render();
           });
           root.appendChild(btn);
         });
       }
     }
+    const clearMenuErr = (): void => {
+      if (menuErr) menuErr.textContent = "";
+    };
+    app.querySelector("#lesson-menu-rest")?.addEventListener("click", () => {
+      clearMenuErr();
+      if (!selectedLessonMatchId) {
+        if (menuErr) menuErr.textContent = "اختر درساً من القائمة.";
+        return;
+      }
+      void openLessonById(selectedLessonMatchId);
+    });
+    app.querySelector("#lesson-menu-public")?.addEventListener("click", () => {
+      clearMenuErr();
+      const name = (nameMenuInput?.value ?? "").trim();
+      if (!selectedLessonMatchId) {
+        if (menuErr) menuErr.textContent = "اختر درساً من القائمة.";
+        return;
+      }
+      if (!name) {
+        if (menuErr) menuErr.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        return;
+      }
+      storePlayerName(name);
+      playerNameDraft = name;
+      phase = "matchmaking";
+      soloLearningPending = false;
+      currentGameMode = "lesson";
+      lobbyNotice = "جاري الاتصال بالخادم والبحث عن منافسين لنفس الدرس…";
+      render();
+      connectSocket(name, "lesson", null, "mix", "public", undefined, selectedLessonMatchId);
+    });
+    app.querySelector("#lesson-menu-create-private")?.addEventListener("click", () => {
+      clearMenuErr();
+      const name = (nameMenuInput?.value ?? "").trim();
+      if (!name) {
+        if (menuErr) menuErr.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        return;
+      }
+      if (!selectedLessonMatchId) {
+        if (menuErr) menuErr.textContent = "اختر درساً قبل إنشاء الغرفة.";
+        return;
+      }
+      storePlayerName(name);
+      playerNameDraft = name;
+      phase = "private_room_lobby";
+      soloLearningPending = false;
+      privateRoomCodeState = null;
+      privateRoomInviteUrl = null;
+      privateQrDataUrl = null;
+      isPrivateRoomSession = true;
+      lobbyNotice = "جاري إنشاء الغرفة الخاصة...";
+      currentGameMode = "lesson";
+      render();
+      connectSocket(
+        name,
+        "lesson",
+        null,
+        "mix",
+        "private_create",
+        undefined,
+        selectedLessonMatchId,
+      );
+    });
+    app.querySelector("#lesson-menu-join-private")?.addEventListener("click", () => {
+      clearMenuErr();
+      const name = (nameMenuInput?.value ?? "").trim();
+      const roomCode = (roomMenuInput?.value || pendingJoinRoomCode).trim().toUpperCase();
+      if (!name) {
+        if (menuErr) menuErr.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+        return;
+      }
+      if (!roomCode) {
+        if (menuErr) menuErr.textContent = "أدخل كود الغرفة.";
+        return;
+      }
+      pendingJoinRoomCode = roomCode;
+      storePlayerName(name);
+      playerNameDraft = name;
+      phase = "matchmaking";
+      soloLearningPending = false;
+      privateRoomCodeState = roomCode;
+      privateRoomInviteUrl = null;
+      privateQrDataUrl = null;
+      isPrivateRoomSession = true;
+      lastPrivateRoomCode = roomCode;
+      currentGameMode = "lesson";
+      lobbyNotice = "جاري الانضمام للغرفة الخاصة...";
+      render();
+      connectSocket(name, "lesson", null, "mix", "private_join", roomCode);
+    });
     app.querySelector("#lesson-back-home")?.addEventListener("click", () => {
       lessonBrowseMsg = "";
+      selectedLessonMatchId = null;
       phase = "name";
       render();
     });
