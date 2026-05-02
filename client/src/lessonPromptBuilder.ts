@@ -47,11 +47,43 @@ export function buildLessonAiPromptText(raw: LessonAiPromptParams): string {
 
   const lengthStudyBodyLine = `— الطول: استخدم من ${p.minSentences} إلى ${p.maxSentences} جملة كحد أقصى، مركزة وغنية.\n`;
   const strictJsonRules =
-    "قواعد صارمة إضافية لتنسيق JSON (إلزامي):\n" +
-    "— لا تلف المخرجات داخل سياج Markdown (مثل كتل json بثلاث علامات اقتباس مائلة) ولا تسبق الكائن أو تلحقه بأي نص توضيحي؛ المخرجات = كائن JSON خام فقط.\n" +
-    "— لا تضع فاصلة ختامية بعد آخر عنصر في أي كائن {} أو مصفوفة [].\n" +
-    "— correctIndex يجب أن يكون عدداً صحيحاً من 0 حتى (طول مصفوفة options ناقص 1) لكل سؤال.\n" +
-    "— أغلق كل الأقواس؛ المفاتيح بين علامتي تنصيص مزدوجة فقط كما في JSON القياسي.\n\n";
+    "قواعد JSON القياسية (RFC 8259) — إلزامي:\n" +
+    "— المخرجات = كائن جذر واحد فقط يحتوي المفتاحين lesson و sections بالضبط؛ لا مفاتيح إضافية في الجذر.\n" +
+    "— جميع مفاتيح الكائنات والسلاسل النصية بين علامتي تنصيص مزدوجة ASCII (\")؛ يُمنع استخدام علامات التنصيص المفردة (') كحدود لسلسلة JSON.\n" +
+    "— الأرقام (defaultAnswerMs، studyPhaseMs، correctIndex، sortOrder) يجب أن تكون أرقاماً JSON خامة بلا علامات اقتباس.\n" +
+    "— correctIndex: إن كان options بطول 2 فالمسموح 0 أو 1 فقط؛ إن كان بطول 4 فالمسموح 0 أو 1 أو 2 أو 3 فقط.\n" +
+    "— difficulty نص JSON فقط واحد من الثلاثة: \"easy\" أو \"medium\" أو \"hard\" (أحرف إنجليزية صغيرة).\n" +
+    "— لا تلف المخرجات داخل سياج Markdown ولا تسبقها أو تلحقها بأي نص؛ لا تعليقات // ولا /* */ داخل JSON.\n" +
+    "— لا فاصلة ختامية بعد آخر عنصر في {} أو []. لا تستخدم undefined أو NaN أو Infinity.\n" +
+    "— slug وdescription يمكن أن تكون null أو نصاً؛ sortOrder عدد صحيح (استخدم 0 إن لم يكن لديك تفضيل).\n\n";
+  const jsonShapeExample = JSON.stringify(
+    {
+      lesson: {
+        title: "عنوان الدرس",
+        slug: null,
+        description: null,
+        defaultAnswerMs,
+        sortOrder: 0,
+      },
+      sections: [
+        {
+          titleAr: "عنوان القسم",
+          studyPhaseMs: studyPhaseMsUnified,
+          items: [
+            {
+              prompt: "نص السؤال؟",
+              options: ["خيار أ", "خيار ب", "خيار ج", "خيار د"],
+              correctIndex: 0,
+              difficulty: "medium",
+              studyBody: "نص بطاقة المذاكرة.",
+            },
+          ],
+        },
+      ],
+    },
+    null,
+    2,
+  );
   const qualityBlock =
     "\nجودة المحتوى (إلزامي اتباع الروح):\n" +
     "— المشتتات: اجعل الخيارات الخاطئة من نفس المجال وتبدو معقولة لمن لم يقرأ بطاقة المذاكرة جيداً؛ تجنّب الخيارات السخيفة أو البديهية جداً.\n" +
@@ -63,15 +95,18 @@ export function buildLessonAiPromptText(raw: LessonAiPromptParams): string {
   return (
     "دورك: أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية.\n\n" +
     "المخرجات: JSON صالح فقط (سطر واحد أو متعدد)، بدون نص قبله أو بعده وبدون Markdown أو تعليقات.\n\n" +
-    "🚨 تحذير برمجي حرج لسلامة JSON: يُمنع منعاً باتاً استخدام علامات التنصيص المزدوجة (\") داخل القيم النصية للحقول (مثل prompt، options، أو studyBody). إذا احتجت إلى كتابة أمثلة أو اقتباسات داخل النص، استخدم حصراً علامات الاقتباس المفردة (')، أو الأقواس ( )، أو الأقواس العربية (« »). أي علامة (\") داخل النص ستؤدي إلى تعطل النظام وفشل قراءة JSON.\n\n" +
+    "🚨 داخل القيم النصية (prompt، options، studyBody، العناوين): لا تُدرج علامة التنصيص المزدوجة U+0022 حرفياً داخل النص؛ استخدم « » أو اقتباساً مفرداً أو أقواساً أو أعد الصياغة. إن اضطررت تقنياً لعلامة مزدوجة داخل سلسلة JSON فاستخدم الهروب القياسي JSON (شرطة مائلة ثم علامة مزدوجة) داخل تلك السلسلة فقط؛ الأفضل تجنّب ذلك.\n\n" +
     strictJsonRules +
-    "هيكل الجذر:\n" +
-    "— lesson: title (نص)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح بالمللي ثانية)، sortOrder (عدد صحيح).\n" +
-    `— sections: مصفوفة طولها بالضبط ${p.nSec}؛ كل عنصر: titleAr، studyPhaseMs (إجمالي زمن بطاقات المذاكرة للقسم بالمللي ثانية)، items (مصفوفة أسئلة).\n` +
+    "مثال شكل صالح (اتبع نفس الأسماء والتعشيش؛ وسّع المحتوى والأعداد حسب القيود أدناه وليس حسب حجم المثال):\n" +
+    jsonShapeExample +
+    "\n\nهيكل الجذر:\n" +
+    "— lesson: title (نص غير فارغ)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح بالمللي ثانية بين 3000 و120000)، sortOrder (عدد صحيح ≥0، يُفضّل 0).\n" +
+    `— sections: مصفوفة طولها بالضبط ${p.nSec}؛ كل عنصر: titleAr (نص أو null)، studyPhaseMs (عدد صحيح بالمللي ثانية)، items (مصفوفة أسئلة).\n` +
     "لا تُضمّن lessonCategoryId ولا أي حقل لتصنيف الدرس في JSON.\n\n" +
     sectionBlock +
     "\n\nكل سؤال داخل items يجب أن يحتوي:\n" +
-    "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (0..طول-1)، difficulty: easy|medium|hard، studyBody (نص بطاقة المذاكرة، مطلوب غير فارغ)، answerMs اختياري (مللي ثانية أو null للاعتماد على defaultAnswerMs)، subcategoryKey اختياري (مثل general_default).\n" +
+    "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (عدد صحيح حسب طول options أعلاه)، difficulty: easy أو medium أو hard، studyBody (نص غير فارغ)، answerMs اختياري (عدد أو null)، subcategoryKey اختياري (نص مثل general_default).\n" +
+    `قائمة تحقق قبل الإرسال: طول sections = ${p.nSec}؛ طول items في كل قسم = ${p.qSame}؛ defaultAnswerMs في lesson = ${defaultAnswerMs}؛ studyPhaseMs في كل قسم = ${studyPhaseMsUnified}؛ كل options إما 2 أو 4 عناصر؛ كل studyBody غير فارغ.\n` +
     qualityBlock +
     "\nقيود المعطيات لهذا الطلب:\n" +
     `— عدد الأقسام: ${p.nSec}.\n` +
