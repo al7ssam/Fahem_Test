@@ -142,9 +142,9 @@
         </summary>
         <div class="collapsible-panel-body">
           <p class="muted" style="margin:0 0 .45rem;font-size:.82rem">
-            املأ المعطيات ثم انسخ البرومبت إلى أداة الذكاء الاصطناعي؛ الصق الناتج JSON في الكتلة أعلاه. للأسئلة لكل قسم إما رقم موحّد أو مصفوفة JSON مثل <code>[3,4,2]</code>.
+            املأ المعطيات ثم انسخ البرومبت إلى أداة الذكاء الاصطناعي؛ الصق الناتج JSON في الكتلة أعلاه.
           </p>
-          <div class="row" style="align-items:end">
+          <div class="row" style="align-items:end;flex-wrap:wrap;gap:.45rem">
             <div>
               <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">عدد الأقسام</label>
               <input type="number" id="ai-sections" min="1" max="20" value="3" style="width:6rem" />
@@ -153,12 +153,8 @@
               <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">أسئلة/قسم (موحّد)</label>
               <input type="number" id="ai-q-same" min="1" max="50" value="3" style="width:6rem" />
             </div>
-            <div style="flex:1;min-width:10rem">
-              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">أو مصفوفة أسئلة لكل قسم (JSON)</label>
-              <input type="text" id="ai-q-list" placeholder='مثال: [3,3,4]' style="width:100%" />
-            </div>
           </div>
-          <div class="row" style="margin-top:.45rem;align-items:end">
+          <div class="row" style="margin-top:.45rem;align-items:end;flex-wrap:wrap;gap:.45rem">
             <div>
               <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">وقت الإجابة الافتراضي (ثانية)</label>
               <input type="number" id="ai-answer-sec" min="3" max="120" step="0.5" value="15" style="width:6rem" />
@@ -166,10 +162,6 @@
             <div>
               <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">زمن مذاكرة القسم (ثانية، موحّد)</label>
               <input type="number" id="ai-study-sec" min="2" max="300" step="0.5" value="60" style="width:7rem" />
-            </div>
-            <div style="flex:1;min-width:10rem">
-              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">أو زمن مذاكرة لكل قسم (ثوانٍ، JSON)</label>
-              <input type="text" id="ai-study-list" placeholder='مثال: [60,90,45]' style="width:100%" />
             </div>
           </div>
           <label class="muted" style="display:block;margin:.45rem 0 .2rem;font-size:.82rem">موضوع الدرس / المنهاج (اختياري)</label>
@@ -1215,104 +1207,10 @@
           } catch (_) {}
         };
 
-        function parsePositiveIntArray(raw, maxLen) {
-          if (raw == null || String(raw).trim() === "") return null;
-          try {
-            var arr = JSON.parse(String(raw).trim());
-            if (!Array.isArray(arr) || arr.length !== maxLen) return null;
-            var out = [];
-            for (var i = 0; i < arr.length; i++) {
-              var n = Number(arr[i]);
-              if (!Number.isFinite(n) || n <= 0) return null;
-              var t = Math.trunc(n);
-              if (t !== n) return null;
-              out.push(t);
-            }
-            return out;
-          } catch (_e) {
-            return null;
-          }
-        }
-
-        function parseStudySecArray(raw, maxLen) {
-          if (raw == null || String(raw).trim() === "") return null;
-          try {
-            var arr = JSON.parse(String(raw).trim());
-            if (!Array.isArray(arr) || arr.length !== maxLen) return null;
-            var out = [];
-            for (var i = 0; i < arr.length; i++) {
-              var n = Number(arr[i]);
-              if (!Number.isFinite(n)) return null;
-              if (n < 2 || n > 300) return null;
-              out.push(n);
-            }
-            return out;
-          } catch (_e) {
-            return null;
-          }
-        }
-
-        function buildSectionConstraintsLines(nSec, qParsed, studyMsPerSection, qSame, studyPhaseMsUnified) {
-          var lines = [];
-          var i;
-          if (qParsed && studyMsPerSection && qParsed.length === nSec && studyMsPerSection.length === nSec) {
-            for (i = 0; i < nSec; i++) {
-              lines.push(
-                "— القسم " +
-                  (i + 1) +
-                  ": items يجب أن تحتوي بالضبط " +
-                  qParsed[i] +
-                  " سؤالاً؛ studyPhaseMs = " +
-                  studyMsPerSection[i] +
-                  " (مللي ثانية).",
-              );
-            }
-            return "قيود الأقسام بالترتيب:\n" + lines.join("\n");
-          }
-          if (qParsed && qParsed.length === nSec && !studyMsPerSection) {
-            for (i = 0; i < nSec; i++) {
-              lines.push(
-                "— القسم " +
-                  (i + 1) +
-                  ": items يجب أن تحتوي بالضبط " +
-                  qParsed[i] +
-                  " سؤالاً؛ studyPhaseMs = " +
-                  studyPhaseMsUnified +
-                  " (مللي ثانية، موحّد لكل الأقسام).",
-              );
-            }
-            return "قيود الأقسام بالترتيب:\n" + lines.join("\n");
-          }
-          if (!qParsed && studyMsPerSection && studyMsPerSection.length === nSec) {
-            for (i = 0; i < nSec; i++) {
-              lines.push(
-                "— القسم " +
-                  (i + 1) +
-                  ": items بعدد موحّد " +
-                  qSame +
-                  " سؤالاً؛ studyPhaseMs = " +
-                  studyMsPerSection[i] +
-                  " (مللي ثانية).",
-              );
-            }
-            return "قيود الأقسام بالترتيب:\n" + lines.join("\n");
-          }
-          return (
-            "جميع الأقسام الـ " +
-            nSec +
-            ": لكل قسم items بعدد موحّد " +
-            qSame +
-            " سؤالاً، وstudyPhaseMs = " +
-            studyPhaseMsUnified +
-            " (مللي ثانية) لكل قسم."
-          );
-        }
-
         function buildAiLessonPrompt() {
           var nSec = Math.min(20, Math.max(1, parseInt(document.getElementById("ai-sections").value, 10) || 3));
           var qSameEl = document.getElementById("ai-q-same").value.trim();
           var qSame = Math.min(50, Math.max(1, parseInt(qSameEl, 10) || 3));
-          var qListRaw = document.getElementById("ai-q-list").value.trim();
           var ansSec = parseFloat(document.getElementById("ai-answer-sec").value);
           if (!Number.isFinite(ansSec)) ansSec = 15;
           ansSec = Math.min(120, Math.max(3, ansSec));
@@ -1320,7 +1218,6 @@
           var studySec = parseFloat(studySameEl);
           if (!Number.isFinite(studySec)) studySec = 60;
           studySec = Math.min(300, Math.max(2, studySec));
-          var studyListRaw = document.getElementById("ai-study-list").value.trim();
           var topic = document.getElementById("ai-topic").value.trim();
           var audienceEl = document.getElementById("ai-audience");
           var audience = audienceEl && audienceEl.value ? String(audienceEl.value).trim() : "";
@@ -1328,64 +1225,17 @@
           var defaultAnswerMs = Math.round(ansSec * 1000);
           var studyPhaseMsUnified = Math.round(studySec * 1000);
 
-          var qParsed = qListRaw ? parsePositiveIntArray(qListRaw, nSec) : null;
-          var studySecParsed = studyListRaw ? parseStudySecArray(studyListRaw, nSec) : null;
-          var studyMsPerSection = studySecParsed
-            ? studySecParsed.map(function (s) {
-                return Math.round(Number(s) * 1000);
-              })
-            : null;
+          var sectionBlock =
+            "جميع الأقسام الـ " +
+            nSec +
+            ": لكل قسم items بعدد موحّد " +
+            qSame +
+            " سؤالاً، وstudyPhaseMs = " +
+            studyPhaseMsUnified +
+            " (مللي ثانية) لكل قسم.";
 
-          var qMismatch = qListRaw.length > 0 && !qParsed;
-          var studyMismatch = studyListRaw.length > 0 && !studySecParsed;
-          var arrayMismatch = qMismatch || studyMismatch;
-
-          var sectionBlock = buildSectionConstraintsLines(nSec, qParsed, studyMsPerSection, qSame, studyPhaseMsUnified);
-
-          var studyMsListDisplay = studyMsPerSection ? "[" + studyMsPerSection.join(",") + "]" : null;
-          var qListNote = qListRaw
-            ? qParsed
-              ? "تم تفسير مصفوفة عدد الأسئلة لكل قسم (صالحة، طولها " + nSec + "): " + qListRaw
-              : "حقل مصفوفة الأسئلة غير متسق مع عدد الأقسام (" +
-                nSec +
-                ") أو غير صالح — راجع JSON. المُدخل: " +
-                qListRaw
-            : "عدد الأسئلة في كل قسم موحّد: " + qSame + " لكل من الأقسام الـ " + nSec + ".";
-
-          var studyListNote = studyListRaw
-            ? studySecParsed
-              ? "أوقات مذاكرة الأقسام بالمللي ثانية (جاهزة من الثواني المُدخلة " +
-                studyListRaw +
-                "): " +
-                studyMsListDisplay +
-                " — استخدم هذه القيم كـ studyPhaseMs بالترتيب."
-              : "حقل مصفوفة أوقات المذاكرة غير متسق مع عدد الأقسام (" +
-                nSec +
-                ") أو خارج النطاق 2–300 ثانية لكل عنصر — راجع JSON. المُدخل: " +
-                studyListRaw
-            : "زمن مذاكرة كل قسم موحّد بالمللي ثانية: " +
-              studyPhaseMsUnified +
-              " (أي " +
-              studySec +
-              " ثانية) لجميع الأقسام ما لم تُخصّص قيود أخرى في الأعلى.";
-
-          var totalQApprox = qParsed
-            ? qParsed.reduce(function (a, b) {
-                return a + b;
-              }, 0)
-            : nSec * qSame;
-          var avgStudyMsPerCardHint = studyPhaseMsUnified;
-          if (qParsed && studyMsPerSection) {
-            var sumRatios = 0;
-            for (var j = 0; j < nSec; j++) sumRatios += studyMsPerSection[j] / qParsed[j];
-            avgStudyMsPerCardHint = Math.round(sumRatios / nSec);
-          } else if (qParsed && !studyMsPerSection) {
-            var sumRatiosU = 0;
-            for (var k = 0; k < nSec; k++) sumRatiosU += studyPhaseMsUnified / qParsed[k];
-            avgStudyMsPerCardHint = Math.round(sumRatiosU / nSec);
-          } else {
-            avgStudyMsPerCardHint = Math.round(studyPhaseMsUnified / Math.max(1, qSame));
-          }
+          var totalQApprox = nSec * qSame;
+          var avgStudyMsPerCardHint = Math.round(studyPhaseMsUnified / Math.max(1, qSame));
 
           var topicBlock = "";
           if (topic || audience) {
@@ -1393,12 +1243,6 @@
             if (topic) topicBlock += topic + "\n";
             if (audience) topicBlock += "مستوى الجمهور المستهدف: " + audience + "\n";
           }
-
-          var mismatchBanner = arrayMismatch
-            ? "\n\nتحذير للمُنشئ: طول مصفوفة الأسئلة و/أو مصفوفة أوقات المذاكرة لا يطابق عدد الأقسام (" +
-              nSec +
-              ") أو البيانات غير صالحة. راجع الحقول في الواجهة؛ عند التصدير اعتمد الوضع الموحّد أو صحّح JSON.\n"
-            : "";
 
           var qualityBlock =
             "\nجودة المحتوى (إلزامي اتباع الروح):\n" +
@@ -1410,7 +1254,7 @@
             avgStudyMsPerCardHint +
             " مللي ثانية — إرشاد تقريبي وليس حداً صارماً.)\n";
 
-          var text =
+          return (
             "دورك: أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية.\n\n" +
             "المخرجات: JSON صالح فقط (سطر واحد أو متعدد)، بدون نص قبله أو بعده وبدون Markdown أو تعليقات.\n\n" +
             "هيكل الجذر:\n" +
@@ -1427,23 +1271,26 @@
             "— عدد الأقسام: " +
             nSec +
             ".\n" +
-            "— " +
-            qListNote +
-            "\n" +
+            "— عدد الأسئلة في كل قسم موحّد: " +
+            qSame +
+            " لكل من الأقسام الـ " +
+            nSec +
+            ".\n" +
             "— defaultAnswerMs للدرس: " +
             defaultAnswerMs +
             " مللي ثانية (" +
             ansSec +
             " ثانية).\n" +
-            "— " +
-            studyListNote +
+            "— زمن مذاكرة كل قسم موحّد: studyPhaseMs = " +
+            studyPhaseMsUnified +
+            " مللي ثانية (" +
+            studySec +
+            " ثانية) لجميع الأقسام.\n" +
             topicBlock +
-            mismatchBanner +
             "\nاملأ النصوص التعليمية بالعربية المناسبة للجمهور. تأكد أن كل قسم يطابق أعداد items وstudyPhaseMs أعلاه وأن الخيارات والإجابة الصحيحة متسقة.\n\n" +
             "أخرج JSON الآن.\n\n" +
-            "(اختياري عند اللصق في أداة تفصل رسالة النظام عن المستخدم: ضع التعليمات أعلاه في رسالة المستخدم، وصفّ دور النموذج في رسالة النظام كمُنشئ JSON عربي لتطبيق تعليمي دون تعليق خارج JSON.)";
-
-          return { text: text, arrayMismatch: arrayMismatch };
+            "(اختياري عند اللصق في أداة تفصل رسالة النظام عن المستخدم: ضع التعليمات أعلاه في رسالة المستخدم، وصفّ دور النموذج في رسالة النظام كمُنشئ JSON عربي لتطبيق تعليمي دون تعليق خارج JSON.)"
+          );
         }
 
         function buildEmptyImportTemplate() {
@@ -1488,21 +1335,8 @@
           }
         }
 
-        document.getElementById("ai-copy-prompt").onclick = async function () {
-          var r = buildAiLessonPrompt();
-          try {
-            await navigator.clipboard.writeText(r.text);
-            if (r.arrayMismatch) {
-              setMsg(
-                "تم النسخ. تنبيه: طول مصفوفة الأسئلة أو أوقات المذاكرة لا يطابق عدد الأقسام — راجع الحقول؛ يظهر تحذير داخل البرومبت أيضاً.",
-                false,
-              );
-            } else {
-              setMsg("تم النسخ.", true);
-            }
-          } catch (_) {
-            setMsg("تعذر النسخ — انسخ يدوياً من المحرر.", false);
-          }
+        document.getElementById("ai-copy-prompt").onclick = function () {
+          void copyTextToClipboard(buildAiLessonPrompt());
         };
 
         document.getElementById("ai-copy-template").onclick = function () {
