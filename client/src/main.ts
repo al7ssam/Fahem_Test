@@ -743,6 +743,12 @@ function render(): void {
     input.addEventListener("input", () => {
       playerNameDraft = input.value;
     });
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        input.blur();
+      }
+    });
     const btn = app.querySelector<HTMLButtonElement>("#join-btn")!;
     const soloBtn = app.querySelector<HTMLButtonElement>("#solo-learning-btn");
     const createPrivateBtn = app.querySelector<HTMLButtonElement>("#create-private-room-btn");
