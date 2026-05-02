@@ -8,6 +8,8 @@ ALTER TABLE lesson_sections ADD CONSTRAINT lesson_sections_study_phase_ms_range
   CHECK (study_phase_ms IS NULL OR (study_phase_ms >= 2000 AND study_phase_ms <= 300000));
 
 -- تعبئة من منطق المجموع السابق لكل بطاقة مذاكرة في القسم
+-- ملاحظة: لا نستخدم lessons.default_study_card_ms هنا لأن قواعد قديمة قد تفتقد العمود
+-- (CREATE TABLE IF NOT EXISTS لا يضيف أعمدة جديدة). 10000 مطابق للقيمة الافتراضية في 041.
 UPDATE lesson_sections ls
 SET study_phase_ms = agg.computed
 FROM (
@@ -19,7 +21,7 @@ FROM (
         5000,
         CASE
           WHEN COALESCE(sums.sum_ms, 0) > 0 THEN COALESCE(sums.sum_ms, 0)
-          ELSE l.default_study_card_ms
+          ELSE 10000
         END
       )
     )::INTEGER AS computed
@@ -29,7 +31,7 @@ FROM (
     SELECT SUM(
              CASE
                WHEN q.study_body IS NOT NULL AND btrim(q.study_body) <> ''
-               THEN COALESCE(li.study_card_ms, l.default_study_card_ms)
+               THEN COALESCE(li.study_card_ms, 10000)
                ELSE 0
              END
            ) AS sum_ms
