@@ -200,6 +200,8 @@ let customLessonJsonText = "";
 let customLessonErr = "";
 let customLessonMsg = "";
 let customLessonClientId = "";
+/** يظهر لصق JSON وأزرار الأدوات الخارجية بعد نسخ البرومبت (أو استعادة مسودة) */
+let customLessonShowJsonPanel = false;
 const defaultCustomPromptParams = (): LessonAiPromptParams => ({
   nSec: 3,
   qSame: 3,
@@ -805,12 +807,16 @@ function render(): void {
               customLessonJsonText = d.jsonText;
               customLessonPromptParams = { ...defaultCustomPromptParams(), ...d.promptParams };
               customLessonSessionToken = d.lastSessionToken ?? null;
+              customLessonShowJsonPanel =
+                d.showJsonPanel === true ||
+                (String(d.jsonText ?? "").trim().length > 0 && d.showJsonPanel !== false);
             } else {
               customLessonClientId = "";
               customLessonLearningIntent = "";
               customLessonJsonText = "";
               customLessonPromptParams = defaultCustomPromptParams();
               customLessonSessionToken = null;
+              customLessonShowJsonPanel = false;
             }
             customLessonValidatedBody = null;
             customLessonPreviewLesson = null;
@@ -1070,6 +1076,8 @@ function render(): void {
 
   if (phase === "custom_lesson") {
     const p = customLessonPromptParams;
+    const showJsonPanel = customLessonShowJsonPanel;
+    const hasValidatedPreview = customLessonPreviewLesson != null;
     const persistDraft = (): void => {
       if (!customLessonClientId) {
         try {
@@ -1084,6 +1092,7 @@ function render(): void {
         jsonText: customLessonJsonText,
         promptParams: { ...customLessonPromptParams },
         lastSessionToken: customLessonSessionToken,
+        showJsonPanel: customLessonShowJsonPanel,
       });
     };
     const audienceOptions: Array<{ v: string; t: string }> = [
@@ -1101,37 +1110,66 @@ function render(): void {
             <button type="button" id="cl-back" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">الرئيسية</button>
             <h1 class="text-xl font-extrabold text-amber-300">درس مخصص</h1>
           </div>
-          <p class="text-slate-400 text-sm m-0">أنشئ البرومبت وانسخه لأداة ذكاء خارجية، ثم الصق JSON الناتج هنا. التحقق يتم على الخادم دون حفظ الدرس في الحساب.</p>
+          <p class="text-slate-400 text-sm m-0">اكتب ما تريد تعلّمه، انسخ البرومبت إلى ChatGPT أو Gemini، ثم الصق JSON هنا. لا يُحفظ الدرس على الحساب.</p>
           <label class="text-slate-300 text-sm">ماذا تريد أن تتعلّم؟</label>
-          <textarea id="cl-intent" rows="4" class="app-input w-full px-3 py-2 text-sm" placeholder="مادة، موضوع، أو نص معلومات...">${escapeHtml(customLessonLearningIntent)}</textarea>
+          <textarea id="cl-intent" rows="4" class="app-input w-full px-3 py-2 text-sm" placeholder="مادة، موضوع، أو ملخّص لما تريد أن يغطيه الدرس...">${escapeHtml(customLessonLearningIntent)}</textarea>
           <details class="app-card p-3 space-y-2">
-            <summary class="cursor-pointer text-amber-200 text-sm font-bold">إعدادات البرومبت</summary>
+            <summary class="cursor-pointer text-amber-200 text-sm font-bold">إعدادات البرومبت (اختياري)</summary>
             <div class="grid grid-cols-2 gap-2 pt-2">
-              <label class="text-xs text-slate-400 col-span-2">أقسام / أسئلة لكل قسم / إجابة (ث) / مذاكرة (ث)</label>
-              <input id="cl-nsec" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm" value="${p.nSec}" />
-              <input id="cl-qsame" type="number" min="1" max="50" class="app-input px-2 py-1 text-sm" value="${p.qSame}" />
-              <input id="cl-anssec" type="number" min="3" max="120" step="0.5" class="app-input px-2 py-1 text-sm" value="${p.ansSec}" />
-              <input id="cl-studysec" type="number" min="2" max="300" step="0.5" class="app-input px-2 py-1 text-sm" value="${p.studySec}" />
-              <input id="cl-minsent" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm" value="${p.minSentences}" />
-              <input id="cl-maxsent" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm" value="${p.maxSentences}" />
+              <div class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-[10px] text-slate-500 leading-tight">عدد الأقسام</span>
+                <input id="cl-nsec" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm w-full" value="${p.nSec}" title="عدد أقسام الدرس (1–20)" aria-label="عدد أقسام الدرس" placeholder="1–20" />
+              </div>
+              <div class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-[10px] text-slate-500 leading-tight">أسئلة لكل قسم</span>
+                <input id="cl-qsame" type="number" min="1" max="50" class="app-input px-2 py-1 text-sm w-full" value="${p.qSame}" title="عدد أسئلة الاختيار من متعدد في كل قسم" aria-label="عدد الأسئلة لكل قسم" placeholder="1–50" />
+              </div>
+              <div class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-[10px] text-slate-500 leading-tight">زمن الإجابة (ثانية)</span>
+                <input id="cl-anssec" type="number" min="3" max="120" step="0.5" class="app-input px-2 py-1 text-sm w-full" value="${p.ansSec}" title="الوقت المتاح لكل سؤال اختيار من متعدد" aria-label="زمن الإجابة بالثواني" placeholder="3–120" />
+              </div>
+              <div class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-[10px] text-slate-500 leading-tight">زمن المذاكرة للقسم (ثانية)</span>
+                <input id="cl-studysec" type="number" min="2" max="300" step="0.5" class="app-input px-2 py-1 text-sm w-full" value="${p.studySec}" title="إجمالي زمن بطاقات المذاكرة لكل قسم" aria-label="زمن المذاكرة للقسم بالثواني" placeholder="2–300" />
+              </div>
+              <div class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-[10px] text-slate-500 leading-tight">أدنى جمل لنص المذاكرة</span>
+                <input id="cl-minsent" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm w-full" value="${p.minSentences}" title="الحد الأدنى لعدد الجمل في studyBody" aria-label="أدنى عدد جمل لنص بطاقة المذاكرة" placeholder="1–20" />
+              </div>
+              <div class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-[10px] text-slate-500 leading-tight">أقصى جمل لنص المذاكرة</span>
+                <input id="cl-maxsent" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm w-full" value="${p.maxSentences}" title="الحد الأقصى لعدد الجمل في studyBody" aria-label="أقصى عدد جمل لنص بطاقة المذاكرة" placeholder="1–20" />
+              </div>
             </div>
-            <label class="text-xs text-slate-400">موضوع / منهاج (اختياري)</label>
-            <input id="cl-topic" type="text" class="app-input w-full px-2 py-1 text-sm" value="${escapeHtml(p.topic)}" />
+            <label class="text-xs text-slate-400">موضوع أو منهاج (اختياري)</label>
+            <input id="cl-topic" type="text" class="app-input w-full px-2 py-1 text-sm" value="${escapeHtml(p.topic)}" placeholder="مثال: المعادلات الخطية — الصف الثالث" title="يُذكر في البرومبت كسياق للنموذج" />
             <label class="text-xs text-slate-400">مستوى الجمهور</label>
-            <select id="cl-audience" class="app-input w-full px-2 py-1 text-sm">
+            <select id="cl-audience" class="app-input w-full px-2 py-1 text-sm" title="من يخاطبهم الدرس" aria-label="مستوى الجمهور">
               ${audienceOptions.map((o) => `<option value="${escapeHtml(o.v)}" ${p.audience === o.v ? "selected" : ""}>${escapeHtml(o.t)}</option>`).join("")}
             </select>
           </details>
           <button type="button" id="cl-copy" class="ui-btn ui-btn--primary w-full py-2">نسخ البرومبت</button>
+          ${
+            showJsonPanel
+              ? `<div class="flex flex-col sm:flex-row gap-2">
+            <button type="button" id="cl-open-gpt" class="ui-btn ui-btn--ghost flex-1 py-2 text-sm">فتح ChatGPT</button>
+            <button type="button" id="cl-open-gem" class="ui-btn ui-btn--ghost flex-1 py-2 text-sm">فتح Gemini</button>
+          </div>
           <label class="text-slate-300 text-sm">JSON الدرس (من النموذج)</label>
-          <textarea id="cl-json" rows="8" class="app-input w-full px-3 py-2 text-xs font-mono" placeholder='{"lesson":{...},"sections":[...]}'>${escapeHtml(customLessonJsonText)}</textarea>
+          <textarea id="cl-json" rows="8" class="app-input w-full px-3 py-2 text-xs font-mono" placeholder='الصق هنا كائن JSON كامل: {"lesson":{...},"sections":[...]}'>${escapeHtml(customLessonJsonText)}</textarea>
+          <button type="button" id="cl-preview" class="ui-btn ui-btn--cta w-full py-2">تحقق ومعاينة</button>`
+              : `<p class="text-slate-500 text-xs m-0">اضغط «نسخ البرومبت» لإظهار لصق JSON والتحقق.</p>`
+          }
           <p id="cl-msg" class="text-emerald-300 text-sm min-h-[1.25rem] m-0">${escapeHtml(customLessonMsg)}</p>
           <p id="cl-err" class="text-red-400 text-sm min-h-[1.25rem] m-0">${escapeHtml(customLessonErr)}</p>
-          <div class="flex flex-col gap-2">
-            <button type="button" id="cl-preview" class="ui-btn ui-btn--cta w-full py-2">تحقق ومعاينة</button>
+          ${
+            hasValidatedPreview
+              ? `<div class="flex flex-col gap-2">
             <button type="button" id="cl-solo" class="ui-btn ui-btn--primary w-full py-2">ابدأ التعلم الفردي (محلي)</button>
             <button type="button" id="cl-private" class="ui-btn ui-btn--ghost w-full py-2">إنشاء غرفة خاصة</button>
-          </div>
+          </div>`
+              : ""
+          }
         </div>
       `),
     );
@@ -1157,7 +1195,8 @@ function render(): void {
         maxSentences: Math.max(mi, ma),
       };
       customLessonLearningIntent = app.querySelector<HTMLTextAreaElement>("#cl-intent")?.value ?? "";
-      customLessonJsonText = app.querySelector<HTMLTextAreaElement>("#cl-json")?.value ?? "";
+      const jsonTa = app.querySelector<HTMLTextAreaElement>("#cl-json");
+      if (jsonTa) customLessonJsonText = jsonTa.value ?? "";
     };
     app.querySelector("#cl-back")?.addEventListener("click", () => {
       readParamsFromDom();
@@ -1177,11 +1216,18 @@ function render(): void {
       try {
         await navigator.clipboard.writeText(text);
         customLessonMsg = "تم نسخ البرومبت.";
+        customLessonShowJsonPanel = true;
       } catch {
         customLessonErr = "تعذر النسخ — انسخ يدوياً.";
       }
       persistDraft();
       render();
+    });
+    app.querySelector("#cl-open-gpt")?.addEventListener("click", () => {
+      window.open("https://chatgpt.com/", "_blank", "noopener,noreferrer");
+    });
+    app.querySelector("#cl-open-gem")?.addEventListener("click", () => {
+      window.open("https://gemini.google.com/app", "_blank", "noopener,noreferrer");
     });
     app.querySelector("#cl-preview")?.addEventListener("click", async () => {
       readParamsFromDom();
@@ -1200,8 +1246,12 @@ function render(): void {
           return;
         }
         body = JSON.parse(raw) as Record<string, unknown>;
-      } catch {
-        customLessonErr = "JSON غير صالح (صياغة).";
+      } catch (e) {
+        const detail =
+          e instanceof SyntaxError && typeof e.message === "string" && e.message.trim()
+            ? e.message.trim()
+            : "صياغة غير صالحة";
+        customLessonErr = `JSON غير صالح (${detail}).`;
         persistDraft();
         render();
         return;

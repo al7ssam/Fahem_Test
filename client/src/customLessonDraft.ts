@@ -11,6 +11,8 @@ export type CustomLessonDraftV1 = {
   promptParams: LessonAiPromptParams;
   /** اختياري: آخر رمز جلسة من السيرفر */
   lastSessionToken?: string | null;
+  /** بعد نسخ البرومبت تُظهر خطوة لصق JSON (يُستعاد من المسودة) */
+  showJsonPanel?: boolean;
 };
 
 function randomId(): string {
@@ -35,6 +37,7 @@ export function loadCustomLessonDraft(): CustomLessonDraftV1 | null {
       jsonText: typeof o.jsonText === "string" ? o.jsonText : "",
       promptParams: o.promptParams as LessonAiPromptParams,
       lastSessionToken: o.lastSessionToken ?? null,
+      showJsonPanel: typeof o.showJsonPanel === "boolean" ? o.showJsonPanel : undefined,
     };
   } catch {
     return null;
@@ -50,6 +53,7 @@ export function saveCustomLessonDraft(draft: Omit<CustomLessonDraftV1, "version"
     jsonText: draft.jsonText,
     promptParams: draft.promptParams,
     lastSessionToken: draft.lastSessionToken ?? null,
+    showJsonPanel: draft.showJsonPanel,
   };
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(full));
