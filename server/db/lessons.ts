@@ -2,6 +2,12 @@ import type { Pool, PoolClient } from "pg";
 import type { QuestionRow, StudyPhaseCardPayload } from "./questions";
 import { getPool } from "./pool";
 
+/**
+ * عند غياب study_phase_ms للقسم: يُستخدم كبديل لكل بطاقة مذاكرة بلا study_card_ms على صف lesson_items
+ * عند احتساب المجموع (legacy فقط).
+ */
+const LESSON_LEGACY_STUDY_SUM_FALLBACK_MS = 10_000;
+
 export type LessonCategoryAdmin = {
   id: number;
   parentId: number | null;
@@ -19,7 +25,6 @@ export type LessonAdminSummary = {
   slug: string | null;
   description: string | null;
   defaultAnswerMs: number;
-  defaultStudyCardMs: number;
   isPublished: boolean;
   sortOrder: number;
   itemCount: number;
@@ -83,7 +88,6 @@ export type LessonPlaybackPayload = {
   slug: string | null;
   description: string | null;
   defaultAnswerMs: number;
-  defaultStudyCardMs: number;
   category: { id: number; nameAr: string; icon: string } | null;
   /** أقسام الدرس بالترتيب؛ كل قسم يضم خطواته (بطاقات + أسئلة لنفس المجموعة). */
   sections: LessonPlaybackSection[];
@@ -219,13 +223,12 @@ export async function listLessonsAdmin(filters: {
     slug: string | null;
     description: string | null;
     default_answer_ms: number;
-    default_study_card_ms: number;
     is_published: boolean;
     sort_order: number;
     item_count: string;
   }>(
     `SELECT l.id, l.lesson_category_id, lc.name_ar AS category_name, l.title, l.slug, l.description,
-            l.default_answer_ms, l.default_study_card_ms, l.is_published, l.sort_order,
+            l.default_answer_ms, l.is_published, l.sort_order,
             (SELECT COUNT(*)::text FROM lesson_items li WHERE li.lesson_id = l.id) AS item_count
      FROM lessons l
      LEFT JOIN lesson_categories lc ON lc.id = l.lesson_category_id
@@ -241,7 +244,6 @@ export async function listLessonsAdmin(filters: {
     slug: row.slug?.trim() || null,
     description: row.description,
     defaultAnswerMs: row.default_answer_ms,
-    defaultStudyCardMs: row.default_study_card_ms,
     isPublished: row.is_published,
     sortOrder: row.sort_order,
     itemCount: Number(row.item_count ?? 0),
@@ -254,7 +256,6 @@ export async function insertLesson(params: {
   slug: string | null;
   description: string | null;
   defaultAnswerMs: number;
-  defaultStudyCardMs: number;
   isPublished: boolean;
   sortOrder: number;
 }): Promise<number> {
@@ -262,8 +263,8 @@ export async function insertLesson(params: {
   const r = await pool.query<{ id: number }>(
     `INSERT INTO lessons (
        lesson_category_id, title, slug, description,
-       default_answer_ms, default_study_card_ms, is_published, sort_order
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       default_answer_ms, is_published, sort_order
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id`,
     [
       params.lessonCategoryId,
@@ -271,7 +272,6 @@ export async function insertLesson(params: {
       params.slug?.trim() || null,
       params.description?.trim() || null,
       params.defaultAnswerMs,
-      params.defaultStudyCardMs,
       params.isPublished,
       params.sortOrder,
     ],
@@ -291,13 +291,12 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
     slug: string | null;
     description: string | null;
     default_answer_ms: number;
-    default_study_card_ms: number;
     is_published: boolean;
     sort_order: number;
     item_count: string;
   }>(
     `SELECT l.id, l.lesson_category_id, lc.name_ar AS category_name, l.title, l.slug, l.description,
-            l.default_answer_ms, l.default_study_card_ms, l.is_published, l.sort_order,
+            l.default_answer_ms, l.is_published, l.sort_order,
             (SELECT COUNT(*)::text FROM lesson_items li WHERE li.lesson_id = l.id) AS item_count
      FROM lessons l
      LEFT JOIN lesson_categories lc ON lc.id = l.lesson_category_id
@@ -408,7 +407,6 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
       slug: row.slug?.trim() || null,
       description: row.description,
       defaultAnswerMs: row.default_answer_ms,
-      defaultStudyCardMs: row.default_study_card_ms,
       isPublished: row.is_published,
       sortOrder: row.sort_order,
       itemCount: Number(row.item_count ?? 0),
@@ -425,7 +423,6 @@ export async function updateLesson(
     slug?: string | null;
     description?: string | null;
     defaultAnswerMs?: number;
-    defaultStudyCardMs?: number;
     isPublished?: boolean;
     sortOrder?: number;
   },
@@ -453,10 +450,6 @@ export async function updateLesson(
   if (patch.defaultAnswerMs !== undefined) {
     sets.push(`default_answer_ms = $${i++}`);
     vals.push(patch.defaultAnswerMs);
-  }
-  if (patch.defaultStudyCardMs !== undefined) {
-    sets.push(`default_study_card_ms = $${i++}`);
-    vals.push(patch.defaultStudyCardMs);
   }
   if (patch.isPublished !== undefined) {
     sets.push(`is_published = $${i++}`);
@@ -506,13 +499,13 @@ function clampResolvedStudyPhaseMs(ms: number): number {
 
 function legacySectionStudyPhaseMs(
   sectionRows: Array<{ study_body: string | null; study_card_ms: number | null }>,
-  defaultStudyCardMs: number,
+  perCardMsFallback: number,
 ): number {
   let sum = 0;
   for (const r of sectionRows) {
-    if (r.study_body?.trim()) sum += r.study_card_ms ?? defaultStudyCardMs;
+    if (r.study_body?.trim()) sum += r.study_card_ms ?? perCardMsFallback;
   }
-  return clampResolvedStudyPhaseMs(sum > 0 ? sum : defaultStudyCardMs);
+  return clampResolvedStudyPhaseMs(sum > 0 ? sum : perCardMsFallback);
 }
 
 /** مسودة استيراد درس من JSON (بدون تصنيف). */
@@ -538,7 +531,6 @@ export type LessonImportMetaInput = {
   slug: string | null;
   description: string | null;
   defaultAnswerMs: number;
-  defaultStudyCardMs: number;
   sortOrder: number;
 };
 
@@ -585,7 +577,7 @@ export function buildPlaybackFromImportDraft(
     if (secIn.studyPhaseMs != null) {
       resolved = clampResolvedStudyPhaseMs(secIn.studyPhaseMs);
     } else {
-      resolved = legacySectionStudyPhaseMs(secRows, meta.defaultStudyCardMs);
+      resolved = legacySectionStudyPhaseMs(secRows, LESSON_LEGACY_STUDY_SUM_FALLBACK_MS);
     }
 
     const n = studyIndices.length;
@@ -613,7 +605,6 @@ export function buildPlaybackFromImportDraft(
     slug: meta.slug?.trim() || null,
     description: meta.description?.trim() ?? null,
     defaultAnswerMs: meta.defaultAnswerMs,
-    defaultStudyCardMs: meta.defaultStudyCardMs,
     category: null,
     sections,
     steps: stepsFlat,
@@ -701,8 +692,8 @@ export async function importLessonFromJsonTransaction(
     const lr = await client.query<{ id: number }>(
       `INSERT INTO lessons (
          lesson_category_id, title, slug, description,
-         default_answer_ms, default_study_card_ms, is_published, sort_order
-       ) VALUES ($1, $2, $3, $4, $5, $6, FALSE, $7)
+         default_answer_ms, is_published, sort_order
+       ) VALUES ($1, $2, $3, $4, $5, FALSE, $6)
        RETURNING id`,
       [
         null,
@@ -710,7 +701,6 @@ export async function importLessonFromJsonTransaction(
         meta.slug?.trim() || null,
         meta.description?.trim() || null,
         meta.defaultAnswerMs,
-        meta.defaultStudyCardMs,
         meta.sortOrder,
       ],
     );
@@ -831,12 +821,11 @@ async function loadLessonPlaybackRows(
     slug: string | null;
     description: string | null;
     default_answer_ms: number;
-    default_study_card_ms: number;
     cat_id: number | null;
     cat_name: string | null;
     cat_icon: string | null;
   }>(
-    `SELECT l.id, l.title, l.slug, l.description, l.default_answer_ms, l.default_study_card_ms,
+    `SELECT l.id, l.title, l.slug, l.description, l.default_answer_ms,
             lc.id AS cat_id, lc.name_ar AS cat_name, lc.icon AS cat_icon
      FROM lessons l
      LEFT JOIN lesson_categories lc ON lc.id = l.lesson_category_id
@@ -907,7 +896,7 @@ async function loadLessonPlaybackRows(
     if (first?.study_phase_ms != null) {
       resolved = clampResolvedStudyPhaseMs(first.study_phase_ms);
     } else {
-      resolved = legacySectionStudyPhaseMs(secRows, lesson.default_study_card_ms);
+      resolved = legacySectionStudyPhaseMs(secRows, LESSON_LEGACY_STUDY_SUM_FALLBACK_MS);
     }
 
     const n = studyIndices.length;
@@ -935,7 +924,6 @@ async function loadLessonPlaybackRows(
     slug: lesson.slug?.trim() || null,
     description: lesson.description,
     defaultAnswerMs: lesson.default_answer_ms,
-    defaultStudyCardMs: lesson.default_study_card_ms,
     category:
       lesson.cat_id != null && lesson.cat_name
         ? { id: lesson.cat_id, nameAr: lesson.cat_name, icon: lesson.cat_icon || "📖" }

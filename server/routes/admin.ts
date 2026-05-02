@@ -431,7 +431,6 @@ const lessonPostSchema = z.object({
   slug: z.string().trim().min(1).max(160).nullable().optional(),
   description: z.string().max(8000).nullable().optional(),
   defaultAnswerMs: z.number().int().min(3000).max(120000).optional(),
-  defaultStudyCardMs: z.number().int().min(2000).max(300000).optional(),
   isPublished: z.boolean().optional(),
   sortOrder: z.number().int().min(0).max(100000).optional(),
 });
@@ -508,7 +507,6 @@ const lessonImportBodySchema = z.object({
     slug: z.string().trim().max(160).nullable().optional(),
     description: z.string().max(8000).nullable().optional(),
     defaultAnswerMs: z.number().int().min(3000).max(120000),
-    defaultStudyCardMs: z.number().int().min(2000).max(300000),
     sortOrder: z.number().int().min(0).max(100000).optional(),
   }),
   sections: z.array(lessonImportSectionSchema).min(1).max(20),
@@ -526,7 +524,6 @@ function normalizeLessonImportPayload(body: z.infer<typeof lessonImportBodySchem
     slug,
     description: body.lesson.description?.trim() ?? null,
     defaultAnswerMs: body.lesson.defaultAnswerMs,
-    defaultStudyCardMs: body.lesson.defaultStudyCardMs,
     sortOrder: body.lesson.sortOrder ?? 0,
   };
   const sections: LessonImportSectionInput[] = body.sections.map((sec) => {
@@ -3511,7 +3508,6 @@ export function registerAdminRoutes(app: Express): void {
         slug: d.slug ?? null,
         description: d.description ?? null,
         defaultAnswerMs: d.defaultAnswerMs ?? 15_000,
-        defaultStudyCardMs: d.defaultStudyCardMs ?? 10_000,
         isPublished: false,
         sortOrder: d.sortOrder ?? 0,
       });
@@ -3823,7 +3819,6 @@ export function registerAdminRoutes(app: Express): void {
         slug: d.slug,
         description: d.description,
         defaultAnswerMs: d.defaultAnswerMs,
-        defaultStudyCardMs: d.defaultStudyCardMs,
         isPublished: d.isPublished,
         sortOrder: d.sortOrder,
       });

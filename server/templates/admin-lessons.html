@@ -107,14 +107,14 @@
         </summary>
         <div class="collapsible-panel-body">
           <p class="muted" style="margin:0 0 .5rem;font-size:.82rem">
-            الحقول الزمنية بالمللي ثانية (مثل 15000 = 15 ثانية). لا يُضمَّن تصنيف الدرس — عيّنه يدوياً من حقل التصنيف بعد الإنشاء.
+            الأزمنة بالمللي ثانية (مثل 15000 = 15 ثانية): defaultAnswerMs للدرس، وstudyPhaseMs لكل قسم (زمن المذاكرة الإجمالي للقسم). لا يُضمَّن تصنيف الدرس — عيّنه يدوياً بعد الإنشاء.
           </p>
           <div class="row" style="margin-bottom:.35rem">
             <label class="muted" style="font-size:.82rem">ملف JSON</label>
             <input type="file" id="import-json-file" accept="application/json,.json" style="flex:1;min-width:12rem" />
           </div>
           <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">محتوى JSON</label>
-          <textarea id="import-json-text" rows="10" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:.78rem;line-height:1.35" placeholder='{"lesson":{"title":"…","defaultAnswerMs":15000,"defaultStudyCardMs":10000,"sortOrder":0},"sections":[{"titleAr":"القسم 1","studyPhaseMs":60000,"items":[…]}]}'></textarea>
+          <textarea id="import-json-text" rows="10" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:.78rem;line-height:1.35" placeholder='{"lesson":{"title":"…","defaultAnswerMs":15000,"sortOrder":0},"sections":[{"titleAr":"القسم 1","studyPhaseMs":60000,"items":[…]}]}'></textarea>
           <div class="row" style="margin-top:.55rem">
             <button type="button" class="btn" id="import-json-preview">معاينة الدرس</button>
             <button type="button" class="btn btn-secondary" id="import-json-commit">إضافة الدرس</button>
@@ -172,8 +172,17 @@
               <input type="text" id="ai-study-list" placeholder='مثال: [60,90,45]' style="width:100%" />
             </div>
           </div>
-          <label class="muted" style="display:block;margin:.45rem 0 .2rem;font-size:.82rem">موضوع الدرس / الجمهور / المنهاج (اختياري)</label>
+          <label class="muted" style="display:block;margin:.45rem 0 .2rem;font-size:.82rem">موضوع الدرس / المنهاج (اختياري)</label>
           <textarea id="ai-topic" rows="2" style="width:100%" placeholder="مثال: قواعد النحو للصف الثاني ثانوي"></textarea>
+          <label class="muted" style="display:block;margin:.45rem 0 .2rem;font-size:.82rem">مستوى الجمهور (اختياري)</label>
+          <select id="ai-audience" style="width:100%;max-width:22rem;font-size:.9rem">
+            <option value="">— بدون تحديد إضافي (يُستمد من النص أعلاه) —</option>
+            <option value="أطفال">أطفال</option>
+            <option value="مبتدئ">مبتدئ</option>
+            <option value="ثانوي">ثانوي</option>
+            <option value="جامعي">جامعي</option>
+            <option value="متخصصون">متخصصون</option>
+          </select>
           <div class="row" style="margin-top:.55rem">
             <button type="button" class="btn" id="ai-copy-prompt">نسخ البرومبت</button>
             <button type="button" class="btn btn-secondary" id="ai-copy-template">نسخ قالب JSON فارغ</button>
@@ -221,8 +230,6 @@
         <div class="row">
           <label class="muted">وقت الإجابة الافتراضي (ثانية)</label>
           <input id="l-d-ans" type="number" min="3" max="120" step="0.5" value="15" style="width:120px" />
-          <label class="muted">مدة بطاقة التعلم الافتراضية (ثانية)</label>
-          <input id="l-d-study" type="number" min="2" max="300" step="0.5" value="10" style="width:120px" />
           <label class="muted">ترتيب</label>
           <input id="l-sort" type="number" min="0" value="0" style="width:80px" />
         </div>
@@ -635,7 +642,6 @@
             document.getElementById("l-desc").value = d.lesson.description || "";
             document.getElementById("l-pub").checked = !!d.lesson.isPublished;
             document.getElementById("l-d-ans").value = msToSecDisplay(d.lesson.defaultAnswerMs);
-            document.getElementById("l-d-study").value = msToSecDisplay(d.lesson.defaultStudyCardMs);
             document.getElementById("l-sort").value = String(d.lesson.sortOrder ?? 0);
             const cid = d.lesson.lessonCategoryId;
             document.getElementById("l-cat").value = cid != null ? String(cid) : "";
@@ -1209,6 +1215,99 @@
           } catch (_) {}
         };
 
+        function parsePositiveIntArray(raw, maxLen) {
+          if (raw == null || String(raw).trim() === "") return null;
+          try {
+            var arr = JSON.parse(String(raw).trim());
+            if (!Array.isArray(arr) || arr.length !== maxLen) return null;
+            var out = [];
+            for (var i = 0; i < arr.length; i++) {
+              var n = Number(arr[i]);
+              if (!Number.isFinite(n) || n <= 0) return null;
+              var t = Math.trunc(n);
+              if (t !== n) return null;
+              out.push(t);
+            }
+            return out;
+          } catch (_e) {
+            return null;
+          }
+        }
+
+        function parseStudySecArray(raw, maxLen) {
+          if (raw == null || String(raw).trim() === "") return null;
+          try {
+            var arr = JSON.parse(String(raw).trim());
+            if (!Array.isArray(arr) || arr.length !== maxLen) return null;
+            var out = [];
+            for (var i = 0; i < arr.length; i++) {
+              var n = Number(arr[i]);
+              if (!Number.isFinite(n)) return null;
+              if (n < 2 || n > 300) return null;
+              out.push(n);
+            }
+            return out;
+          } catch (_e) {
+            return null;
+          }
+        }
+
+        function buildSectionConstraintsLines(nSec, qParsed, studyMsPerSection, qSame, studyPhaseMsUnified) {
+          var lines = [];
+          var i;
+          if (qParsed && studyMsPerSection && qParsed.length === nSec && studyMsPerSection.length === nSec) {
+            for (i = 0; i < nSec; i++) {
+              lines.push(
+                "— القسم " +
+                  (i + 1) +
+                  ": items يجب أن تحتوي بالضبط " +
+                  qParsed[i] +
+                  " سؤالاً؛ studyPhaseMs = " +
+                  studyMsPerSection[i] +
+                  " (مللي ثانية).",
+              );
+            }
+            return "قيود الأقسام بالترتيب:\n" + lines.join("\n");
+          }
+          if (qParsed && qParsed.length === nSec && !studyMsPerSection) {
+            for (i = 0; i < nSec; i++) {
+              lines.push(
+                "— القسم " +
+                  (i + 1) +
+                  ": items يجب أن تحتوي بالضبط " +
+                  qParsed[i] +
+                  " سؤالاً؛ studyPhaseMs = " +
+                  studyPhaseMsUnified +
+                  " (مللي ثانية، موحّد لكل الأقسام).",
+              );
+            }
+            return "قيود الأقسام بالترتيب:\n" + lines.join("\n");
+          }
+          if (!qParsed && studyMsPerSection && studyMsPerSection.length === nSec) {
+            for (i = 0; i < nSec; i++) {
+              lines.push(
+                "— القسم " +
+                  (i + 1) +
+                  ": items بعدد موحّد " +
+                  qSame +
+                  " سؤالاً؛ studyPhaseMs = " +
+                  studyMsPerSection[i] +
+                  " (مللي ثانية).",
+              );
+            }
+            return "قيود الأقسام بالترتيب:\n" + lines.join("\n");
+          }
+          return (
+            "جميع الأقسام الـ " +
+            nSec +
+            ": لكل قسم items بعدد موحّد " +
+            qSame +
+            " سؤالاً، وstudyPhaseMs = " +
+            studyPhaseMsUnified +
+            " (مللي ثانية) لكل قسم."
+          );
+        }
+
         function buildAiLessonPrompt() {
           var nSec = Math.min(20, Math.max(1, parseInt(document.getElementById("ai-sections").value, 10) || 3));
           var qSameEl = document.getElementById("ai-q-same").value.trim();
@@ -1223,54 +1322,128 @@
           studySec = Math.min(300, Math.max(2, studySec));
           var studyListRaw = document.getElementById("ai-study-list").value.trim();
           var topic = document.getElementById("ai-topic").value.trim();
+          var audienceEl = document.getElementById("ai-audience");
+          var audience = audienceEl && audienceEl.value ? String(audienceEl.value).trim() : "";
 
           var defaultAnswerMs = Math.round(ansSec * 1000);
           var studyPhaseMsUnified = Math.round(studySec * 1000);
 
-          var qDesc = qListRaw
-            ? "عدد الأسئلة في كل قسم يكون بالترتيب حسب مصفوفة JSON يكون طولها " +
-              nSec +
-              " (مثال للشكل: [3,4,2]). القيمة المُدخلة: " +
-              qListRaw
-            : "عدد الأسئلة في كل قسم موحّد: " + qSame + " أسئلة لكل من الأقسام الـ " + nSec;
+          var qParsed = qListRaw ? parsePositiveIntArray(qListRaw, nSec) : null;
+          var studySecParsed = studyListRaw ? parseStudySecArray(studyListRaw, nSec) : null;
+          var studyMsPerSection = studySecParsed
+            ? studySecParsed.map(function (s) {
+                return Math.round(Number(s) * 1000);
+              })
+            : null;
 
-          var studyDesc = studyListRaw
-            ? "حقل studyPhaseMs لكل قسم بالمللي ثانية، بالترتيب، مصفوفة بطول " +
-              nSec +
-              " (تحويل الثواني إلى مللي: ثانية × 1000). مثال للشكل: [60000,90000]. القيمة المُدخلة: " +
-              studyListRaw
-            : "حقل studyPhaseMs لكل قسم يمكن ضبطه على نفس القيمة بالمللي ثانية: " +
+          var qMismatch = qListRaw.length > 0 && !qParsed;
+          var studyMismatch = studyListRaw.length > 0 && !studySecParsed;
+          var arrayMismatch = qMismatch || studyMismatch;
+
+          var sectionBlock = buildSectionConstraintsLines(nSec, qParsed, studyMsPerSection, qSame, studyPhaseMsUnified);
+
+          var studyMsListDisplay = studyMsPerSection ? "[" + studyMsPerSection.join(",") + "]" : null;
+          var qListNote = qListRaw
+            ? qParsed
+              ? "تم تفسير مصفوفة عدد الأسئلة لكل قسم (صالحة، طولها " + nSec + "): " + qListRaw
+              : "حقل مصفوفة الأسئلة غير متسق مع عدد الأقسام (" +
+                nSec +
+                ") أو غير صالح — راجع JSON. المُدخل: " +
+                qListRaw
+            : "عدد الأسئلة في كل قسم موحّد: " + qSame + " لكل من الأقسام الـ " + nSec + ".";
+
+          var studyListNote = studyListRaw
+            ? studySecParsed
+              ? "أوقات مذاكرة الأقسام بالمللي ثانية (جاهزة من الثواني المُدخلة " +
+                studyListRaw +
+                "): " +
+                studyMsListDisplay +
+                " — استخدم هذه القيم كـ studyPhaseMs بالترتيب."
+              : "حقل مصفوفة أوقات المذاكرة غير متسق مع عدد الأقسام (" +
+                nSec +
+                ") أو خارج النطاق 2–300 ثانية لكل عنصر — راجع JSON. المُدخل: " +
+                studyListRaw
+            : "زمن مذاكرة كل قسم موحّد بالمللي ثانية: " +
               studyPhaseMsUnified +
               " (أي " +
               studySec +
-              " ثانية) لجميع الأقسام، أو تخصيص كل قسم إن رغبت.";
+              " ثانية) لجميع الأقسام ما لم تُخصّص قيود أخرى في الأعلى.";
 
-          var topicLine = topic ? "\nسياق الموضوع والجمهور:\n" + topic + "\n" : "";
+          var totalQApprox = qParsed
+            ? qParsed.reduce(function (a, b) {
+                return a + b;
+              }, 0)
+            : nSec * qSame;
+          var avgStudyMsPerCardHint = studyPhaseMsUnified;
+          if (qParsed && studyMsPerSection) {
+            var sumRatios = 0;
+            for (var j = 0; j < nSec; j++) sumRatios += studyMsPerSection[j] / qParsed[j];
+            avgStudyMsPerCardHint = Math.round(sumRatios / nSec);
+          } else if (qParsed && !studyMsPerSection) {
+            var sumRatiosU = 0;
+            for (var k = 0; k < nSec; k++) sumRatiosU += studyPhaseMsUnified / qParsed[k];
+            avgStudyMsPerCardHint = Math.round(sumRatiosU / nSec);
+          } else {
+            avgStudyMsPerCardHint = Math.round(studyPhaseMsUnified / Math.max(1, qSame));
+          }
 
-          return (
-            "أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية. أخرج JSON صالحاً فقط، من سطر واحد أو متعدد، بدون شرح قبله أو بعده وبدون Markdown.\n\n" +
-            "المطلوب هيكل الجذر:\n" +
-            "- lesson: title (نص)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح مللي ثانية)، defaultStudyCardMs (عدد صحيح مللي ثانية)، sortOrder (عدد صحيح).\n" +
-            "- sections: مصفوفة طولها " +
+          var topicBlock = "";
+          if (topic || audience) {
+            topicBlock = "\nسياق الموضوع والجمهور:\n";
+            if (topic) topicBlock += topic + "\n";
+            if (audience) topicBlock += "مستوى الجمهور المستهدف: " + audience + "\n";
+          }
+
+          var mismatchBanner = arrayMismatch
+            ? "\n\nتحذير للمُنشئ: طول مصفوفة الأسئلة و/أو مصفوفة أوقات المذاكرة لا يطابق عدد الأقسام (" +
+              nSec +
+              ") أو البيانات غير صالحة. راجع الحقول في الواجهة؛ عند التصدير اعتمد الوضع الموحّد أو صحّح JSON.\n"
+            : "";
+
+          var qualityBlock =
+            "\nجودة المحتوى (إلزامي اتباع الروح):\n" +
+            "— المشتتات: اجعل الخيارات الخاطئة من نفس المجال وتبدو معقولة لمن لم يقرأ بطاقة المذاكرة جيداً؛ تجنّب الخيارات السخيفة أو البديهية جداً.\n" +
+            "— تطابق المذاكرة والاختبار: المعلومة اللازمة للإجابة الصحيحة يجب أن تكون موجودة في studyBody لذلك السؤال (صراحة أو ضمناً)، دون مطالبة خارج نطاق البطاقة.\n" +
+            "— طول studyBody: عدد بطاقات المذاكرة يقارب عدد الأسئلة في القسم؛ عندما يكون زمن القسم (studyPhaseMs) مقسوماً على عدد الأسئلة فيه صغيراً نسبياً، اجعل كل studyBody جملة إلى ثلاث جمل مركزة تحتوي المعلومة الكافية فقط. (تقريباً " +
+            totalQApprox +
+            " سؤالاً في الدرس؛ مؤشر زمن موحّد تقريبي لكل بطاقة عند التساوي: نحو " +
+            avgStudyMsPerCardHint +
+            " مللي ثانية — إرشاد تقريبي وليس حداً صارماً.)\n";
+
+          var text =
+            "دورك: أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية.\n\n" +
+            "المخرجات: JSON صالح فقط (سطر واحد أو متعدد)، بدون نص قبله أو بعده وبدون Markdown أو تعليقات.\n\n" +
+            "هيكل الجذر:\n" +
+            "— lesson: title (نص)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح بالمللي ثانية)، sortOrder (عدد صحيح).\n" +
+            "— sections: مصفوفة طولها بالضبط " +
             nSec +
-            "؛ كل عنصر يحتوي titleAr (عنوان القسم)، studyPhaseMs (عدد مللي ثانية لمجموع زمن بطاقات المذاكرة للقسم)، items: مصفوفة أسئلة.\n" +
-            "لا تُضمّن أي حقل لتصنيف الدرس (lessonCategoryId) في JSON.\n\n" +
-            "كل سؤال داخل items يجب أن يحتوي:\n" +
-            "prompt، options (مصفوفة من 2 أو 4 نصوص)، correctIndex (0..طول-1)، difficulty: easy|medium|hard، studyBody (نص بطاقة المذاكرة، مطلوب غير فارغ)، answerMs اختياري (مللي ثانية لهذا السؤال أو null للاعتماد على defaultAnswerMs)، subcategoryKey اختياري (مثل general_default).\n\n" +
-            "قيود المعطيات لهذا الطلب:\n" +
-            "- عدد الأقسام: " +
+            "؛ كل عنصر: titleAr، studyPhaseMs (إجمالي زمن بطاقات المذاكرة للقسم بالمللي ثانية)، items (مصفوفة أسئلة).\n" +
+            "لا تُضمّن lessonCategoryId ولا أي حقل لتصنيف الدرس في JSON.\n\n" +
+            sectionBlock +
+            "\n\nكل سؤال داخل items يجب أن يحتوي:\n" +
+            "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (0..طول-1)، difficulty: easy|medium|hard، studyBody (نص بطاقة المذاكرة، مطلوب غير فارغ)، answerMs اختياري (مللي ثانية أو null للاعتماد على defaultAnswerMs)، subcategoryKey اختياري (مثل general_default).\n" +
+            qualityBlock +
+            "\nقيود المعطيات لهذا الطلب:\n" +
+            "— عدد الأقسام: " +
             nSec +
-            ".\n- " +
-            qDesc +
-            ".\n- الوقت الافتراضي للإجابة للدرس (defaultAnswerMs): " +
+            ".\n" +
+            "— " +
+            qListNote +
+            "\n" +
+            "— defaultAnswerMs للدرس: " +
             defaultAnswerMs +
             " مللي ثانية (" +
             ansSec +
-            " ثانية).\n- defaultStudyCardMs للدرس اقترح قيمة منطيقية بالمللي (غالباً ما يُنسّق مع بطاقات قصيرة).\n- " +
-            studyDesc +
-            topicLine +
-            "\nاملأ جميع النصوص التعليمية بالعربية الفصحى أو العربية المناسبة للجمهور. تأكد أن كل قسم يحتوي على الأقل سؤالاً واحداً وأن الخيارات والإجابة الصحيحة متسقة."
-          );
+            " ثانية).\n" +
+            "— " +
+            studyListNote +
+            topicBlock +
+            mismatchBanner +
+            "\nاملأ النصوص التعليمية بالعربية المناسبة للجمهور. تأكد أن كل قسم يطابق أعداد items وstudyPhaseMs أعلاه وأن الخيارات والإجابة الصحيحة متسقة.\n\n" +
+            "أخرج JSON الآن.\n\n" +
+            "(اختياري عند اللصق في أداة تفصل رسالة النظام عن المستخدم: ضع التعليمات أعلاه في رسالة المستخدم، وصفّ دور النموذج في رسالة النظام كمُنشئ JSON عربي لتطبيق تعليمي دون تعليق خارج JSON.)";
+
+          return { text: text, arrayMismatch: arrayMismatch };
         }
 
         function buildEmptyImportTemplate() {
@@ -1281,7 +1454,6 @@
                 slug: null,
                 description: "",
                 defaultAnswerMs: 15000,
-                defaultStudyCardMs: 10000,
                 sortOrder: 0,
               },
               sections: [
@@ -1316,8 +1488,21 @@
           }
         }
 
-        document.getElementById("ai-copy-prompt").onclick = function () {
-          void copyTextToClipboard(buildAiLessonPrompt());
+        document.getElementById("ai-copy-prompt").onclick = async function () {
+          var r = buildAiLessonPrompt();
+          try {
+            await navigator.clipboard.writeText(r.text);
+            if (r.arrayMismatch) {
+              setMsg(
+                "تم النسخ. تنبيه: طول مصفوفة الأسئلة أو أوقات المذاكرة لا يطابق عدد الأقسام — راجع الحقول؛ يظهر تحذير داخل البرومبت أيضاً.",
+                false,
+              );
+            } else {
+              setMsg("تم النسخ.", true);
+            }
+          } catch (_) {
+            setMsg("تعذر النسخ — انسخ يدوياً من المحرر.", false);
+          }
         };
 
         document.getElementById("ai-copy-template").onclick = function () {
@@ -1356,13 +1541,12 @@
           if (!selectedLessonId) return;
           const lessonCategoryIdRaw = document.getElementById("l-cat").value;
           const da = secStrToMs(document.getElementById("l-d-ans").value);
-          const ds = secStrToMs(document.getElementById("l-d-study").value);
-          if (da == null || Number.isNaN(da) || ds == null || Number.isNaN(ds)) {
-            setMsg("أدخل أوقاتاً صالحة بالثواني للدرس.", false);
+          if (da == null || Number.isNaN(da)) {
+            setMsg("أدخل وقتاً صالحاً بالثواني لوقت الإجابة الافتراضي.", false);
             return;
           }
-          if (da < 3000 || da > 120000 || ds < 2000 || ds > 300000) {
-            setMsg("وقت الإجابة الافتراضي 3–120 ثانية، وبطاقة التعلم 2–300 ثانية.", false);
+          if (da < 3000 || da > 120000) {
+            setMsg("وقت الإجابة الافتراضي 3–120 ثانية.", false);
             return;
           }
           const body = {
@@ -1372,7 +1556,6 @@
             lessonCategoryId: lessonCategoryIdRaw ? Number(lessonCategoryIdRaw) : null,
             isPublished: document.getElementById("l-pub").checked,
             defaultAnswerMs: da,
-            defaultStudyCardMs: ds,
             sortOrder: Number(document.getElementById("l-sort").value),
           };
           try {

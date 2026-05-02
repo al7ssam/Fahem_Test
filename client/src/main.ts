@@ -45,7 +45,6 @@ type LessonPlaybackPayload = {
   slug: string | null;
   description: string | null;
   defaultAnswerMs: number;
-  defaultStudyCardMs: number;
   category: { id: number; nameAr: string; icon: string } | null;
   sections?: LessonPlaybackSection[];
   steps: LessonPlaybackStep[];
