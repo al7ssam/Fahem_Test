@@ -2,7 +2,8 @@
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getPool } from "../db/pool";
-import { getPublishedLessonPlaybackById } from "../db/lessons";
+import { getPublishedLessonPlaybackById, type LessonPlaybackPayload } from "../db/lessons";
+import { getCustomLessonPlayback } from "../customLessonSessions";
 import { countQuestionsBySubcategory } from "../db/questions";
 import { Match, type DifficultyMode, type GameMode } from "./Match";
 
@@ -19,6 +20,34 @@ const joinLobbySchema = z
     if (data.mode === "lesson") {
       if (data.lessonId == null || !Number.isFinite(data.lessonId) || data.lessonId < 1) {
         ctx.addIssue({ code: "custom", path: ["lessonId"], message: "lesson_id_required" });
+      }
+    }
+  });
+
+/** غرفة خاصة + فردي عبر السيرفر: درس منشور أو درس مخصص برمز جلسة */
+const joinLessonFlexibleSchema = z
+  .object({
+    name: z.string().trim().min(1).max(32),
+    mode: z.enum(["direct", "study_then_quiz", "lesson"]).default("direct"),
+    subcategoryKey: z.string().trim().min(1).max(120).optional(),
+    lessonId: z.number().int().positive().optional(),
+    customLessonToken: z.string().uuid().optional(),
+    difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
+    playerSessionId: z.string().trim().min(1).max(120).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.mode === "lesson") {
+      const hasToken = Boolean(data.customLessonToken?.trim());
+      const hasLesson = data.lessonId != null && Number.isFinite(data.lessonId) && data.lessonId >= 1;
+      if (!hasToken && !hasLesson) {
+        ctx.addIssue({ code: "custom", path: ["lessonId"], message: "lesson_id_or_token_required" });
+      }
+      if (hasToken && hasLesson) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["customLessonToken"],
+          message: "lesson_token_and_id_conflict",
+        });
       }
     }
   });
@@ -84,6 +113,9 @@ type PrivateRoomState = {
   mode: GameMode;
   subcategoryKey: string | null;
   lessonId: number | null;
+  /** عند الدرس المخصص: حمولة جاهزة بدل القراءة من قاعدة البيانات */
+  customLessonPlayback: LessonPlaybackPayload | null;
+  customLessonToken: string | null;
   difficultyMode: DifficultyMode;
   settings: PrivateRoomSettings;
   members: Map<string, LobbyEntry>;
@@ -333,7 +365,7 @@ export class GameManager {
 
     socket.on("create_private_room", async (raw, cb) => {
       try {
-        const parsed = joinLobbySchema.safeParse(raw);
+        const parsed = joinLessonFlexibleSchema.safeParse(raw);
         if (!parsed.success) {
           cb?.({ ok: false, error: "invalid_body" });
           return;
@@ -346,10 +378,25 @@ export class GameManager {
           mode === "study_then_quiz"
             ? String(d.subcategoryKey ?? "general_default").trim()
             : null;
-        const lessonId = mode === "lesson" ? (d.lessonId ?? null) : null;
-        if (mode === "lesson" && (lessonId == null || lessonId < 1)) {
-          cb?.({ ok: false, error: "lesson_id_required", message: "اختر درساً صالحاً." });
-          return;
+        const tokenRaw = String(d.customLessonToken ?? "").trim();
+        let customLessonPlayback: LessonPlaybackPayload | null = null;
+        let lessonId: number | null = mode === "lesson" ? (d.lessonId ?? null) : null;
+        if (mode === "lesson") {
+          if (tokenRaw) {
+            customLessonPlayback = getCustomLessonPlayback(tokenRaw);
+            if (!customLessonPlayback || customLessonPlayback.steps.length === 0) {
+              cb?.({
+                ok: false,
+                error: "custom_lesson_expired",
+                message: "انتهت صلاحية الدرس المخصص أو غير صالح. أعد التحقق من JSON ثم أنشئ جلسة جديدة.",
+              });
+              return;
+            }
+            lessonId = null;
+          } else if (lessonId == null || lessonId < 1) {
+            cb?.({ ok: false, error: "lesson_id_required", message: "اختر درساً صالحاً." });
+            return;
+          }
         }
         const questionMsRaw = Number((raw as { questionMs?: unknown }).questionMs ?? 15_000);
         const studyPhaseMsRaw = Number((raw as { studyPhaseMs?: unknown }).studyPhaseMs ?? 60_000);
@@ -378,6 +425,8 @@ export class GameManager {
           mode,
           subcategoryKey,
           lessonId,
+          customLessonPlayback,
+          customLessonToken: tokenRaw || null,
           difficultyMode: d.difficultyMode ?? "mix",
           settings,
           members: new Map([[socket.id, entry]]),
@@ -525,7 +574,7 @@ export class GameManager {
 
     socket.on("start_solo_match", async (raw, cb) => {
       try {
-        const parsed = joinLobbySchema.safeParse(raw);
+        const parsed = joinLessonFlexibleSchema.safeParse(raw);
         if (!parsed.success) {
           cb?.({ ok: false, error: "invalid_name" });
           return;
@@ -537,22 +586,36 @@ export class GameManager {
           mode === "study_then_quiz"
             ? String(parsed.data.subcategoryKey ?? "general_default").trim()
             : null;
-        const lessonId = mode === "lesson" ? (parsed.data.lessonId ?? null) : null;
-        let lessonPlaybackForMatch: Awaited<ReturnType<typeof getPublishedLessonPlaybackById>> = null;
+        const tokenSolo = String(parsed.data.customLessonToken ?? "").trim();
+        let lessonId = mode === "lesson" ? (parsed.data.lessonId ?? null) : null;
+        let lessonPlaybackForMatch: LessonPlaybackPayload | null = null;
 
         if (mode === "lesson") {
-          if (lessonId == null || lessonId < 1) {
-            cb?.({ ok: false, error: "lesson_id_required", message: "معرّف الدرس مطلوب." });
-            return;
-          }
-          lessonPlaybackForMatch = await getPublishedLessonPlaybackById(lessonId);
-          if (!lessonPlaybackForMatch || lessonPlaybackForMatch.steps.length === 0) {
-            cb?.({
-              ok: false,
-              error: "lesson_not_found",
-              message: "الدرس غير متاح أو غير منشور.",
-            });
-            return;
+          if (tokenSolo) {
+            lessonPlaybackForMatch = getCustomLessonPlayback(tokenSolo);
+            if (!lessonPlaybackForMatch || lessonPlaybackForMatch.steps.length === 0) {
+              cb?.({
+                ok: false,
+                error: "custom_lesson_expired",
+                message: "انتهت صلاحية الدرس المخصص أو غير صالح.",
+              });
+              return;
+            }
+            lessonId = null;
+          } else {
+            if (lessonId == null || lessonId < 1) {
+              cb?.({ ok: false, error: "lesson_id_required", message: "معرّف الدرس مطلوب." });
+              return;
+            }
+            lessonPlaybackForMatch = await getPublishedLessonPlaybackById(lessonId);
+            if (!lessonPlaybackForMatch || lessonPlaybackForMatch.steps.length === 0) {
+              cb?.({
+                ok: false,
+                error: "lesson_not_found",
+                message: "الدرس غير متاح أو غير منشور.",
+              });
+              return;
+            }
           }
         }
 
@@ -820,21 +883,31 @@ export class GameManager {
       }
     }
     if (room.mode === "lesson") {
-      const lid = room.lessonId;
-      if (lid == null || lid < 1) {
-        this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
-          reason: "lesson_invalid",
-          message: "غرفة الدرس لا تحتوي على معرّف درس صالح.",
-        });
-        return;
-      }
-      const lesson = await getPublishedLessonPlaybackById(lid);
-      if (!lesson || lesson.steps.length === 0) {
-        this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
-          reason: "lesson_not_found",
-          message: "الدرس غير متاح أو غير منشور.",
-        });
-        return;
+      if (room.customLessonPlayback) {
+        if (room.customLessonPlayback.steps.length === 0) {
+          this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+            reason: "lesson_invalid",
+            message: "الدرس المخصص لا يحتوي على خطوات.",
+          });
+          return;
+        }
+      } else {
+        const lid = room.lessonId;
+        if (lid == null || lid < 1) {
+          this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+            reason: "lesson_invalid",
+            message: "غرفة الدرس لا تحتوي على معرّف درس صالح.",
+          });
+          return;
+        }
+        const lesson = await getPublishedLessonPlaybackById(lid);
+        if (!lesson || lesson.steps.length === 0) {
+          this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+            reason: "lesson_not_found",
+            message: "الدرس غير متاح أو غير منشور.",
+          });
+          return;
+        }
       }
     }
     room.lockedParticipants = members.map((m) => m.socketId);
@@ -868,9 +941,11 @@ export class GameManager {
     }
     const matchId = randomUUID();
     const lessonPlayback =
-      room.mode === "lesson" && room.lessonId != null
-        ? await getPublishedLessonPlaybackById(room.lessonId)
-        : null;
+      room.mode === "lesson" && room.customLessonPlayback
+        ? room.customLessonPlayback
+        : room.mode === "lesson" && room.lessonId != null
+          ? await getPublishedLessonPlaybackById(room.lessonId)
+          : null;
     if (room.mode === "lesson" && !lessonPlayback) {
       room.lockedParticipants = [];
       room.roomVersion += 1;

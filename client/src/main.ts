@@ -1,11 +1,15 @@
 import "./style.css";
 import { io, type Socket } from "socket.io-client";
 import { toDataURL as qrToDataURL } from "qrcode";
+import { buildCustomLessonAiPromptText, type LessonAiPromptParams } from "./lessonPromptBuilder";
+import { normalizePastedJsonForParse } from "./jsonNormalize";
+import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 
 type GameMode = "direct" | "study_then_quiz" | "lesson";
 type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 type Phase =
   | "name"
+  | "custom_lesson"
   | "lesson_menu"
   | "lesson_study"
   | "lesson_quiz"
@@ -187,6 +191,26 @@ let lessonBrowseSelectedCategoryId: number | null = null;
 const LESSON_BROWSE_UNCATEGORIZED = -1;
 let lessonBrowseMsg = "";
 let lessonPlayback: LessonPlaybackPayload | null = null;
+/** درس مخصص: جسم JSON المُتحقق منه (لإنشاء جلسة سيرفر) */
+let customLessonValidatedBody: Record<string, unknown> | null = null;
+let customLessonPreviewLesson: LessonPlaybackPayload | null = null;
+let customLessonSessionToken: string | null = null;
+let customLessonLearningIntent = "";
+let customLessonJsonText = "";
+let customLessonErr = "";
+let customLessonMsg = "";
+let customLessonClientId = "";
+const defaultCustomPromptParams = (): LessonAiPromptParams => ({
+  nSec: 3,
+  qSame: 3,
+  ansSec: 15,
+  studySec: 60,
+  topic: "",
+  audience: "",
+  minSentences: 1,
+  maxSentences: 3,
+});
+let customLessonPromptParams: LessonAiPromptParams = defaultCustomPromptParams();
 let lessonStudyQueue: Array<{ body: string; ms: number }> = [];
 let lessonStudyIdx = 0;
 let lessonStudySegmentEndAt = 0;
@@ -658,6 +682,11 @@ function render(): void {
                   <span class="mode-option-title">دروس منظمة</span>
                   <span class="mode-option-desc">اختر درساً ثم تعلّم فردياً أو تحدّ عاماً أو غرفة خاصة</span>
                 </button>
+                <button type="button" class="mode-option-btn" data-flow="custom_lesson">
+                  <span class="mode-option-icon" aria-hidden="true">✨</span>
+                  <span class="mode-option-title">درس مخصص</span>
+                  <span class="mode-option-desc">برومبت خارجي + لصق JSON ثم تعلّم فردياً أو غرفة خاصة</span>
+                </button>
                 `
                     : nameFlowStep === "main_categories"
                       ? mainCards
@@ -765,6 +794,30 @@ function render(): void {
                 lessonBrowseMsg = "تعذر تحميل الدروس.";
                 render();
               });
+            return;
+          }
+          if (b.dataset.flow === "custom_lesson") {
+            err.textContent = "";
+            const d = loadCustomLessonDraft();
+            if (d) {
+              customLessonClientId = d.clientLessonId;
+              customLessonLearningIntent = d.learningIntent;
+              customLessonJsonText = d.jsonText;
+              customLessonPromptParams = { ...defaultCustomPromptParams(), ...d.promptParams };
+              customLessonSessionToken = d.lastSessionToken ?? null;
+            } else {
+              customLessonClientId = "";
+              customLessonLearningIntent = "";
+              customLessonJsonText = "";
+              customLessonPromptParams = defaultCustomPromptParams();
+              customLessonSessionToken = null;
+            }
+            customLessonValidatedBody = null;
+            customLessonPreviewLesson = null;
+            customLessonErr = "";
+            customLessonMsg = "";
+            phase = "custom_lesson";
+            render();
             return;
           }
           selectedModeInName =
@@ -1012,6 +1065,234 @@ function render(): void {
       render();
       connectSocket(storedName, "direct", null, "mix", "private_join", pendingJoinRoomCode);
     }
+    return;
+  }
+
+  if (phase === "custom_lesson") {
+    const p = customLessonPromptParams;
+    const persistDraft = (): void => {
+      if (!customLessonClientId) {
+        try {
+          customLessonClientId = crypto.randomUUID();
+        } catch {
+          customLessonClientId = `cl_${Date.now()}`;
+        }
+      }
+      saveCustomLessonDraft({
+        clientLessonId: customLessonClientId,
+        learningIntent: customLessonLearningIntent,
+        jsonText: customLessonJsonText,
+        promptParams: { ...customLessonPromptParams },
+        lastSessionToken: customLessonSessionToken,
+      });
+    };
+    const audienceOptions: Array<{ v: string; t: string }> = [
+      { v: "", t: "— بدون تحديد —" },
+      { v: "أطفال", t: "أطفال" },
+      { v: "مبتدئ", t: "مبتدئ" },
+      { v: "ثانوي", t: "ثانوي" },
+      { v: "جامعي", t: "جامعي" },
+      { v: "متخصصون", t: "متخصصون" },
+    ];
+    app.append(
+      el(`
+        <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3 text-right">
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" id="cl-back" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">الرئيسية</button>
+            <h1 class="text-xl font-extrabold text-amber-300">درس مخصص</h1>
+          </div>
+          <p class="text-slate-400 text-sm m-0">أنشئ البرومبت وانسخه لأداة ذكاء خارجية، ثم الصق JSON الناتج هنا. التحقق يتم على الخادم دون حفظ الدرس في الحساب.</p>
+          <label class="text-slate-300 text-sm">ماذا تريد أن تتعلّم؟</label>
+          <textarea id="cl-intent" rows="4" class="app-input w-full px-3 py-2 text-sm" placeholder="مادة، موضوع، أو نص معلومات...">${escapeHtml(customLessonLearningIntent)}</textarea>
+          <details class="app-card p-3 space-y-2">
+            <summary class="cursor-pointer text-amber-200 text-sm font-bold">إعدادات البرومبت</summary>
+            <div class="grid grid-cols-2 gap-2 pt-2">
+              <label class="text-xs text-slate-400 col-span-2">أقسام / أسئلة لكل قسم / إجابة (ث) / مذاكرة (ث)</label>
+              <input id="cl-nsec" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm" value="${p.nSec}" />
+              <input id="cl-qsame" type="number" min="1" max="50" class="app-input px-2 py-1 text-sm" value="${p.qSame}" />
+              <input id="cl-anssec" type="number" min="3" max="120" step="0.5" class="app-input px-2 py-1 text-sm" value="${p.ansSec}" />
+              <input id="cl-studysec" type="number" min="2" max="300" step="0.5" class="app-input px-2 py-1 text-sm" value="${p.studySec}" />
+              <input id="cl-minsent" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm" value="${p.minSentences}" />
+              <input id="cl-maxsent" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm" value="${p.maxSentences}" />
+            </div>
+            <label class="text-xs text-slate-400">موضوع / منهاج (اختياري)</label>
+            <input id="cl-topic" type="text" class="app-input w-full px-2 py-1 text-sm" value="${escapeHtml(p.topic)}" />
+            <label class="text-xs text-slate-400">مستوى الجمهور</label>
+            <select id="cl-audience" class="app-input w-full px-2 py-1 text-sm">
+              ${audienceOptions.map((o) => `<option value="${escapeHtml(o.v)}" ${p.audience === o.v ? "selected" : ""}>${escapeHtml(o.t)}</option>`).join("")}
+            </select>
+          </details>
+          <button type="button" id="cl-copy" class="ui-btn ui-btn--primary w-full py-2">نسخ البرومبت</button>
+          <label class="text-slate-300 text-sm">JSON الدرس (من النموذج)</label>
+          <textarea id="cl-json" rows="8" class="app-input w-full px-3 py-2 text-xs font-mono" placeholder='{"lesson":{...},"sections":[...]}'>${escapeHtml(customLessonJsonText)}</textarea>
+          <p id="cl-msg" class="text-emerald-300 text-sm min-h-[1.25rem] m-0">${escapeHtml(customLessonMsg)}</p>
+          <p id="cl-err" class="text-red-400 text-sm min-h-[1.25rem] m-0">${escapeHtml(customLessonErr)}</p>
+          <div class="flex flex-col gap-2">
+            <button type="button" id="cl-preview" class="ui-btn ui-btn--cta w-full py-2">تحقق ومعاينة</button>
+            <button type="button" id="cl-solo" class="ui-btn ui-btn--primary w-full py-2">ابدأ التعلم الفردي (محلي)</button>
+            <button type="button" id="cl-private" class="ui-btn ui-btn--ghost w-full py-2">إنشاء غرفة خاصة</button>
+          </div>
+        </div>
+      `),
+    );
+    const readParamsFromDom = (): void => {
+      const num = (id: string, def: number, min: number, max: number): number => {
+        const el = app.querySelector<HTMLInputElement>(id);
+        const v = el ? parseFloat(el.value) : def;
+        if (!Number.isFinite(v)) return def;
+        return Math.min(max, Math.max(min, v));
+      };
+      const n = num("#cl-nsec", 3, 1, 20);
+      const q = num("#cl-qsame", 3, 1, 50);
+      const mi = Math.min(20, Math.max(1, Math.trunc(num("#cl-minsent", 1, 1, 20))));
+      const ma = Math.min(20, Math.max(1, Math.trunc(num("#cl-maxsent", 3, 1, 20))));
+      customLessonPromptParams = {
+        nSec: n,
+        qSame: q,
+        ansSec: num("#cl-anssec", 15, 3, 120),
+        studySec: num("#cl-studysec", 60, 2, 300),
+        topic: app.querySelector<HTMLInputElement>("#cl-topic")?.value.trim() ?? "",
+        audience: app.querySelector<HTMLSelectElement>("#cl-audience")?.value.trim() ?? "",
+        minSentences: Math.min(mi, ma),
+        maxSentences: Math.max(mi, ma),
+      };
+      customLessonLearningIntent = app.querySelector<HTMLTextAreaElement>("#cl-intent")?.value ?? "";
+      customLessonJsonText = app.querySelector<HTMLTextAreaElement>("#cl-json")?.value ?? "";
+    };
+    app.querySelector("#cl-back")?.addEventListener("click", () => {
+      readParamsFromDom();
+      persistDraft();
+      phase = "name";
+      nameFlowStep = "mode";
+      render();
+    });
+    app.querySelector("#cl-copy")?.addEventListener("click", async () => {
+      readParamsFromDom();
+      customLessonErr = "";
+      customLessonMsg = "";
+      const text = buildCustomLessonAiPromptText({
+        ...customLessonPromptParams,
+        learningIntent: customLessonLearningIntent,
+      });
+      try {
+        await navigator.clipboard.writeText(text);
+        customLessonMsg = "تم نسخ البرومبت.";
+      } catch {
+        customLessonErr = "تعذر النسخ — انسخ يدوياً.";
+      }
+      persistDraft();
+      render();
+    });
+    app.querySelector("#cl-preview")?.addEventListener("click", async () => {
+      readParamsFromDom();
+      customLessonErr = "";
+      customLessonMsg = "";
+      customLessonValidatedBody = null;
+      customLessonPreviewLesson = null;
+      customLessonSessionToken = null;
+      let body: Record<string, unknown>;
+      try {
+        const raw = normalizePastedJsonForParse(customLessonJsonText);
+        if (!raw) {
+          customLessonErr = "الصق JSON الدرس أولاً.";
+          persistDraft();
+          render();
+          return;
+        }
+        body = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        customLessonErr = "JSON غير صالح (صياغة).";
+        persistDraft();
+        render();
+        return;
+      }
+      try {
+        const res = await fetch("/api/custom-lessons/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          lesson?: LessonPlaybackPayload;
+          issues?: Array<{ path: string; message: string }>;
+          error?: string;
+        };
+        if (!res.ok || !data.ok || !data.lesson) {
+          const iss = data.issues?.map((i) => `${i.path}: ${i.message}`).join("؛ ") || data.error || "رفض الخادم";
+          customLessonErr = iss;
+          persistDraft();
+          render();
+          return;
+        }
+        customLessonValidatedBody = body;
+        customLessonPreviewLesson = data.lesson;
+        customLessonMsg = `تم التحقق — ${data.lesson.steps.length} خطوة في الدرس.`;
+      } catch {
+        customLessonErr = "تعذر الاتصال بالخادم.";
+      }
+      persistDraft();
+      render();
+    });
+    app.querySelector("#cl-solo")?.addEventListener("click", () => {
+      readParamsFromDom();
+      customLessonErr = "";
+      customLessonMsg = "";
+      if (!customLessonPreviewLesson) {
+        customLessonErr = "استخدم «تحقق ومعاينة» أولاً.";
+        persistDraft();
+        render();
+        return;
+      }
+      persistDraft();
+      beginLessonPlayback(customLessonPreviewLesson);
+    });
+    app.querySelector("#cl-private")?.addEventListener("click", async () => {
+      readParamsFromDom();
+      customLessonErr = "";
+      customLessonMsg = "";
+      if (!customLessonValidatedBody) {
+        customLessonErr = "استخدم «تحقق ومعاينة» أولاً.";
+        persistDraft();
+        render();
+        return;
+      }
+      const name = getStoredPlayerName() || playerNameDraft.trim();
+      if (!name) {
+        customLessonErr = "عرّف اسماً من الشاشة الرئيسية أولاً (الرئيسية).";
+        persistDraft();
+        render();
+        return;
+      }
+      try {
+        const res = await fetch("/api/custom-lessons/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(customLessonValidatedBody),
+        });
+        const data = (await res.json()) as { ok?: boolean; token?: string; error?: string };
+        if (!res.ok || !data.ok || !data.token) {
+          customLessonErr = data.error || "تعذر إنشاء جلسة الدرس.";
+          persistDraft();
+          render();
+          return;
+        }
+        customLessonSessionToken = data.token;
+        persistDraft();
+        storePlayerName(name);
+        playerNameDraft = name;
+        phase = "matchmaking";
+        soloLearningPending = false;
+        currentGameMode = "lesson";
+        lobbyNotice = "جاري إنشاء الغرفة الخاصة للدرس المخصص…";
+        render();
+        connectSocket(name, "lesson", null, "mix", "private_create", undefined, null, data.token);
+      } catch {
+        customLessonErr = "تعذر الاتصال بالخادم.";
+        persistDraft();
+        render();
+      }
+    });
     return;
   }
 
@@ -2885,6 +3166,7 @@ function connectSocket(
   joinKind: JoinKind = "public",
   roomCode?: string,
   lessonIdForMatch?: number | null,
+  customLessonTokenForMatch?: string | null,
 ): void {
   const playerSessionId = getOrCreatePlayerSessionId();
   const flowToken = ++searchFlowToken;
@@ -2977,7 +3259,11 @@ function connectSocket(
       name,
       mode,
       ...(mode === "study_then_quiz" && subcategoryKey ? { subcategoryKey } : {}),
-      ...(mode === "lesson" && lessonIdForMatch != null && lessonIdForMatch > 0 ? { lessonId: lessonIdForMatch } : {}),
+      ...(mode === "lesson" && customLessonTokenForMatch
+        ? { customLessonToken: customLessonTokenForMatch }
+        : mode === "lesson" && lessonIdForMatch != null && lessonIdForMatch > 0
+          ? { lessonId: lessonIdForMatch }
+          : {}),
       difficultyMode,
       ...(roomCode ? { roomCode } : {}),
       origin: window.location.origin,

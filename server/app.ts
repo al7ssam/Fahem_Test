@@ -4,6 +4,7 @@ import cors from "cors";
 import helmet from "helmet";
 import { config } from "./config";
 import { registerAdminRoutes } from "./routes/admin";
+import { registerCustomLessonRoutes } from "./routes/customLessons";
 
 export function createApp() {
   const app = express();
@@ -26,6 +27,7 @@ export function createApp() {
   });
 
   app.use(express.json({ limit: "1mb" }));
+  registerCustomLessonRoutes(app);
   registerAdminRoutes(app);
 
   if (config.isProduction) {

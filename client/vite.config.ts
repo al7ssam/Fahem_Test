@@ -21,6 +21,7 @@ export default defineConfig({
       },
       "/admin": { target: "http://127.0.0.1:3000" },
       "/api/admin": { target: "http://127.0.0.1:3000" },
+      "/api/custom-lessons": { target: "http://127.0.0.1:3000" },
     },
   },
 });
