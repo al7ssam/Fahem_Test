@@ -1124,14 +1124,23 @@
           lessonPreviewIndex = 0;
         }
 
+        function normalizePastedJsonForParse(raw) {
+          var s = String(raw == null ? "" : raw).trim();
+          if (!s) return "";
+          s = s.replace(/^\uFEFF/, "");
+          s = s.replace(/^\s*```(?:json)?\s*\r?\n?/i, "");
+          s = s.replace(/\s*```\s*$/i, "");
+          return s.trim();
+        }
+
         function parseImportJsonFromUI() {
-          const raw = document.getElementById("import-json-text").value.trim();
-          if (!raw) {
+          const normalized = normalizePastedJsonForParse(document.getElementById("import-json-text").value);
+          if (!normalized) {
             setMsg("الصق JSON أو اختر ملفاً.", false);
             throw new Error("empty_json");
           }
           try {
-            return JSON.parse(raw);
+            return JSON.parse(normalized);
           } catch (_e) {
             setMsg("JSON غير صالح (خطأ في الصياغة).", false);
             throw new Error("bad_json");
@@ -1250,6 +1259,7 @@
           return (
             "دورك: أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية.\n\n" +
             "المخرجات: JSON صالح فقط (سطر واحد أو متعدد)، بدون نص قبله أو بعده وبدون Markdown أو تعليقات.\n\n" +
+            "🚨 تحذير برمجي حرج لسلامة JSON: يُمنع منعاً باتاً استخدام علامات التنصيص المزدوجة (\") داخل القيم النصية للحقول (مثل prompt، options، أو studyBody). إذا احتجت إلى كتابة أمثلة أو اقتباسات داخل النص، استخدم حصراً علامات الاقتباس المفردة (')، أو الأقواس ( )، أو الأقواس العربية (« »). أي علامة (\") داخل النص ستؤدي إلى تعطل النظام وفشل قراءة JSON.\n\n" +
             "هيكل الجذر:\n" +
             "— lesson: title (نص)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح بالمللي ثانية)، sortOrder (عدد صحيح).\n" +
             "— sections: مصفوفة طولها بالضبط " +
