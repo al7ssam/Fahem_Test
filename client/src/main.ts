@@ -1233,9 +1233,6 @@ function render(): void {
       readParamsFromDom();
       customLessonErr = "";
       customLessonMsg = "";
-      customLessonValidatedBody = null;
-      customLessonPreviewLesson = null;
-      customLessonSessionToken = null;
       let body: Record<string, unknown>;
       try {
         const raw = normalizePastedJsonForParse(customLessonJsonText);
@@ -1256,6 +1253,9 @@ function render(): void {
         render();
         return;
       }
+      customLessonValidatedBody = null;
+      customLessonPreviewLesson = null;
+      customLessonSessionToken = null;
       try {
         const res = await fetch("/api/custom-lessons/preview", {
           method: "POST",
@@ -1295,7 +1295,9 @@ function render(): void {
         return;
       }
       persistDraft();
+      clearTimer();
       beginLessonPlayback(customLessonPreviewLesson);
+      render();
     });
     app.querySelector("#cl-private")?.addEventListener("click", async () => {
       readParamsFromDom();
