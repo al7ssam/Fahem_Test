@@ -4,6 +4,7 @@ import { toDataURL as qrToDataURL } from "qrcode";
 import { buildCustomLessonAiPromptText, type LessonAiPromptParams } from "./lessonPromptBuilder";
 import { normalizePastedJsonForParse } from "./jsonNormalize";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
+import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 
 type GameMode = "direct" | "study_then_quiz" | "lesson";
 type DifficultyMode = "mix" | "easy" | "medium" | "hard";
@@ -1151,21 +1152,21 @@ function render(): void {
           <button type="button" id="cl-copy" class="ui-btn ui-btn--primary w-full py-2">نسخ البرومبت</button>
           ${
             showJsonPanel
-              ? `<div class="flex flex-col sm:flex-row gap-2">
-            <button type="button" id="cl-open-gpt" class="ui-btn ui-btn--ghost flex-1 py-2 text-sm">فتح ChatGPT</button>
-            <button type="button" id="cl-open-gem" class="ui-btn ui-btn--ghost flex-1 py-2 text-sm">فتح Gemini</button>
+              ? `<div class="flex flex-row flex-nowrap gap-2 w-full">
+            <button type="button" id="cl-open-gpt" class="ui-btn ui-btn--ghost flex-1 min-w-0 py-2 text-sm">فتح ChatGPT</button>
+            <button type="button" id="cl-open-gem" class="ui-btn ui-btn--ghost flex-1 min-w-0 py-2 text-sm">فتح Gemini</button>
           </div>
           <label class="text-slate-300 text-sm">JSON الدرس (من النموذج)</label>
           <textarea id="cl-json" rows="8" class="app-input w-full px-3 py-2 text-xs font-mono" placeholder='الصق هنا كائن JSON كامل: {"lesson":{...},"sections":[...]}'>${escapeHtml(customLessonJsonText)}</textarea>
-          <button type="button" id="cl-preview" class="ui-btn ui-btn--cta w-full py-2">تحقق ومعاينة</button>`
-              : `<p class="text-slate-500 text-xs m-0">اضغط «نسخ البرومبت» لإظهار لصق JSON والتحقق.</p>`
+          <button type="button" id="cl-preview" class="ui-btn ui-btn--cta w-full py-2">إضافة الدرس</button>`
+              : `<p class="text-slate-500 text-xs m-0">اضغط «نسخ البرومبت» لإظهار لصق JSON وإضافة الدرس.</p>`
           }
           <p id="cl-msg" class="text-emerald-300 text-sm min-h-[1.25rem] m-0">${escapeHtml(customLessonMsg)}</p>
           <p id="cl-err" class="text-red-400 text-sm min-h-[1.25rem] m-0">${escapeHtml(customLessonErr)}</p>
           ${
             hasValidatedPreview
               ? `<div class="flex flex-col gap-2">
-            <button type="button" id="cl-solo" class="ui-btn ui-btn--primary w-full py-2">ابدأ التعلم الفردي (محلي)</button>
+            <button type="button" id="cl-solo" class="ui-btn ui-btn--primary w-full py-2">ابدأ التعلم الفردي</button>
             <button type="button" id="cl-private" class="ui-btn ui-btn--ghost w-full py-2">إنشاء غرفة خاصة</button>
           </div>`
               : ""
@@ -1224,10 +1225,10 @@ function render(): void {
       render();
     });
     app.querySelector("#cl-open-gpt")?.addEventListener("click", () => {
-      window.open("https://chatgpt.com/", "_blank", "noopener,noreferrer");
+      openChatGptExternal();
     });
     app.querySelector("#cl-open-gem")?.addEventListener("click", () => {
-      window.open("https://gemini.google.com/app", "_blank", "noopener,noreferrer");
+      openGeminiExternal();
     });
     app.querySelector("#cl-preview")?.addEventListener("click", async () => {
       readParamsFromDom();
@@ -1289,7 +1290,7 @@ function render(): void {
       customLessonErr = "";
       customLessonMsg = "";
       if (!customLessonPreviewLesson) {
-        customLessonErr = "استخدم «تحقق ومعاينة» أولاً.";
+        customLessonErr = "استخدم «إضافة الدرس» أولاً.";
         persistDraft();
         render();
         return;
@@ -1304,7 +1305,7 @@ function render(): void {
       customLessonErr = "";
       customLessonMsg = "";
       if (!customLessonValidatedBody) {
-        customLessonErr = "استخدم «تحقق ومعاينة» أولاً.";
+        customLessonErr = "استخدم «إضافة الدرس» أولاً.";
         persistDraft();
         render();
         return;
@@ -1752,6 +1753,8 @@ function render(): void {
     const status = app.querySelector<HTMLParagraphElement>("#lesson-q-status");
     if (step && qText && opts) {
       qText.textContent = step.prompt;
+      const prevFocus = document.activeElement;
+      if (prevFocus instanceof HTMLElement && opts.contains(prevFocus)) prevFocus.blur();
       opts.innerHTML = "";
       let answered = false;
       step.options.forEach((label, idx) => {
@@ -1795,8 +1798,9 @@ function render(): void {
           <p class="text-slate-200 text-lg">${escapeHtml(lessonPlayback?.title ?? "")}</p>
           <p class="text-emerald-300 text-xl font-bold">النتيجة: ${lessonQuizCorrect} / ${total}</p>
           <button type="button" id="lesson-review-open" class="ui-btn ui-btn--primary w-full py-3 text-lg">مراجعة</button>
-          <button type="button" id="lesson-done-back" class="ui-btn ui-btn--cta w-full py-3 text-lg">قائمة الدروس</button>
-          <button type="button" id="lesson-done-home" class="ui-btn ui-btn--ghost w-full py-3">الوضع العادي</button>
+          <button type="button" id="lesson-redo" class="ui-btn ui-btn--cta w-full py-3 text-lg">إعادة الدرس</button>
+          <button type="button" id="lesson-done-end-custom" class="ui-btn ui-btn--primary w-full py-3 text-lg">إنهاء الدرس</button>
+          <button type="button" id="lesson-done-home-main" class="ui-btn ui-btn--ghost w-full py-3">العودة للرئيسية</button>
         </div>
       `),
     );
@@ -1805,21 +1809,32 @@ function render(): void {
       phase = "lesson_review";
       render();
     });
-    app.querySelector("#lesson-done-back")?.addEventListener("click", () => {
-      resetLessonState();
-      lessonBrowseStep = "lessons";
-      selectedLessonMatchId = null;
-      phase = "lesson_menu";
-      void fetchLessonBrowse()
-        .then(() => render())
-        .catch(() => render());
+    app.querySelector("#lesson-redo")?.addEventListener("click", () => {
+      const snap = lessonPlayback;
+      if (!snap?.steps?.length) return;
+      clearTimer();
+      beginLessonPlayback(snap);
+      render();
     });
-    app.querySelector("#lesson-done-home")?.addEventListener("click", () => {
+    app.querySelector("#lesson-done-end-custom")?.addEventListener("click", () => {
+      clearTimer();
+      resetLessonState();
+      customLessonPreviewLesson = null;
+      customLessonValidatedBody = null;
+      customLessonSessionToken = null;
+      customLessonErr = "";
+      customLessonMsg = "";
+      phase = "custom_lesson";
+      render();
+    });
+    app.querySelector("#lesson-done-home-main")?.addEventListener("click", () => {
+      clearTimer();
       resetLessonState();
       lessonBrowseStep = "categories";
       lessonBrowseSelectedCategoryId = null;
       selectedLessonMatchId = null;
       phase = "name";
+      nameFlowStep = "mode";
       render();
     });
     return;
@@ -2705,6 +2720,8 @@ function advanceLessonQuizAfterResolution(wasCorrect: boolean, selectedChoice: n
   window.setTimeout(() => {
     lessonQuizIdxInSection += 1;
     lessonPrepareCurrentLessonQuizQuestion();
+    const ae = document.activeElement;
+    if (ae instanceof HTMLElement) ae.blur();
     render();
   }, 900);
 }
@@ -3879,6 +3896,8 @@ function connectSocket(
       const status = app.querySelector<HTMLParagraphElement>("#status");
       if (!text || !opts) return;
       text.textContent = q.prompt;
+      const prevFocusOpts = document.activeElement;
+      if (prevFocusOpts instanceof HTMLElement && opts.contains(prevFocusOpts)) prevFocusOpts.blur();
       opts.innerHTML = "";
       let answered = false;
       q.options.forEach((label, idx) => {

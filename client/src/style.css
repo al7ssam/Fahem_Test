@@ -184,9 +184,12 @@ body {
   touch-action: manipulation;
 }
 
-.option-btn:hover {
-  border-color: rgba(251, 191, 36, 0.52);
-  background: linear-gradient(145deg, rgba(51, 65, 85, 0.95), rgba(30, 41, 59, 0.95));
+/* لا تطبّق hover على اللمس — يبقى «تحويم» عالق فيفسّر كتحديد على الخيار نفس الفهرس بعد السؤال التالي */
+@media (hover: hover) and (pointer: fine) {
+  .option-btn:hover {
+    border-color: rgba(251, 191, 36, 0.52);
+    background: linear-gradient(145deg, rgba(51, 65, 85, 0.95), rgba(30, 41, 59, 0.95));
+  }
 }
 
 .option-btn:active,
