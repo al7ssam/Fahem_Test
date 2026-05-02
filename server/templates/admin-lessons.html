@@ -164,6 +164,21 @@
               <input type="number" id="ai-study-sec" min="2" max="300" step="0.5" value="60" style="width:7rem" />
             </div>
           </div>
+          <!--
+            معطيات طول studyBody في البرومبت: تُقرأ في buildAiLessonPrompt() من
+            #ai-study-min-sentences و #ai-study-max-sentences (افتراضياً 1 و 3 عند غياب العنصر أو قيمة غير صالحة).
+            لإضافة حقول لاحقاً: انسخ صف الإدخال أدناه مع id مطابق أو مرّر القيم إلى الدالة من مصدر آخر.
+          -->
+          <div class="row" style="margin-top:.45rem;align-items:end;flex-wrap:wrap;gap:.45rem">
+            <div>
+              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">حد أدنى جمل البطاقة (studyBody)</label>
+              <input type="number" id="ai-study-min-sentences" min="1" max="20" value="1" style="width:6rem" />
+            </div>
+            <div>
+              <label class="muted" style="display:block;margin-bottom:.2rem;font-size:.82rem">حد أقصى جمل البطاقة (studyBody)</label>
+              <input type="number" id="ai-study-max-sentences" min="1" max="20" value="3" style="width:6rem" />
+            </div>
+          </div>
           <label class="muted" style="display:block;margin:.45rem 0 .2rem;font-size:.82rem">موضوع الدرس / المنهاج (اختياري)</label>
           <textarea id="ai-topic" rows="2" style="width:100%" placeholder="مثال: قواعد النحو للصف الثاني ثانوي"></textarea>
           <label class="muted" style="display:block;margin:.45rem 0 .2rem;font-size:.82rem">مستوى الجمهور (اختياري)</label>
@@ -1231,6 +1246,24 @@
           var audienceEl = document.getElementById("ai-audience");
           var audience = audienceEl && audienceEl.value ? String(audienceEl.value).trim() : "";
 
+          var minSentences = 1;
+          var maxSentences = 3;
+          var minEl = document.getElementById("ai-study-min-sentences");
+          var maxEl = document.getElementById("ai-study-max-sentences");
+          if (minEl) {
+            var mi = parseInt(String(minEl.value).trim(), 10);
+            if (Number.isFinite(mi)) minSentences = Math.min(20, Math.max(1, mi));
+          }
+          if (maxEl) {
+            var ma = parseInt(String(maxEl.value).trim(), 10);
+            if (Number.isFinite(ma)) maxSentences = Math.min(20, Math.max(1, ma));
+          }
+          if (maxSentences < minSentences) {
+            var swap = minSentences;
+            minSentences = maxSentences;
+            maxSentences = swap;
+          }
+
           var defaultAnswerMs = Math.round(ansSec * 1000);
           var studyPhaseMsUnified = Math.round(studySec * 1000);
 
@@ -1250,11 +1283,14 @@
             if (audience) topicBlock += "مستوى الجمهور المستهدف: " + audience + "\n";
           }
 
+          var lengthStudyBodyLine = `— الطول: استخدم من ${minSentences} إلى ${maxSentences} جملة كحد أقصى، مركزة وغنية.\n`;
           var qualityBlock =
             "\nجودة المحتوى (إلزامي اتباع الروح):\n" +
             "— المشتتات: اجعل الخيارات الخاطئة من نفس المجال وتبدو معقولة لمن لم يقرأ بطاقة المذاكرة جيداً؛ تجنّب الخيارات السخيفة أو البديهية جداً.\n" +
             "— تطابق المذاكرة والاختبار: المعلومة اللازمة للإجابة الصحيحة يجب أن تكون موجودة في studyBody لذلك السؤال (صراحة أو ضمناً)، دون مطالبة خارج نطاق البطاقة.\n" +
-            "— جودة وطول studyBody: لا تجعل البطاقة مجرد إجابة جافة للسؤال، بل اجعلها غنية ومركزة. استخدم من جملة إلى 3 جمل كحد أقصى لتجنب حشو الكلام. يُفضل دائماً (إن أمكن) أن تحتوي البطاقة على تعريف مبسط + مثال قصير جداً يوضح المعلومة. ركز على جودة الشرح وسهولة استيعابه.\n";
+            "— بناء المعرفة لا التلقين: لا تهدف البطاقة إلى تلقين إجابة السؤال حرفياً؛ ابنِ الفهم والربط المنطقي. إذا ذكرت مثالاً عددياً أو موقفاً، استخدم أرقاماً أو معطيات مختلفة عن صياغة السؤال بحيث يبقى المثال مفيداً للفهم دون كشف مباشر لإجابة نفس السؤال.\n" +
+            lengthStudyBodyLine +
+            "— جودة studyBody: لا تجعل البطاقة مجرد إجابة جافة؛ اجعلها غنية ومركزة. يُفضّل (إن أمكن) تعريف مبسط مع مثال قصير جداً يوضح الفكرة. ركز على جودة الشرح وسهولة الاستيعاب.\n";
 
           return (
             "دورك: أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية.\n\n" +
