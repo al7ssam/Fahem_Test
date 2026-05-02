@@ -15,7 +15,7 @@ function openWebTab(url: string): void {
 }
 
 /**
- * أندرويد (كروم): intent:// مع package و S.browser_fallback_url — يفتح التطبيق إن وُجد وإلا الرابط في المتصفح.
+ * أندرويد (كروم): intent:// مع package و S.browser_fallback_url
  * @see https://developer.chrome.com/docs/android/intents
  */
 function openAndroidIntentHttps(intentHostAndPath: string, packageName: string, fallbackHttps: string): void {
@@ -25,36 +25,63 @@ function openAndroidIntentHttps(intentHostAndPath: string, packageName: string, 
 }
 
 /**
- * آي أو إس: محاولة مخطط التطبيق عبر iframe خفي؛ إن بقي الصفحة ظاهراً نفتح الويب في تاب جديد.
- * لا ضمان 100٪ — يعتمد على النظام والتطبيق.
+ * تشغيل مخطط URL على iOS/Safari — يجب أن يحدث من إيماءة المستخدم مباشرة (click).
+ * لا يستخدم iframe: سفاري غالباً يمنع/يتجاهل فتح التطبيق من iframe.
+ *
+ * يُجرَّب مخطط أساسي ثم احتياطي (مثلاً تطبيق مستقل ثم Google)، ثم فتح الويب إن لم يُلغَ الرجوع (blur/pagehide).
  */
-function tryIosAppSchemeThenWeb(appScheme: string, webUrl: string): void {
-  let settled = false;
-  const settle = (openedWeb: boolean): void => {
-    if (settled) return;
-    settled = true;
-    if (openedWeb) openWebTab(webUrl);
+function tryIosCustomSchemeThenWeb(primary: string, secondary: string | null, webUrl: string): void {
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const cleanupAndClearTimer = (): void => {
+    document.removeEventListener("visibilitychange", onVis);
+    window.removeEventListener("blur", onBlur, true);
+    window.removeEventListener("pagehide", onPageHide);
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+  };
+
+  const cancel = (): void => {
+    if (cancelled) return;
+    cancelled = true;
+    cleanupAndClearTimer();
   };
 
   const onVis = (): void => {
-    if (document.visibilityState === "hidden") settle(false);
+    if (document.visibilityState === "hidden") cancel();
   };
-  const onPageHide = (): void => settle(false);
+  const onBlur = (): void => cancel();
+  const onPageHide = (): void => cancel();
 
   document.addEventListener("visibilitychange", onVis);
-  window.addEventListener("pagehide", onPageHide, { once: true });
+  window.addEventListener("blur", onBlur, { capture: true });
+  window.addEventListener("pagehide", onPageHide);
 
-  const iframe = document.createElement("iframe");
-  iframe.setAttribute("aria-hidden", "true");
-  iframe.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;border:0;opacity:0;";
-  iframe.src = appScheme;
-  document.body.appendChild(iframe);
+  const triggerScheme = (href: string): void => {
+    const a = document.createElement("a");
+    a.href = href;
+    a.rel = "noopener noreferrer";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
 
-  window.setTimeout(() => {
-    document.removeEventListener("visibilitychange", onVis);
-    iframe.remove();
-    if (document.visibilityState === "visible") settle(true);
-  }, 750);
+  triggerScheme(primary);
+
+  if (secondary) {
+    window.setTimeout(() => {
+      if (!cancelled) triggerScheme(secondary);
+    }, 280);
+  }
+
+  timer = window.setTimeout(() => {
+    cleanupAndClearTimer();
+    if (!cancelled && document.visibilityState === "visible") {
+      openWebTab(webUrl);
+    }
+  }, 2400);
 }
 
 export function openChatGptExternal(): void {
@@ -64,7 +91,12 @@ export function openChatGptExternal(): void {
     return;
   }
   if (isIosLike()) {
-    tryIosAppSchemeThenWeb("com.openai.chat://", web);
+    // مطابقة عنوان الويب — موصى به من مجتمع OpenAI ليدخل التطبيق من Safari
+    tryIosCustomSchemeThenWeb(
+      "chatgpt://chatgpt.com/",
+      "com.openai.chat://chatgpt.com/",
+      web,
+    );
     return;
   }
   openWebTab(web);
@@ -77,7 +109,8 @@ export function openGeminiExternal(): void {
     return;
   }
   if (isIosLike()) {
-    tryIosAppSchemeThenWeb("googlegemini://", web);
+    // تطبيق Gemini؛ احتياط: فتح تبويب Gemini داخل تطبيق Google (googleapp://robin شائع في iOS)
+    tryIosCustomSchemeThenWeb("googlegemini://", "googleapp://robin", web);
     return;
   }
   openWebTab(web);
