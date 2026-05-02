@@ -205,18 +205,21 @@ let customLessonClientId = "";
 let customLessonShowJsonPanel = false;
 const defaultCustomPromptParams = (): LessonAiPromptParams => ({
   nSec: 3,
-  qSame: 3,
+  qSame: 5,
   ansSec: 15,
   studySec: 60,
   topic: "",
   audience: "",
   minSentences: 1,
-  maxSentences: 3,
+  maxSentences: 6,
 });
 let customLessonPromptParams: LessonAiPromptParams = defaultCustomPromptParams();
 let lessonStudyQueue: Array<{ body: string; ms: number }> = [];
 let lessonStudyIdx = 0;
+/** نهاية زمن البطاقة الحالية (للانتقال التلقائي بين البطاقات) */
 let lessonStudySegmentEndAt = 0;
+/** نهاية زمن مذاكرة القسم كاملاً — العداد الظاهر لا يُعاد من الصفر عند «التالي» */
+let lessonStudySectionDeadlineAt = 0;
 let lessonQuizIdx = 0;
 let lessonQuizIdxInSection = 0;
 let lessonSectionIdx = 0;
@@ -806,7 +809,11 @@ function render(): void {
               customLessonClientId = d.clientLessonId;
               customLessonLearningIntent = d.learningIntent;
               customLessonJsonText = d.jsonText;
-              customLessonPromptParams = { ...defaultCustomPromptParams(), ...d.promptParams };
+              customLessonPromptParams = {
+                ...defaultCustomPromptParams(),
+                ...d.promptParams,
+                topic: "",
+              };
               customLessonSessionToken = d.lastSessionToken ?? null;
               customLessonShowJsonPanel =
                 d.showJsonPanel === true ||
@@ -1142,8 +1149,6 @@ function render(): void {
                 <input id="cl-maxsent" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm w-full" value="${p.maxSentences}" title="الحد الأقصى لعدد الجمل في studyBody" aria-label="أقصى عدد جمل لنص بطاقة المذاكرة" placeholder="1–20" />
               </div>
             </div>
-            <label class="text-xs text-slate-400">موضوع أو منهاج (اختياري)</label>
-            <input id="cl-topic" type="text" class="app-input w-full px-2 py-1 text-sm" value="${escapeHtml(p.topic)}" placeholder="مثال: المعادلات الخطية — الصف الثالث" title="يُذكر في البرومبت كسياق للنموذج" />
             <label class="text-xs text-slate-400">مستوى الجمهور</label>
             <select id="cl-audience" class="app-input w-full px-2 py-1 text-sm" title="من يخاطبهم الدرس" aria-label="مستوى الجمهور">
               ${audienceOptions.map((o) => `<option value="${escapeHtml(o.v)}" ${p.audience === o.v ? "selected" : ""}>${escapeHtml(o.t)}</option>`).join("")}
@@ -1182,15 +1187,15 @@ function render(): void {
         return Math.min(max, Math.max(min, v));
       };
       const n = num("#cl-nsec", 3, 1, 20);
-      const q = num("#cl-qsame", 3, 1, 50);
+      const q = num("#cl-qsame", 5, 1, 50);
       const mi = Math.min(20, Math.max(1, Math.trunc(num("#cl-minsent", 1, 1, 20))));
-      const ma = Math.min(20, Math.max(1, Math.trunc(num("#cl-maxsent", 3, 1, 20))));
+      const ma = Math.min(20, Math.max(1, Math.trunc(num("#cl-maxsent", 6, 1, 20))));
       customLessonPromptParams = {
         nSec: n,
         qSame: q,
         ansSec: num("#cl-anssec", 15, 3, 120),
         studySec: num("#cl-studysec", 60, 2, 300),
-        topic: app.querySelector<HTMLInputElement>("#cl-topic")?.value.trim() ?? "",
+        topic: "",
         audience: app.querySelector<HTMLSelectElement>("#cl-audience")?.value.trim() ?? "",
         minSentences: Math.min(mi, ma),
         maxSentences: Math.max(mi, ma),
@@ -1707,10 +1712,20 @@ function render(): void {
     clearTimer();
     timerHandle = window.setInterval(() => {
       const clock = app.querySelector<HTMLDivElement>("#lesson-seg-clock");
-      const left = Math.max(0, lessonStudySegmentEndAt - nowSynced());
-      const sec = Math.max(0, Math.floor((left + 250) / 1000));
-      if (clock) clock.textContent = `${sec}s`;
-      if (left <= 0) {
+      const now = nowSynced();
+      const sectionLeft = Math.max(0, lessonStudySectionDeadlineAt - now);
+      const secShown = Math.max(0, Math.floor((sectionLeft + 250) / 1000));
+      if (clock) clock.textContent = `${secShown}s`;
+      if (sectionLeft <= 0) {
+        clearTimer();
+        phase = "lesson_quiz";
+        lessonQuizIdxInSection = 0;
+        lessonPrepareCurrentLessonQuizQuestion();
+        render();
+        return;
+      }
+      const cardLeft = lessonStudySegmentEndAt - now;
+      if (cardLeft <= 0) {
         clearTimer();
         lessonStudyIdx++;
         if (lessonStudyIdx >= lessonStudyQueue.length) {
@@ -1797,7 +1812,7 @@ function render(): void {
           <h2 class="text-2xl font-extrabold text-amber-300">أنهيت الدرس</h2>
           <p class="text-slate-200 text-lg">${escapeHtml(lessonPlayback?.title ?? "")}</p>
           <p class="text-emerald-300 text-xl font-bold">النتيجة: ${lessonQuizCorrect} / ${total}</p>
-          <button type="button" id="lesson-review-open" class="ui-btn ui-btn--primary w-full py-3 text-lg">مراجعة</button>
+          <button type="button" id="lesson-review-open" class="ui-btn ui-btn--primary w-full py-3 text-lg">مراجعة الإجابات</button>
           <button type="button" id="lesson-redo" class="ui-btn ui-btn--cta w-full py-3 text-lg">إعادة الدرس</button>
           <button type="button" id="lesson-done-end-custom" class="ui-btn ui-btn--primary w-full py-3 text-lg">إنهاء الدرس</button>
           <button type="button" id="lesson-done-home-main" class="ui-btn ui-btn--ghost w-full py-3">العودة للرئيسية</button>
@@ -1830,12 +1845,7 @@ function render(): void {
     app.querySelector("#lesson-done-home-main")?.addEventListener("click", () => {
       clearTimer();
       resetLessonState();
-      lessonBrowseStep = "categories";
-      lessonBrowseSelectedCategoryId = null;
-      selectedLessonMatchId = null;
-      phase = "name";
-      nameFlowStep = "mode";
-      render();
+      returnToHomeFromSearch();
     });
     return;
   }
@@ -2562,6 +2572,7 @@ function resetLessonState(): void {
   lessonStudyQueue = [];
   lessonStudyIdx = 0;
   lessonStudySegmentEndAt = 0;
+  lessonStudySectionDeadlineAt = 0;
   lessonQuizIdx = 0;
   lessonQuizIdxInSection = 0;
   lessonSectionIdx = 0;
@@ -2603,6 +2614,12 @@ function startLessonStudyForCurrentSection(): void {
   lessonStudyIdx = 0;
   if (lessonStudyQueue.length > 0) {
     phase = "lesson_study";
+    const sumCardMs = lessonStudyQueue.reduce((acc, q) => acc + q.ms, 0);
+    const phaseCap =
+      typeof sec.studyPhaseMs === "number" && Number.isFinite(sec.studyPhaseMs) && sec.studyPhaseMs > 0
+        ? sec.studyPhaseMs
+        : sumCardMs;
+    lessonStudySectionDeadlineAt = nowSynced() + Math.max(1000, phaseCap);
     lessonStudySegmentEndAt = nowSynced() + lessonStudyQueue[0].ms;
   } else {
     phase = "lesson_quiz";
