@@ -67,6 +67,21 @@
       .collapsible-caret { flex-shrink: 0; font-size: 0.75rem; color: var(--muted); transition: transform 0.2s ease; }
       .collapsible-details[open] .collapsible-caret { transform: rotate(-180deg); }
       .collapsible-panel-body { padding-top: 0.35rem; }
+      /* معاينة استيراد الدرس — مطابقة تقريبية لـ admin.html (استيراد JSON) */
+      #import-lesson-preview-shell { margin-top: 0.75rem; border: 1px solid rgba(223, 187, 106, 0.2); border-radius: 1rem; padding: 0.85rem; background: rgba(6, 10, 21, 0.8); }
+      #import-lesson-preview-shell[hidden] { display: none !important; }
+      .preview-phone { max-width: 26rem; margin: 0 auto; border: 1px solid rgba(223, 187, 106, 0.24); border-radius: 1.3rem; padding: 0.85rem; background: linear-gradient(to bottom, rgba(13, 19, 37, 0.96), rgba(8, 13, 27, 0.96)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02); }
+      .preview-lesson-line { font-size: 0.82rem; color: var(--muted); margin-bottom: 0.55rem; text-align: center; }
+      .preview-meta { display: flex; justify-content: space-between; gap: 0.5rem; color: #ccb98d; font-size: 0.84rem; margin-bottom: 0.7rem; flex-wrap: wrap; }
+      .preview-prompt { font-size: 1rem; font-weight: 700; color: #f5eedf; margin-bottom: 0.7rem; white-space: pre-wrap; word-break: break-word; }
+      .preview-options { display: grid; gap: 0.5rem; }
+      .preview-options.two-options { grid-template-columns: 1fr 1fr; }
+      .preview-option { border: 1px solid rgba(223, 187, 106, 0.22); background: rgba(12, 17, 34, 0.95); color: #f0e6d2; border-radius: 0.7rem; padding: 0.62rem 0.75rem; text-align: right; font-size: 0.95rem; }
+      .preview-option.correct { border-color: rgba(16, 185, 129, 0.72); background: rgba(16, 185, 129, 0.2); color: #baf7df; }
+      .preview-study { margin-top: 0.75rem; border: 1px solid rgba(223, 187, 106, 0.24); border-radius: 0.75rem; background: rgba(25, 31, 57, 0.82); padding: 0.7rem; }
+      .preview-study b { color: #f1dbac; }
+      .preview-study .preview-study-body { margin-top: 0.45rem; white-space: pre-wrap; word-break: break-word; }
+      .preview-empty { color: #c9ba97; text-align: center; font-size: 0.9rem; padding: 1.2rem 0.4rem; }
       @media (max-width:1100px) { .split { grid-template-columns:1fr; } }
     </style>
   </head>
@@ -103,6 +118,19 @@
           <div class="row" style="margin-top:.55rem">
             <button type="button" class="btn" id="import-json-preview">معاينة الدرس</button>
             <button type="button" class="btn btn-secondary" id="import-json-commit">إضافة الدرس</button>
+          </div>
+          <div id="import-lesson-preview-shell" hidden>
+            <p class="muted" style="margin:.55rem 0 .4rem;font-size:.82rem;text-align:center">
+              معاينة المحتوى (نفس فكرة معاينة استيراد الأسئلة من JSON في لوحة الإدارة الرئيسية).
+            </p>
+            <div class="preview-phone" id="import-lesson-preview-phone">
+              <div class="preview-empty">اضغط «معاينة الدرس» بعد لصق JSON صالح.</div>
+            </div>
+            <div class="row" style="margin-top:.55rem;justify-content:center">
+              <button type="button" class="btn btn-secondary" id="import-lesson-preview-prev">السابق</button>
+              <button type="button" class="btn btn-secondary" id="import-lesson-preview-next">التالي</button>
+              <button type="button" class="btn btn-secondary" id="import-lesson-preview-close">إغلاق المعاينة</button>
+            </div>
           </div>
         </div>
       </details>
@@ -962,7 +990,141 @@
           } catch (_) {}
         });
 
-        const FAHEM_ADMIN_PREVIEW_KEY = "fahem_admin_lesson_preview_v1";
+        let lessonPreviewSteps = [];
+        let lessonPreviewIndex = 0;
+
+        function msToPreviewSecLabel(ms) {
+          if (ms == null || !Number.isFinite(Number(ms))) return "—";
+          return String(Math.round((Number(ms) / 1000) * 1000) / 1000) + " ث";
+        }
+
+        function flattenLessonPreviewSteps(lesson) {
+          if (!lesson || typeof lesson !== "object") return [];
+          const title = String(lesson.title || "").trim() || "درس";
+          const stepsFlat = Array.isArray(lesson.steps) ? lesson.steps : [];
+          const sections =
+            Array.isArray(lesson.sections) && lesson.sections.length > 0 ? lesson.sections : null;
+          const out = [];
+          if (sections) {
+            for (let si = 0; si < sections.length; si++) {
+              const sec = sections[si];
+              const secSteps = Array.isArray(sec.steps) ? sec.steps : [];
+              const secTitle =
+                sec.titleAr && String(sec.titleAr).trim()
+                  ? String(sec.titleAr).trim()
+                  : "القسم " + (si + 1);
+              for (let j = 0; j < secSteps.length; j++) {
+                const st = secSteps[j];
+                if (!st || typeof st !== "object") continue;
+                out.push({
+                  lessonTitle: title,
+                  sectionLine: secTitle + " — السؤال " + (j + 1) + " من " + secSteps.length,
+                  prompt: String(st.prompt || ""),
+                  options: Array.isArray(st.options) ? st.options.map((x) => String(x)) : [],
+                  correctIndex: Number.isInteger(st.correctIndex) ? st.correctIndex : 0,
+                  studyBody: st.studyBody != null ? String(st.studyBody) : "",
+                  answerSec: msToPreviewSecLabel(st.effectiveAnswerMs),
+                  studyCardSec: msToPreviewSecLabel(st.effectiveStudyCardMs),
+                });
+              }
+            }
+          } else {
+            const n = stepsFlat.length;
+            for (let j = 0; j < n; j++) {
+              const st = stepsFlat[j];
+              if (!st || typeof st !== "object") continue;
+              out.push({
+                lessonTitle: title,
+                sectionLine: "السؤال " + (j + 1) + " من " + n,
+                prompt: String(st.prompt || ""),
+                options: Array.isArray(st.options) ? st.options.map((x) => String(x)) : [],
+                correctIndex: Number.isInteger(st.correctIndex) ? st.correctIndex : 0,
+                studyBody: st.studyBody != null ? String(st.studyBody) : "",
+                answerSec: msToPreviewSecLabel(st.effectiveAnswerMs),
+                studyCardSec: msToPreviewSecLabel(st.effectiveStudyCardMs),
+              });
+            }
+          }
+          const T = out.length;
+          for (let i = 0; i < out.length; i++) {
+            out[i].globalIdx = i + 1;
+            out[i].globalTotal = T;
+          }
+          return out;
+        }
+
+        function renderLessonImportPreview() {
+          const shell = document.getElementById("import-lesson-preview-shell");
+          const phone = document.getElementById("import-lesson-preview-phone");
+          const prevBtn = document.getElementById("import-lesson-preview-prev");
+          const nextBtn = document.getElementById("import-lesson-preview-next");
+          if (!phone || !prevBtn || !nextBtn) return;
+          if (!lessonPreviewSteps.length) {
+            phone.innerHTML = '<div class="preview-empty">لا توجد خطوات للمعاينة.</div>';
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
+            return;
+          }
+          const item = lessonPreviewSteps[lessonPreviewIndex];
+          const optsClass = item.options.length === 2 ? "preview-options two-options" : "preview-options";
+          let optionsHtml = "";
+          for (let i = 0; i < item.options.length; i++) {
+            const c = "preview-option" + (i === item.correctIndex ? " correct" : "");
+            optionsHtml += '<div class="' + c + '">' + escapeHtml(item.options[i]) + "</div>";
+          }
+          const studyBlock =
+            item.studyBody.trim() === ""
+              ? ""
+              : '<div class="preview-study"><b>بطاقة المذاكرة:</b><div class="preview-study-body">' +
+                escapeHtml(item.studyBody) +
+                "</div></div>";
+          phone.innerHTML =
+            '<div class="preview-lesson-line">' +
+            escapeHtml(item.lessonTitle) +
+            "</div>" +
+            '<div class="preview-meta"><span>' +
+            "السؤال " +
+            item.globalIdx +
+            " / " +
+            item.globalTotal +
+            " — " +
+            escapeHtml(item.sectionLine) +
+            '</span><span>إجابة ~' +
+            escapeHtml(item.answerSec) +
+            " · بطاقة ~" +
+            escapeHtml(item.studyCardSec) +
+            "</span></div>" +
+            '<div class="preview-prompt">' +
+            escapeHtml(item.prompt) +
+            "</div>" +
+            '<div class="' +
+            optsClass +
+            '">' +
+            optionsHtml +
+            "</div>" +
+            studyBlock;
+          prevBtn.disabled = lessonPreviewIndex <= 0;
+          nextBtn.disabled = lessonPreviewIndex >= lessonPreviewSteps.length - 1;
+          if (shell && !shell.hidden) shell.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+
+        function openLessonImportPreviewShell(lesson) {
+          lessonPreviewSteps = flattenLessonPreviewSteps(lesson);
+          lessonPreviewIndex = 0;
+          const shell = document.getElementById("import-lesson-preview-shell");
+          if (shell) shell.hidden = false;
+          renderLessonImportPreview();
+        }
+
+        function closeLessonImportPreviewShell() {
+          const shell = document.getElementById("import-lesson-preview-shell");
+          const phone = document.getElementById("import-lesson-preview-phone");
+          if (shell) shell.hidden = true;
+          if (phone)
+            phone.innerHTML = '<div class="preview-empty">اضغط «معاينة الدرس» بعد لصق JSON صالح.</div>';
+          lessonPreviewSteps = [];
+          lessonPreviewIndex = 0;
+        }
 
         function parseImportJsonFromUI() {
           const raw = document.getElementById("import-json-text").value.trim();
@@ -1007,11 +1169,24 @@
               setMsg("لم تُرجع المعاينة بيانات.", false);
               return;
             }
-            sessionStorage.setItem(FAHEM_ADMIN_PREVIEW_KEY, JSON.stringify(data.lesson));
-            window.open("/?lessonPreview=1", "_blank", "noopener,noreferrer");
-            setMsg("فُتحت المعاينة في نافذة جديدة.", true);
+            openLessonImportPreviewShell(data.lesson);
+            setMsg("تم تجهيز المعاينة — " + lessonPreviewSteps.length + " سؤالاً.", true);
           } catch (_) {}
         };
+
+        document.getElementById("import-lesson-preview-prev").addEventListener("click", function () {
+          if (lessonPreviewIndex <= 0) return;
+          lessonPreviewIndex -= 1;
+          renderLessonImportPreview();
+        });
+        document.getElementById("import-lesson-preview-next").addEventListener("click", function () {
+          if (lessonPreviewIndex >= lessonPreviewSteps.length - 1) return;
+          lessonPreviewIndex += 1;
+          renderLessonImportPreview();
+        });
+        document.getElementById("import-lesson-preview-close").addEventListener("click", function () {
+          closeLessonImportPreviewShell();
+        });
 
         document.getElementById("import-json-commit").onclick = async function () {
           let body;
