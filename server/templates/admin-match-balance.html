@@ -13,7 +13,27 @@
       input, textarea, button { background:#0b1330; border:1px solid var(--border); color:var(--text); border-radius:10px; padding:8px 10px; font-family:inherit; width:100%; }
       textarea { min-height:74px; } button { cursor:pointer; width:auto; }
       .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-      .switch { display:flex; justify-content:space-between; border:1px solid var(--border); border-radius:10px; padding:8px; background:#0b1330; }
+      .switch { display:flex; justify-content:space-between; align-items:center; gap:8px; border:1px solid var(--border); border-radius:10px; padding:8px; background:#0b1330; }
+      .field-row { display:flex; gap:8px; align-items:stretch; }
+      .field-row > input, .field-row > textarea { flex:1; min-width:0; width:auto; }
+      .help-q {
+        flex-shrink:0; width:36px; min-width:36px; height:auto; min-height:40px; padding:0;
+        border-radius:10px; font-weight:700; font-size:15px; line-height:1; cursor:pointer;
+        color:var(--text); border:1px solid var(--border); background:#13204a;
+      }
+      .help-q:hover, .help-q:focus-visible { outline:2px solid #60a5fa; outline-offset:1px; }
+      .help-backdrop {
+        position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:1000;
+        display:none; align-items:center; justify-content:center; padding:16px;
+      }
+      .help-backdrop.open { display:flex; }
+      .help-dialog {
+        max-width:420px; width:100%; background:var(--panel); border:1px solid var(--border);
+        border-radius:14px; padding:16px 18px; box-shadow:0 12px 40px rgba(0,0,0,.45);
+      }
+      .help-dialog h4 { margin:0 0 10px; font-size:1.05rem; }
+      .help-dialog p { margin:0; font-size:14px; line-height:1.65; color:var(--text); opacity:.95; }
+      .help-dialog .help-close { margin-top:14px; width:100%; }
     </style>
   </head>
   <body>
@@ -23,8 +43,12 @@
       {{ADMIN_NAV}}
       <div class="panel">
         <div class="row">
-          <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" style="max-width:340px" />
+          <div class="field-row" style="max-width:380px;flex:1">
+            <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" />
+            <button type="button" class="help-q" data-help-key="sec" aria-label="شرح مفتاح الإدارة">؟</button>
+          </div>
           <button id="load-all">تحميل كل الإعدادات</button>
+          <button type="button" class="help-q" data-help-key="loadAll" aria-label="شرح تحميل الإعدادات">؟</button>
         </div>
         <div id="global-msg" class="msg"></div>
       </div>
@@ -32,16 +56,17 @@
       <section class="panel">
         <h3>نصوص نتيجة اللعبة</h3>
         <div class="grid">
-          <input id="rm-wt" placeholder="عنوان الفوز" />
-          <input id="rm-lt" placeholder="عنوان الخسارة" />
-          <input id="rm-tt" placeholder="عنوان التعادل" />
-          <textarea id="rm-w" placeholder="نص الفائز"></textarea>
-          <textarea id="rm-l" placeholder="نص الخاسر"></textarea>
-          <textarea id="rm-t" placeholder="نص التعادل"></textarea>
+          <div class="field-row"><input id="rm-wt" placeholder="عنوان الفوز" /><button type="button" class="help-q" data-help-key="rmWt" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="rm-lt" placeholder="عنوان الخسارة" /><button type="button" class="help-q" data-help-key="rmLt" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="rm-tt" placeholder="عنوان التعادل" /><button type="button" class="help-q" data-help-key="rmTt" aria-label="شرح">؟</button></div>
+          <div class="field-row"><textarea id="rm-w" placeholder="نص الفائز"></textarea><button type="button" class="help-q" data-help-key="rmW" aria-label="شرح">؟</button></div>
+          <div class="field-row"><textarea id="rm-l" placeholder="نص الخاسر"></textarea><button type="button" class="help-q" data-help-key="rmL" aria-label="شرح">؟</button></div>
+          <div class="field-row"><textarea id="rm-t" placeholder="نص التعادل"></textarea><button type="button" class="help-q" data-help-key="rmT" aria-label="شرح">؟</button></div>
         </div>
         <div class="row" style="margin-top:8px">
           <button id="rm-load">تحميل</button>
           <button id="rm-save">حفظ</button>
+          <button type="button" class="help-q" data-help-key="rmActions" aria-label="شرح التحميل والحفظ">؟</button>
         </div>
         <div id="rm-msg" class="msg"></div>
       </section>
@@ -49,16 +74,17 @@
       <section class="panel">
         <h3>إعدادات الجولة والمباراة</h3>
         <div class="grid">
-          <input id="gs-rounds" type="number" placeholder="maxStudyRounds" />
-          <input id="gs-size" type="number" placeholder="studyRoundQuestionCount" />
-          <input id="gs-question-ms" type="number" placeholder="زمن الإجابة الافتراضي (مللي ث)" title="game_question_ms" />
-          <input id="gs-study-ms" type="number" placeholder="زمن المذاكرة الافتراضي (مللي ث)" title="game_study_phase_ms" />
-          <input id="gs-max-players" type="number" placeholder="maxPlayersPerMatch" />
-          <input id="gs-fill" type="number" placeholder="matchFillWindowSeconds" />
+          <div class="field-row"><input id="gs-rounds" type="number" placeholder="maxStudyRounds" /><button type="button" class="help-q" data-help-key="gsRounds" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="gs-size" type="number" placeholder="studyRoundQuestionCount" /><button type="button" class="help-q" data-help-key="gsSize" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="gs-question-ms" type="number" placeholder="زمن الإجابة الافتراضي (مللي ث)" title="game_question_ms" /><button type="button" class="help-q" data-help-key="gsQuestionMs" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="gs-study-ms" type="number" placeholder="زمن المذاكرة الافتراضي (مللي ث)" title="game_study_phase_ms" /><button type="button" class="help-q" data-help-key="gsStudyMs" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="gs-max-players" type="number" placeholder="maxPlayersPerMatch" /><button type="button" class="help-q" data-help-key="gsMaxPlayers" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="gs-fill" type="number" placeholder="matchFillWindowSeconds" /><button type="button" class="help-q" data-help-key="gsFill" aria-label="شرح">؟</button></div>
         </div>
         <div class="row" style="margin-top:8px">
           <button id="gs-load">تحميل</button>
           <button id="gs-save">حفظ</button>
+          <button type="button" class="help-q" data-help-key="gsActions" aria-label="شرح التحميل والحفظ">؟</button>
         </div>
         <div id="gs-msg" class="msg"></div>
       </section>
@@ -66,42 +92,242 @@
       <section class="panel">
         <h3>اقتصاد المفاتيح والقدرات</h3>
         <div class="grid">
-          <input id="ks-streak" type="number" placeholder="keysStreakPerKey" />
-          <input id="ks-small" type="number" placeholder="keysSmallStreakReward" />
-          <input id="ks-mega-s" type="number" placeholder="keysMegaStreak" />
-          <input id="ks-mega-r" type="number" placeholder="keysMegaReward" />
-          <input id="ks-max" type="number" placeholder="keysMaxPerPlayer" />
-          <input id="ks-boost-pct" type="number" placeholder="keysSkillBoostPercent" />
-          <input id="ks-boost-max" type="number" placeholder="keysSkillBoostMaxMultiplier" />
-          <input id="ks-attack" type="number" placeholder="keysHeartAttackCost" />
-          <input id="ks-shield" type="number" placeholder="keysShieldCost" />
-          <input id="ks-reveal-cost" type="number" placeholder="keysRevealCost" />
-          <input id="ks-rd" type="number" placeholder="keysRevealQuestionsDirect" />
-          <input id="ks-rs" type="number" placeholder="keysRevealQuestionsStudy" />
-          <input id="ks-drop" type="number" step="0.1" placeholder="keysDropRate" />
+          <div class="field-row"><input id="ks-streak" type="number" placeholder="keysStreakPerKey" /><button type="button" class="help-q" data-help-key="ksStreak" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-small" type="number" placeholder="keysSmallStreakReward" /><button type="button" class="help-q" data-help-key="ksSmall" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-mega-s" type="number" placeholder="keysMegaStreak" /><button type="button" class="help-q" data-help-key="ksMegaS" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-mega-r" type="number" placeholder="keysMegaReward" /><button type="button" class="help-q" data-help-key="ksMegaR" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-max" type="number" placeholder="keysMaxPerPlayer" /><button type="button" class="help-q" data-help-key="ksMax" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-boost-pct" type="number" placeholder="keysSkillBoostPercent" /><button type="button" class="help-q" data-help-key="ksBoostPct" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-boost-max" type="number" placeholder="keysSkillBoostMaxMultiplier" /><button type="button" class="help-q" data-help-key="ksBoostMax" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-attack" type="number" placeholder="keysHeartAttackCost" /><button type="button" class="help-q" data-help-key="ksAttack" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-shield" type="number" placeholder="keysShieldCost" /><button type="button" class="help-q" data-help-key="ksShield" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-reveal-cost" type="number" placeholder="keysRevealCost" /><button type="button" class="help-q" data-help-key="ksRevealCost" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-rd" type="number" placeholder="keysRevealQuestionsDirect" /><button type="button" class="help-q" data-help-key="ksRd" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-rs" type="number" placeholder="keysRevealQuestionsStudy" /><button type="button" class="help-q" data-help-key="ksRs" aria-label="شرح">؟</button></div>
+          <div class="field-row"><input id="ks-drop" type="number" step="0.1" placeholder="keysDropRate" /><button type="button" class="help-q" data-help-key="ksDrop" aria-label="شرح">؟</button></div>
         </div>
         <div class="grid" style="margin-top:8px">
-          <label class="switch"><span>تعزيز مباشر</span><input id="sw-bd" type="checkbox" /></label>
-          <label class="switch"><span>تعزيز مذاكرة</span><input id="sw-bs" type="checkbox" /></label>
-          <label class="switch"><span>تجاوز مباشر</span><input id="sw-sd" type="checkbox" /></label>
-          <label class="switch"><span>تجاوز مذاكرة</span><input id="sw-ss" type="checkbox" /></label>
-          <label class="switch"><span>هجوم مباشر</span><input id="sw-ad" type="checkbox" /></label>
-          <label class="switch"><span>هجوم مذاكرة</span><input id="sw-as" type="checkbox" /></label>
-          <label class="switch"><span>كشف مباشر</span><input id="sw-rd" type="checkbox" /></label>
-          <label class="switch"><span>كشف مذاكرة</span><input id="sw-rs" type="checkbox" /></label>
+          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تعزيز مباشر<button type="button" class="help-q" data-help-key="swBd" aria-label="شرح">؟</button></span><input id="sw-bd" type="checkbox" /></label>
+          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تعزيز مذاكرة<button type="button" class="help-q" data-help-key="swBs" aria-label="شرح">؟</button></span><input id="sw-bs" type="checkbox" /></label>
+          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تجاوز مباشر<button type="button" class="help-q" data-help-key="swSd" aria-label="شرح">؟</button></span><input id="sw-sd" type="checkbox" /></label>
+          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تجاوز مذاكرة<button type="button" class="help-q" data-help-key="swSs" aria-label="شرح">؟</button></span><input id="sw-ss" type="checkbox" /></label>
+          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">هجوم مباشر<button type="button" class="help-q" data-help-key="swAd" aria-label="شرح">؟</button></span><input id="sw-ad" type="checkbox" /></label>
+          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">هجوم مذاكرة<button type="button" class="help-q" data-help-key="swAs" aria-label="شرح">؟</button></span><input id="sw-as" type="checkbox" /></label>
+          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">كشف مباشر<button type="button" class="help-q" data-help-key="swRd" aria-label="شرح">؟</button></span><input id="sw-rd" type="checkbox" /></label>
+          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">كشف مذاكرة<button type="button" class="help-q" data-help-key="swRs" aria-label="شرح">؟</button></span><input id="sw-rs" type="checkbox" /></label>
         </div>
         <div class="row" style="margin-top:8px">
           <button id="ks-load">تحميل</button>
           <button id="ks-save">حفظ</button>
+          <button type="button" class="help-q" data-help-key="ksActions" aria-label="شرح التحميل والحفظ">؟</button>
         </div>
         <div id="ks-msg" class="msg"></div>
       </section>
     </div>
 
+    <div id="help-backdrop" class="help-backdrop" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <div class="help-dialog">
+        <h4 id="help-title"></h4>
+        <p id="help-body"></p>
+        <button type="button" class="help-close" id="help-close">إغلاق</button>
+      </div>
+    </div>
+
     <script>
       (function () {
+        var HELP = {
+          sec: {
+            title: "مفتاح الإدارة",
+            body: "كلمة سر ترسل مع طلبات واجهة الإدارة (رأس X-Admin-Secret). بدونها لا يقبل السيرفر التحميل أو الحفظ. احفظ المفتاح في مكان آمن ولا تشاركه.",
+          },
+          loadAll: {
+            title: "تحميل كل الإعدادات",
+            body: "يجلب دفعة واحدة: نصوص نتيجة اللعبة، إعدادات الجولة والمباراة، واقتصاد المفاتيح والقدرات من السيرفر ويعبئ الحقول الحالية.",
+          },
+          rmWt: {
+            title: "عنوان الفوز",
+            body: "عنوان قصير يظهر للاعب عند انتهاء المباراة وهو في مركز الفائز. يفضّل أن يكون واضحاً ومبهجاً ويتناسب مع أسلوب التطبيق.",
+          },
+          rmLt: {
+            title: "عنوان الخسارة",
+            body: "عنوان يظهر عند الخسارة. يساعد اللاعب على فهم الحالة دون نبرة قاسية إن رغبت بذلك.",
+          },
+          rmTt: {
+            title: "عنوان التعادل",
+            body: "عنوان عند تعادل النتيجة بين المتنافسين. يوضح أن لا فائزاً صريحاً في تلك الجولة.",
+          },
+          rmW: {
+            title: "نص الفائز",
+            body: "فقرة أو جمل تظهر تحت عنوان الفوز. يمكنك تهنئة اللاعب أو تشجيعه على الاستمرار.",
+          },
+          rmL: {
+            title: "نص الخاسر",
+            body: "نص يظهر للخاسر. مفيد للتشجيع على المحاولة لاحقاً أو لشرح باختصار ما حدث.",
+          },
+          rmT: {
+            title: "نص التعادل",
+            body: "نص يظهر عند التعادل. يشرح للاعبين أن النتيجة متساوية.",
+          },
+          rmActions: {
+            title: "تحميل وحفظ نصوص النتيجة",
+            body: "«تحميل» يقرأ القيم الحالية من السيرفر. «حفظ» يرسل التعديلات التي كتبتها. يجب إدخال مفتاح الإدارة أولاً.",
+          },
+          gsRounds: {
+            title: "أقصى جولات المذاكرة",
+            body: "في نمط المذاكرة ثم الاختبار: عدد «الماكرو جولات» أو دورات المذاكرة قبل الانتقال لمنطق آخر. رفع الرقم يطيل المباراة في هذا النمط.",
+          },
+          gsSize: {
+            title: "عدد أسئلة جولة المذاكرة",
+            body: "كم سؤالاً تُعرض في طبقة المذاكرة قبل طبقة الأسئلة السريعة في كل دورة. يؤثر على طول المرحلة التعليمية داخل المباراة.",
+          },
+          gsQuestionMs: {
+            title: "زمن الإجابة الافتراضي (ملّي ثانية)",
+            body: "الوقت الافتراضي الذي يملك فيه اللاعب للإجابة على سؤال في المباراة العادية والغرف الخاصة (ما لم يُضبط تصنيف فرعي أو يدوياً). القيمة بالملّي ثانية (مثلاً 15000 = 15 ثانية).",
+          },
+          gsStudyMs: {
+            title: "زمن المذاكرة الافتراضي (ملّي ثانية)",
+            body: "مدة مرحلة المذاكرة قبل الأسئلة في نمط المذاكرة. يُستخدم كافتراض عام ويمكن أن يتجاوزه إعداد التصنيف الفرعي عند الحاجة.",
+          },
+          gsMaxPlayers: {
+            title: "أقصى عدد لاعبين في المباراة",
+            body: "الحد الأعلى لعدد المشاركين في مباراة واحدة عند الربط التلقائي. يساعد على ضبط حمل السيرفر وتجربة اللعب.",
+          },
+          gsFill: {
+            title: "نافذة انتظار اكتمال اللاعبين (ثوانٍ)",
+            body: "الوقت الذي ينتظره النظام بعد اكتمال العدد الأدنى قبل بدء المباراة، لإتاحة انضمام لاعبين إضافيين حتى الحد الأعلى.",
+          },
+          gsActions: {
+            title: "تحميل وحفظ إعدادات الجولة",
+            body: "«تحميل» يجلب القيم من السيرفر. «حفظ» يحدّث الإعدادات العامة للمباراة (بما فيها أزمنة السؤال والمذاكرة الافتراضية).",
+          },
+          ksStreak: {
+            title: "إجابات متتالية لكل مفتاح",
+            body: "عدد الإجابات الصحيحة على التوالي التي يحتاجها اللاعب ليكسب «مفتاحاً» في نظام المكافآت.",
+          },
+          ksSmall: {
+            title: "مكافأة السلسلة الصغيرة",
+            body: "كم مفتاحاً يُمنح عند إكمال سلسلة صغيرة (قبل العتبة الكبرى). يشجع على الاستمرار في الإجابة بشكل صحيح.",
+          },
+          ksMegaS: {
+            title: "عتبة السلسلة الكبرى",
+            body: "عدد الإجابات الصحيحة المتتالية المطلوب لتفعيل مكافأة السلسلة الكبرى (العدد الأكبر قبل إعادة العد أو منح الجائزة الكبرى حسب منطق اللعبة).",
+          },
+          ksMegaR: {
+            title: "مكافأة السلسلة الكبرى",
+            body: "عدد المفاتيح الإضافية (أو حجم المكافأة) عند تحقيق السلسلة الكبرى. يجعل الإتقان المتواصل أكثر قيمة.",
+          },
+          ksMax: {
+            title: "سقف المفاتيح للاعب",
+            body: "أقصى عدد مفاتيح يمكن أن يحتفظ به اللاعب في المباراة. يمنع تراكماً غير متوازن.",
+          },
+          ksBoostPct: {
+            title: "نسبة تعزيز المهارة",
+            body: "يحدد قوة تأثير قدرة التعزيز على النقاط أو السلوك المرتبط. رفعها يزيد حدة التعزيز.",
+          },
+          ksBoostMax: {
+            title: "أقصى مضاعف للتعزيز",
+            body: "الحد الأعلى لمضاعفة التعزيز حتى لا تصبح القدرة مبالغاً فيها.",
+          },
+          ksAttack: {
+            title: "تكلفة هجوم القلوب",
+            body: "عدد المفاتيح المطلوبة لاستخدام قدرة الهجوم على قلوب الخصم.",
+          },
+          ksShield: {
+            title: "تكلفة الدرع",
+            body: "عدد المفاتيح لاستخدام الدرع أو الحماية المرتبطة بها.",
+          },
+          ksRevealCost: {
+            title: "تكلفة الكشف",
+            body: "عدد المفاتيح لاستخدام قدرة كشف جزء من السؤال أو الخيارات.",
+          },
+          ksRd: {
+            title: "أسئلة كشف النمط المباشر",
+            body: "كم سؤالاً يمكن كشفه أو مدى استخدام الكشف في النمط المباشر وفق إعدادات اللعبة.",
+          },
+          ksRs: {
+            title: "أسئلة كشف نمط المذاكرة",
+            body: "نفس الفكرة لكن لنمط المذاكرة ثم الاختبار حيث قد تختلف أرقام التوازن.",
+          },
+          ksDrop: {
+            title: "معدل سقوط المفاتيح",
+            body: "يضبط تكرار أو احتمال منح المفاتيح أثناء اللعب. رفعه يزيد تدفق المفاتيح (إن كان النظام يعتمد على هذا الحقل).",
+          },
+          ksActions: {
+            title: "تحميل وحفظ اقتصاد المفاتيح",
+            body: "«تحميل» يجلب كل أرقام المفاتيح وحالات تفعيل القدرات. «حفظ» يطبق التعديلات على السيرفر.",
+          },
+          swBd: {
+            title: "تعزيز — النمط المباشر",
+            body: "تفعيل أو إيقاف قدرة التعزيز في المباريات ذات النمط المباشر (إجابة سريعة دون مرحلة مذاكرة طويلة).",
+          },
+          swBs: {
+            title: "تعزيز — نمط المذاكرة",
+            body: "تفعيل أو إيقاف التعزيز في نمط المذاكرة ثم الاختبار.",
+          },
+          swSd: {
+            title: "تجاوز السؤال — مباشر",
+            body: "السماح للاعب بتخطي سؤال في النمط المباشر (إن وُجدت آلية التجاوز في الواجهة).",
+          },
+          swSs: {
+            title: "تجاوز السؤال — مذاكرة",
+            body: "نفس الفكرة لنمط المذاكرة ثم الاختبار.",
+          },
+          swAd: {
+            title: "هجوم القلوب — مباشر",
+            body: "تفعيل قدرة سحب قلوب الخصم أو الإضرار به في النمط المباشر.",
+          },
+          swAs: {
+            title: "هجوم القلوب — مذاكرة",
+            body: "تفعيل الهجوم في نمط المذاكرة ثم الاختبار.",
+          },
+          swRd: {
+            title: "كشف الخيارات — مباشر",
+            body: "تفعيل قدرة كشف جزء من السؤال أو الإجابات في النمط المباشر.",
+          },
+          swRs: {
+            title: "كشف الخيارات — مذاكرة",
+            body: "تفعيل الكشف في نمط المذاكرة ثم الاختبار.",
+          },
+        };
+
         function $(id) { return document.getElementById(id); }
         function msg(id, t, ok) { $(id).textContent = t || ""; $(id).style.color = ok ? "#34d399" : "#f87171"; }
+
+        var helpBackdrop = $("help-backdrop");
+        var helpTitle = $("help-title");
+        var helpBody = $("help-body");
+        function closeHelp() {
+          helpBackdrop.classList.remove("open");
+          document.body.style.overflow = "";
+        }
+        function openHelp(key) {
+          var h = HELP[key];
+          if (!h) return;
+          helpTitle.textContent = h.title;
+          helpBody.textContent = h.body;
+          helpBackdrop.classList.add("open");
+          document.body.style.overflow = "hidden";
+        }
+        document.addEventListener(
+          "click",
+          function (ev) {
+            var t = ev.target;
+            if (t && t.classList && t.classList.contains("help-q")) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              var k = t.getAttribute("data-help-key");
+              if (k) openHelp(k);
+            }
+          },
+          true,
+        );
+        helpBackdrop.addEventListener("click", function (ev) {
+          if (ev.target === helpBackdrop) closeHelp();
+        });
+        $("help-close").addEventListener("click", closeHelp);
+        document.addEventListener("keydown", function (ev) {
+          if (ev.key === "Escape" && helpBackdrop.classList.contains("open")) closeHelp();
+        });
         function sec() { return String($("sec").value || "").trim(); }
         function hdr() { return { "X-Admin-Secret": sec(), "Content-Type": "application/json" }; }
         async function api(url, method, body) {
