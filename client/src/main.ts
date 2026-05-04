@@ -674,7 +674,9 @@ function render(): void {
                 }" data-mode="direct" aria-pressed="${selectedModeInName === "direct" ? "true" : "false"}">
                   <span class="mode-option-icon" aria-hidden="true">⚡</span>
                   <span class="mode-option-title">نمط مباشر</span>
-                  <span class="mode-option-desc">أسئلة فورية متتالية بدون مراجعة مسبقة</span>
+                  <span class="mode-option-desc">اضغط للدخول فوراً إلى البحث عن تحدي (${difficultyModeLabelAr(
+                    selectedDifficultyMode,
+                  )}) — أسئلة متتالية</span>
                 </button>
                 <button type="button" class="mode-option-btn ${
                   selectedModeInName === "study_then_quiz" ? "mode-option-btn--selected" : ""
@@ -706,11 +708,11 @@ function render(): void {
                   renderModePicker || isPrivateEntryFlow ? "hidden" : ""
                 }">رجوع</button>
                 <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg ${
-                  isPrivateEntryFlow || renderModePicker || renderDifficultyPicker ? "" : "hidden"
+                  isPrivateEntryFlow || renderDifficultyPicker ? "" : "hidden"
                 }">${
                   isPrivateEntryFlow
                     ? "انضمام للغرفة"
-                    : renderModePicker || renderDifficultyPicker
+                    : renderDifficultyPicker
                       ? "ابدأ التحدي"
                       : nameFlowStep === "main_categories"
                         ? "التالي"
@@ -718,10 +720,16 @@ function render(): void {
                 }</button>
               </div>
               <button id="solo-learning-btn" class="ui-btn ui-btn--primary w-full py-3 text-lg ${
-                renderDifficultyPicker && !isPrivateEntryFlow ? "" : "hidden"
+                !isPrivateEntryFlow &&
+                (renderDifficultyPicker || (renderModePicker && selectedModeInName === "direct"))
+                  ? ""
+                  : "hidden"
               }">التعلم الفردي</button>
               <div class="${
-                renderDifficultyPicker && !isPrivateEntryFlow ? "space-y-2" : "hidden"
+                !isPrivateEntryFlow &&
+                (renderDifficultyPicker || (renderModePicker && selectedModeInName === "direct"))
+                  ? "space-y-2"
+                  : "hidden"
               }">
                 <button id="create-private-room-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg">إنشاء غرفة خاصة</button>
                 <div class="flex gap-2">
@@ -849,7 +857,21 @@ function render(): void {
           });
           if (selectedModeInName === "study_then_quiz") {
             void goToStudyCategories();
+            return;
           }
+          err.textContent = "";
+          const name = input.value.trim();
+          if (!name) {
+            err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+            return;
+          }
+          storePlayerName(name);
+          playerNameDraft = name;
+          phase = "matchmaking";
+          soloLearningPending = false;
+          lobbyNotice = `جاري الاتصال بالخادم... (${difficultyModeLabelAr(selectedDifficultyMode)})`;
+          render();
+          connectSocket(name, "direct", null, selectedDifficultyMode);
         });
       });
     } else if (nameFlowStep === "main_categories") {
@@ -925,29 +947,6 @@ function render(): void {
         lobbyNotice = "جاري الانضمام للغرفة الخاصة...";
         render();
         connectSocket(name, "direct", null, "mix", "private_join", pendingJoinRoomCode);
-        return;
-      }
-      if (nameFlowStep === "mode") {
-        if (selectedModeInName === "direct") {
-          nameFlowStep = "difficulty";
-          btn.disabled = false;
-          btn.classList.remove("btn-pending");
-          render();
-          return;
-        }
-        try {
-          btn.textContent = "جاري تحميل التصنيفات...";
-          await fetchCategoriesState();
-          nameFlowStep = "main_categories";
-          btn.disabled = false;
-          btn.classList.remove("btn-pending");
-          render();
-        } catch {
-          btn.disabled = false;
-          btn.classList.remove("btn-pending");
-          btn.textContent = "ابدأ التحدي";
-          err.textContent = "تعذر تحميل التصنيفات.";
-        }
         return;
       }
       if (nameFlowStep === "main_categories") {
