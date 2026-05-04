@@ -1,6 +1,7 @@
 <style>
   /* شريط تنقل الأدمن — يُحقن مع الصفحات؛ يعتمد على متغيرات الصفحة مع قيم احتياطية */
   .admin-nav {
+    font-family: inherit;
     background: var(--panel, var(--card, #111936));
     border: 1px solid var(--border, var(--line, #2a355d));
     border-radius: 12px;
@@ -19,7 +20,7 @@
   }
   .admin-nav-title {
     color: var(--muted, #9ca3af);
-    font-size: 12px;
+    font-size: var(--admin-fs-xs, 13px);
     min-width: 7.5rem;
   }
   .admin-nav-link {
@@ -29,7 +30,8 @@
     background: var(--admin-nav-link-bg, #0b1330);
     border-radius: 999px;
     padding: 6px 10px;
-    font-size: 13px;
+    font-size: var(--admin-fs-xs, 13px);
+    font-family: inherit;
   }
   .admin-nav-link:hover {
     filter: brightness(1.06);

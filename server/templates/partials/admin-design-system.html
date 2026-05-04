@@ -1,3 +1,9 @@
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap"
+  rel="stylesheet"
+/>
 <style>
   /* نظام تصميم موحّد لصفحات الأدمن — يُحقن أولاً في <head> */
   :root {
@@ -37,13 +43,15 @@
     --admin-radius-xl: 14px;
     --admin-radius-pill: 999px;
 
-    --admin-font-sans: Tahoma, Arial, "Segoe UI", sans-serif;
-    --admin-fs-body: 14px;
-    --admin-fs-sm: 13px;
-    --admin-fs-xs: 12px;
-    --admin-fs-h1: 1.5rem;
-    --admin-fs-h2: 1.15rem;
-    --admin-line-body: 1.5;
+    /* خط موحّد لكل الأدمن (عربي) */
+    --admin-font-sans: "Tajawal", Tahoma, Arial, "Segoe UI", sans-serif;
+    --admin-font-mono: ui-monospace, Consolas, "Cascadia Mono", monospace;
+    --admin-fs-body: 15px;
+    --admin-fs-sm: 14px;
+    --admin-fs-xs: 13px;
+    --admin-fs-h1: 1.65rem;
+    --admin-fs-h2: 1.2rem;
+    --admin-line-body: 1.55;
     --admin-line-tight: 1.35;
 
     --admin-shadow-sm: 0 4px 18px rgba(0, 0, 0, 0.25);
@@ -78,12 +86,60 @@
     background: var(--bg, var(--admin-bg, #0b1020));
     color: var(--text, var(--admin-text, #f8fafc));
     font-family: var(--admin-font-sans);
-    font-size: var(--admin-fs-body, 14px);
-    line-height: var(--admin-line-body, 1.5);
+    font-size: var(--admin-fs-body, 15px);
+    line-height: var(--admin-line-body, 1.55);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1 {
+    font-family: var(--admin-font-sans);
+    font-size: var(--admin-fs-h1);
+    font-weight: 800;
+    line-height: var(--admin-line-tight);
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    font-family: var(--admin-font-sans);
+    font-size: var(--admin-fs-h2);
+    font-weight: 700;
+    line-height: var(--admin-line-tight);
+  }
+  h3 {
+    font-family: var(--admin-font-sans);
+    font-size: 1.05rem;
+    font-weight: 700;
+    line-height: var(--admin-line-tight);
   }
 
   .muted {
     color: var(--muted, var(--admin-text-muted, #9ca3af));
+  }
+
+  /* حقول وأزرار افتراضية — الصفحات الأكثر تحديداً تتجاوز لاحقاً */
+  button,
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-family: inherit;
+    font-size: var(--admin-fs-sm, 14px);
+    border-radius: var(--admin-radius-md, 10px);
+    border: 1px solid var(--border, var(--admin-border, #2a355d));
+    background: var(--admin-input-bg, #0b1330);
+    color: var(--text, var(--admin-text, #f8fafc));
+    padding: var(--admin-space-3, 10px) var(--admin-space-3, 12px);
+  }
+  button {
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  table {
+    font-family: inherit;
+    font-size: var(--admin-fs-sm, 14px);
   }
 
   /* مكوّنات اختيارية — بادئة admin-ui- */
@@ -106,7 +162,7 @@
     background: var(--admin-primary-muted, #1f2b52);
     color: var(--text, var(--admin-text, #f8fafc));
     font-family: inherit;
-    font-size: var(--admin-fs-sm, 13px);
+    font-size: var(--admin-fs-sm, 14px);
     font-weight: 600;
     cursor: pointer;
     text-decoration: none;
@@ -149,12 +205,12 @@
     color: var(--text, var(--admin-text, #f8fafc));
     padding: var(--admin-space-3, 10px) var(--admin-space-3, 12px);
     font-family: inherit;
-    font-size: var(--admin-fs-sm, 13px);
+    font-size: var(--admin-fs-sm, 14px);
   }
 
   .admin-ui-msg {
     min-height: 1.25rem;
-    font-size: var(--admin-fs-sm, 13px);
+    font-size: var(--admin-fs-sm, 14px);
     margin-top: var(--admin-space-2, 8px);
   }
   .admin-ui-msg--ok {
