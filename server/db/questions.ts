@@ -142,3 +142,36 @@ export async function countQuestionsBySubcategory(
   );
   return Number(r.rows[0]?.c ?? 0);
 }
+
+/** أوقات اختيارية من تصنيف فرعي لنمط study_then_quiz (نفس حدود Match.loadRuntimeSettings) */
+export async function getStudyModeTimingOverridesBySubcategoryKey(
+  pool: Pool,
+  subcategoryKey: string,
+): Promise<{ questionMsOverride?: number; studyPhaseMsOverride?: number } | undefined> {
+  const key = String(subcategoryKey || "").trim();
+  if (!key) return undefined;
+  const r = await pool.query<{
+    study_mode_question_ms: number | null;
+    study_mode_study_phase_ms: number | null;
+  }>(
+    `SELECT study_mode_question_ms, study_mode_study_phase_ms
+     FROM question_subcategories WHERE subcategory_key = $1 LIMIT 1`,
+    [key],
+  );
+  const row = r.rows[0];
+  if (!row) return undefined;
+  const out: { questionMsOverride?: number; studyPhaseMsOverride?: number } = {};
+  if (row.study_mode_question_ms != null) {
+    const q = Math.floor(Number(row.study_mode_question_ms));
+    if (Number.isFinite(q)) {
+      out.questionMsOverride = Math.min(120_000, Math.max(5_000, q));
+    }
+  }
+  if (row.study_mode_study_phase_ms != null) {
+    const s = Math.floor(Number(row.study_mode_study_phase_ms));
+    if (Number.isFinite(s)) {
+      out.studyPhaseMsOverride = Math.min(300_000, Math.max(10_000, s));
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}

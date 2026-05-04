@@ -370,6 +370,10 @@ const subCategorySchema = z.object({
   sortOrder: z.number().int().min(0).max(10000).optional(),
   isActive: z.boolean().optional(),
   internalDescription: z.string().max(8000).optional(),
+  /** زمن السؤال (ملّي ث) لنمط study_then_quiz؛ null يمسح التخصيص */
+  studyModeQuestionMs: z.number().int().min(5000).max(120_000).nullable().optional(),
+  /** زمن بطاقة المذاكرة (ملّي ث) لنمط study_then_quiz؛ null يمسح التخصيص */
+  studyModeStudyPhaseMs: z.number().int().min(10_000).max(300_000).nullable().optional(),
 });
 
 const categoriesBulkSchema = z.object({
@@ -651,6 +655,8 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     sortOrder: number;
     isActive: boolean;
     internalDescription: string;
+    studyModeQuestionMs: number | null;
+    studyModeStudyPhaseMs: number | null;
   }>;
 }>> {
   const mains = await pool.query<{
@@ -674,9 +680,13 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     sort_order: number;
     is_active: boolean;
     internal_description: string;
+    study_mode_question_ms: number | null;
+    study_mode_study_phase_ms: number | null;
   }>(
     `SELECT id, main_category_id, subcategory_key, name_ar, icon, sort_order, is_active,
-            COALESCE(internal_description, '') AS internal_description
+            COALESCE(internal_description, '') AS internal_description,
+            study_mode_question_ms,
+            study_mode_study_phase_ms
      FROM question_subcategories
      ORDER BY sort_order ASC, id ASC`,
   );
@@ -701,6 +711,8 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
       sortOrder: s.sort_order,
       isActive: s.is_active,
       internalDescription: s.internal_description,
+      studyModeQuestionMs: s.study_mode_question_ms != null ? Number(s.study_mode_question_ms) : null,
+      studyModeStudyPhaseMs: s.study_mode_study_phase_ms != null ? Number(s.study_mode_study_phase_ms) : null,
     })),
   }));
 }
@@ -998,7 +1010,7 @@ export function registerAdminRoutes(app: Express): void {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.status(200).send(readAdminCategoriesHtml(total));
     } catch {
-      res.status(500).send("تعذر تحميل صفحة إدارة التصنيفات.");
+      res.status(500).send("تعذر تحميل صفحة إدارة تصنيفات نمط المذاكرة.");
     }
   });
 
@@ -2598,15 +2610,20 @@ export function registerAdminRoutes(app: Express): void {
       const pool = getPool();
       const d = parsed.data;
       const internalDescSub = d.internalDescription ?? "";
+      const qMs = d.studyModeQuestionMs === undefined ? null : d.studyModeQuestionMs;
+      const sMs = d.studyModeStudyPhaseMs === undefined ? null : d.studyModeStudyPhaseMs;
       await pool.query(
         `INSERT INTO question_subcategories (
-           main_category_id, subcategory_key, name_ar, icon, sort_order, is_active, internal_description
+           main_category_id, subcategory_key, name_ar, icon, sort_order, is_active, internal_description,
+           study_mode_question_ms, study_mode_study_phase_ms
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (subcategory_key) DO UPDATE
          SET main_category_id = EXCLUDED.main_category_id, name_ar = EXCLUDED.name_ar,
              icon = EXCLUDED.icon, sort_order = EXCLUDED.sort_order, is_active = EXCLUDED.is_active,
-             internal_description = EXCLUDED.internal_description`,
+             internal_description = EXCLUDED.internal_description,
+             study_mode_question_ms = EXCLUDED.study_mode_question_ms,
+             study_mode_study_phase_ms = EXCLUDED.study_mode_study_phase_ms`,
         [
           d.mainCategoryId,
           d.subcategoryKey,
@@ -2615,6 +2632,8 @@ export function registerAdminRoutes(app: Express): void {
           d.sortOrder ?? 0,
           d.isActive ?? true,
           internalDescSub,
+          qMs,
+          sMs,
         ],
       );
       res.json({ ok: true });
@@ -2692,9 +2711,13 @@ export function registerAdminRoutes(app: Express): void {
         sort_order: number;
         is_active: boolean;
         internal_description: string;
+        study_mode_question_ms: number | null;
+        study_mode_study_phase_ms: number | null;
       }>(
         `SELECT main_category_id, subcategory_key, name_ar, icon, sort_order, is_active,
-                COALESCE(internal_description, '') AS internal_description
+                COALESCE(internal_description, '') AS internal_description,
+                study_mode_question_ms,
+                study_mode_study_phase_ms
          FROM question_subcategories WHERE id = $1`,
         [id],
       );
@@ -2703,11 +2726,15 @@ export function registerAdminRoutes(app: Express): void {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
       }
+      const nextQMs = d.studyModeQuestionMs !== undefined ? d.studyModeQuestionMs : row.study_mode_question_ms;
+      const nextSMs = d.studyModeStudyPhaseMs !== undefined ? d.studyModeStudyPhaseMs : row.study_mode_study_phase_ms;
       await pool.query(
         `UPDATE question_subcategories
          SET main_category_id = $1, subcategory_key = $2, name_ar = $3, icon = $4, sort_order = $5, is_active = $6,
-             internal_description = $7
-         WHERE id = $8`,
+             internal_description = $7,
+             study_mode_question_ms = $8,
+             study_mode_study_phase_ms = $9
+         WHERE id = $10`,
         [
           d.mainCategoryId ?? row.main_category_id,
           d.subcategoryKey ?? row.subcategory_key,
@@ -2716,6 +2743,8 @@ export function registerAdminRoutes(app: Express): void {
           d.sortOrder ?? row.sort_order,
           d.isActive ?? row.is_active,
           d.internalDescription !== undefined ? d.internalDescription : row.internal_description,
+          nextQMs,
+          nextSMs,
           id,
         ],
       );

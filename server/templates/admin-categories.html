@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>إدارة التصنيفات | فاهم</title>
+    <title>إدارة تصنيفات نمط المذاكرة | فاهم</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
@@ -35,7 +35,7 @@
   </head>
   <body>
     <div class="wrap">
-      <h1 style="margin:0;color:var(--amber)">إدارة التصنيفات</h1>
+      <h1 style="margin:0;color:var(--amber)">إدارة تصنيفات نمط المذاكرة</h1>
       <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong></p>
 
       <div class="topbar">
@@ -156,6 +156,17 @@
             <input id="m-key" type="text" style="width:100%" />
           </div>
         </div>
+        <div class="row" id="sub-timing-wrap" style="display:none; margin-top:.45rem; flex-wrap:wrap">
+          <div style="min-width:200px; flex:1">
+            <label for="m-study-ms">زمن بطاقة المذاكرة (ملّي ثانية)</label>
+            <input id="m-study-ms" type="text" inputmode="numeric" placeholder="فارغ = الإعداد العام" style="width:100%" />
+          </div>
+          <div style="min-width:200px; flex:1">
+            <label for="m-question-ms">زمن السؤال (ملّي ثانية)</label>
+            <input id="m-question-ms" type="text" inputmode="numeric" placeholder="فارغ = الإعداد العام" style="width:100%" />
+          </div>
+          <p class="muted" style="flex-basis:100%; margin:.25rem 0 0; font-size:.78rem">لنمط «مذاكرة ثم أسئلة» فقط: 10000–300000 للمذاكرة، 5000–120000 للسؤال.</p>
+        </div>
         <div class="row" style="margin-top:.55rem">
           <button class="btn" id="m-save" type="button">حفظ</button>
           <button class="btn btn-secondary" id="m-close" type="button">إلغاء</button>
@@ -257,7 +268,8 @@
           const subs = S.selectedMain.subcategories || [];
           grid.innerHTML = subs.length ? subs.map((s) => {
             const c = S.cov[s.subcategoryKey] || { totalQuestions: 0, easyCount: 0, mediumCount: 0, hardCount: 0, missing: [] };
-            return `<div class="icon-card ${S.selectedSub && S.selectedSub.id === s.id ? "active" : ""}"><div class="row" style="justify-content:space-between">${S.multiMode ? `<input data-sel="${s.id}" type="checkbox" ${S.selectedSubIds[s.id] ? "checked" : ""} />` : ""}<span class="chip">${s.isActive ? "مفعّل" : "معطّل"}</span></div><div style="font-size:1.3rem">${esc(s.icon || "📘")}</div><div class="nm">${esc(s.nameAr)}</div><div class="muted">${esc(s.subcategoryKey)}</div><div><span class="chip">إجمالي: ${c.totalQuestions}</span><span class="chip">سهل: ${c.easyCount}</span><span class="chip">متوسط: ${c.mediumCount}</span><span class="chip">صعب: ${c.hardCount}</span>${(c.missing || []).length ? `<span class="chip warn">فجوات: ${(c.missing || []).length}</span>` : ""}</div><div class="row" style="justify-content:center">${subActions(s)}</div></div>`;
+            const timingChip = (s.studyModeQuestionMs != null || s.studyModeStudyPhaseMs != null) ? `<span class="chip">توقيت مخصّص</span>` : "";
+            return `<div class="icon-card ${S.selectedSub && S.selectedSub.id === s.id ? "active" : ""}"><div class="row" style="justify-content:space-between">${S.multiMode ? `<input data-sel="${s.id}" type="checkbox" ${S.selectedSubIds[s.id] ? "checked" : ""} />` : ""}<span class="chip">${s.isActive ? "مفعّل" : "معطّل"}</span>${timingChip}</div><div style="font-size:1.3rem">${esc(s.icon || "📘")}</div><div class="nm">${esc(s.nameAr)}</div><div class="muted">${esc(s.subcategoryKey)}</div><div><span class="chip">إجمالي: ${c.totalQuestions}</span><span class="chip">سهل: ${c.easyCount}</span><span class="chip">متوسط: ${c.mediumCount}</span><span class="chip">صعب: ${c.hardCount}</span>${(c.missing || []).length ? `<span class="chip warn">فجوات: ${(c.missing || []).length}</span>` : ""}</div><div class="row" style="justify-content:center">${subActions(s)}</div></div>`;
           }).join("") : `<div class="muted">لا توجد تصنيفات فرعية.</div>`;
           document.querySelectorAll("[data-sel]").forEach((x) => x.addEventListener("change", () => { const id = Number(x.getAttribute("data-sel")); if (x.checked) S.selectedSubIds[id] = true; else delete S.selectedSubIds[id]; }));
           document.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => handleSubAction(String(b.getAttribute("data-act")), Number(b.getAttribute("data-sub")))));
@@ -305,21 +317,119 @@
         }
         function openModal(title) { $("modal-title").textContent = title; $("modal-bg").classList.add("show"); }
         function closeModal() { $("modal-bg").classList.remove("show"); S.modal = null; }
-        function openSubModal(s) { S.modal = { kind: "sub-edit", id: s.id }; $("sub-extra").style.display = "flex"; $("m-desc-wrap").style.display = "block"; $("m-key-wrap").style.display = "block"; $("m-key-label").textContent = "مفتاح الفرعي"; $("m-name").value = s.nameAr || ""; $("m-icon").value = s.icon || "📘"; $("m-sort").value = String(s.sortOrder || 0); $("m-desc").value = s.internalDescription || ""; $("m-key").value = s.subcategoryKey || ""; $("m-key").readOnly = false; openModal("تعديل تصنيف فرعي"); }
-        function openMainCreate() { S.modal = { kind: "main-create" }; $("sub-extra").style.display = "flex"; $("m-desc-wrap").style.display = "none"; $("m-key-wrap").style.display = "block"; $("m-key-label").textContent = "مفتاح الرئيسي"; $("m-name").value = ""; $("m-icon").value = "📚"; $("m-sort").value = "0"; $("m-key").value = ""; $("m-key").readOnly = false; openModal("إضافة تصنيف رئيسي"); }
-        function openMainEdit(m) { S.modal = { kind: "main-edit", id: m.id, mainKey: m.mainKey }; $("sub-extra").style.display = "flex"; $("m-desc-wrap").style.display = "none"; $("m-key-wrap").style.display = "block"; $("m-key-label").textContent = "مفتاح الرئيسي"; $("m-name").value = m.nameAr || ""; $("m-icon").value = m.icon || "📚"; $("m-sort").value = String(m.sortOrder || 0); $("m-key").value = m.mainKey || ""; $("m-key").readOnly = false; openModal("تعديل تصنيف رئيسي"); }
-        function openSubCreate() { if (!S.selectedMain) return msg("اختر رئيسيًا أولًا.", false); S.modal = { kind: "sub-create", mainId: S.selectedMain.id }; $("sub-extra").style.display = "flex"; $("m-desc-wrap").style.display = "block"; $("m-key-wrap").style.display = "block"; $("m-key-label").textContent = "مفتاح الفرعي"; $("m-name").value = ""; $("m-icon").value = "📘"; $("m-sort").value = "0"; $("m-desc").value = ""; $("m-key").value = ""; $("m-key").readOnly = false; openModal("إضافة تصنيف فرعي"); }
+        function openSubModal(s) {
+          S.modal = { kind: "sub-edit", id: s.id };
+          $("sub-extra").style.display = "flex";
+          $("sub-timing-wrap").style.display = "flex";
+          $("m-desc-wrap").style.display = "block";
+          $("m-key-wrap").style.display = "block";
+          $("m-key-label").textContent = "مفتاح الفرعي";
+          $("m-name").value = s.nameAr || "";
+          $("m-icon").value = s.icon || "📘";
+          $("m-sort").value = String(s.sortOrder || 0);
+          $("m-desc").value = s.internalDescription || "";
+          $("m-key").value = s.subcategoryKey || "";
+          $("m-key").readOnly = false;
+          $("m-study-ms").value = s.studyModeStudyPhaseMs != null ? String(s.studyModeStudyPhaseMs) : "";
+          $("m-question-ms").value = s.studyModeQuestionMs != null ? String(s.studyModeQuestionMs) : "";
+          openModal("تعديل تصنيف فرعي");
+        }
+        function openMainCreate() {
+          S.modal = { kind: "main-create" };
+          $("sub-extra").style.display = "flex";
+          $("sub-timing-wrap").style.display = "none";
+          $("m-desc-wrap").style.display = "none";
+          $("m-key-wrap").style.display = "block";
+          $("m-key-label").textContent = "مفتاح الرئيسي";
+          $("m-name").value = "";
+          $("m-icon").value = "📚";
+          $("m-sort").value = "0";
+          $("m-key").value = "";
+          $("m-key").readOnly = false;
+          openModal("إضافة تصنيف رئيسي");
+        }
+        function openMainEdit(m) {
+          S.modal = { kind: "main-edit", id: m.id, mainKey: m.mainKey };
+          $("sub-extra").style.display = "flex";
+          $("sub-timing-wrap").style.display = "none";
+          $("m-desc-wrap").style.display = "none";
+          $("m-key-wrap").style.display = "block";
+          $("m-key-label").textContent = "مفتاح الرئيسي";
+          $("m-name").value = m.nameAr || "";
+          $("m-icon").value = m.icon || "📚";
+          $("m-sort").value = String(m.sortOrder || 0);
+          $("m-key").value = m.mainKey || "";
+          $("m-key").readOnly = false;
+          openModal("تعديل تصنيف رئيسي");
+        }
+        function openSubCreate() {
+          if (!S.selectedMain) return msg("اختر رئيسيًا أولًا.", false);
+          S.modal = { kind: "sub-create", mainId: S.selectedMain.id };
+          $("sub-extra").style.display = "flex";
+          $("sub-timing-wrap").style.display = "flex";
+          $("m-desc-wrap").style.display = "block";
+          $("m-key-wrap").style.display = "block";
+          $("m-key-label").textContent = "مفتاح الفرعي";
+          $("m-name").value = "";
+          $("m-icon").value = "📘";
+          $("m-sort").value = "0";
+          $("m-desc").value = "";
+          $("m-key").value = "";
+          $("m-key").readOnly = false;
+          $("m-study-ms").value = "";
+          $("m-question-ms").value = "";
+          openModal("إضافة تصنيف فرعي");
+        }
+        function parseTimingMs(inputId, min, max, errLabel) {
+          const t = String($(inputId).value || "").trim();
+          if (t === "") return { ok: true, value: null };
+          const n = parseInt(t, 10);
+          if (!Number.isFinite(n) || n < min || n > max) return { ok: false, msg: errLabel };
+          return { ok: true, value: n };
+        }
         async function saveModal() {
           if (!S.modal) return;
           const nameAr = String($("m-name").value || "").trim();
           const icon = String($("m-icon").value || "").trim();
           const sortOrder = Number($("m-sort").value || 0);
           if (!nameAr) return msg("الاسم مطلوب.", false);
+          let studyModeQuestionMs;
+          let studyModeStudyPhaseMs;
+          if (S.modal.kind === "sub-edit" || S.modal.kind === "sub-create") {
+            const pq = parseTimingMs("m-question-ms", 5000, 120000, "زمن السؤال: أدخل رقماً بين 5000 و 120000 أو اترك الحقل فارغاً.");
+            if (!pq.ok) return msg(pq.msg, false);
+            const ps = parseTimingMs("m-study-ms", 10000, 300000, "زمن بطاقة المذاكرة: أدخل رقماً بين 10000 و 300000 أو اترك الحقل فارغاً.");
+            if (!ps.ok) return msg(ps.msg, false);
+            studyModeQuestionMs = pq.value;
+            studyModeStudyPhaseMs = ps.value;
+          }
           try {
-            if (S.modal.kind === "sub-edit") await api(`/api/admin/categories/sub/${S.modal.id}`, "PATCH", { nameAr, icon: icon || "📘", sortOrder, internalDescription: String($("m-desc").value || ""), subcategoryKey: String($("m-key").value || "").trim() });
+            if (S.modal.kind === "sub-edit")
+              await api(`/api/admin/categories/sub/${S.modal.id}`, "PATCH", {
+                nameAr,
+                icon: icon || "📘",
+                sortOrder,
+                internalDescription: String($("m-desc").value || ""),
+                subcategoryKey: String($("m-key").value || "").trim(),
+                studyModeQuestionMs,
+                studyModeStudyPhaseMs,
+              });
             if (S.modal.kind === "main-edit") await api(`/api/admin/categories/main/${S.modal.id}`, "PATCH", { mainKey: String($("m-key").value || "").trim() || S.modal.mainKey, nameAr, icon: icon || "📚", sortOrder });
             if (S.modal.kind === "main-create") { const mainKey = String($("m-key").value || "").trim(); if (!mainKey) return msg("مفتاح الرئيسي مطلوب.", false); await api("/api/admin/categories/main", "POST", { mainKey, nameAr, icon: icon || "📚", sortOrder }); }
-            if (S.modal.kind === "sub-create") { const subcategoryKey = String($("m-key").value || "").trim(); if (!subcategoryKey) return msg("مفتاح الفرعي مطلوب.", false); await api("/api/admin/categories/sub", "POST", { mainCategoryId: S.modal.mainId, subcategoryKey, nameAr, icon: icon || "📘", sortOrder, internalDescription: String($("m-desc").value || "") }); }
+            if (S.modal.kind === "sub-create") {
+              const subcategoryKey = String($("m-key").value || "").trim();
+              if (!subcategoryKey) return msg("مفتاح الفرعي مطلوب.", false);
+              await api("/api/admin/categories/sub", "POST", {
+                mainCategoryId: S.modal.mainId,
+                subcategoryKey,
+                nameAr,
+                icon: icon || "📘",
+                sortOrder,
+                internalDescription: String($("m-desc").value || ""),
+                studyModeQuestionMs,
+                studyModeStudyPhaseMs,
+              });
+            }
             closeModal(); await reloadAll();
           } catch { msg("تعذر الحفظ.", false); }
         }

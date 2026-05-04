@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getPool } from "../db/pool";
 import { getPublishedLessonPlaybackById, type LessonPlaybackPayload } from "../db/lessons";
 import { getCustomLessonPlayback } from "../customLessonSessions";
-import { countQuestionsBySubcategory } from "../db/questions";
+import { countQuestionsBySubcategory, getStudyModeTimingOverridesBySubcategoryKey } from "../db/questions";
 import { Match, type DifficultyMode, type GameMode } from "./Match";
 
 const joinLobbySchema = z
@@ -404,6 +404,11 @@ export class GameManager {
           questionMs: Math.min(120_000, Math.max(5_000, Number.isFinite(questionMsRaw) ? questionMsRaw : 15_000)),
           studyPhaseMs: Math.min(300_000, Math.max(10_000, Number.isFinite(studyPhaseMsRaw) ? studyPhaseMsRaw : 60_000)),
         };
+        if (mode === "study_then_quiz" && subcategoryKey) {
+          const subOv = await getStudyModeTimingOverridesBySubcategoryKey(getPool(), subcategoryKey);
+          if (subOv?.questionMsOverride != null) settings.questionMs = subOv.questionMsOverride;
+          if (subOv?.studyPhaseMsOverride != null) settings.studyPhaseMs = subOv.studyPhaseMsOverride;
+        }
         this.leaveMatchForSocket(socket.id);
         this.leaveLobbyEverywhere(socket.id);
         this.removeFromPrivateRoom(socket.id);
@@ -641,6 +646,14 @@ export class GameManager {
 
         const matchId = randomUUID();
 
+        const studyTimeOverrides =
+          mode === "study_then_quiz"
+            ? (await getStudyModeTimingOverridesBySubcategoryKey(
+                getPool(),
+                subcategoryKey ?? "general_default",
+              )) ?? undefined
+            : undefined;
+
         const match = new Match(
           this.io,
           matchId,
@@ -648,7 +661,7 @@ export class GameManager {
           mode,
           mode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
           difficultyMode,
-          undefined,
+          studyTimeOverrides,
           lessonPlaybackForMatch,
         );
 
@@ -1378,6 +1391,14 @@ export class GameManager {
     this.lockedParticipants[gameMode] = [];
     const matchId = randomUUID();
 
+    const lobbyStudyOverrides =
+      gameMode === "study_then_quiz"
+        ? (await getStudyModeTimingOverridesBySubcategoryKey(
+            getPool(),
+            subcategoryKey ?? "general_default",
+          )) ?? undefined
+        : undefined;
+
     const match = new Match(
       this.io,
       matchId,
@@ -1385,7 +1406,7 @@ export class GameManager {
       gameMode,
       gameMode === "study_then_quiz" ? (subcategoryKey ?? "general_default") : null,
       difficultyMode,
-      undefined,
+      lobbyStudyOverrides,
       lessonPlaybackForLobby,
     );
 
