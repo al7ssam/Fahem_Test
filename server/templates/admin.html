@@ -658,63 +658,6 @@
       </div>
 
       <div class="accordion-item">
-        <button class="accordion-trigger" data-acc="prompts">
-          <span class="accordion-title">برومبتات الذكاء الصناعي</span>
-          <span class="accordion-icon">⌄</span>
-        </button>
-        <div class="accordion-content">
-          <div class="card">
-            <label for="ai-prompt-study">برومبت نمط المذاكرة</label>
-            <textarea id="ai-prompt-study" rows="8"></textarea>
-            <div class="btn-row">
-              <button type="button" class="btn btn-secondary" id="copy-study-btn">نسخ النص</button>
-            </div>
-
-            <div class="btn-row">
-              <button type="button" class="btn btn-secondary" id="ai-load-btn">تحميل</button>
-              <button type="button" class="btn" id="ai-save-btn">حفظ</button>
-            </div>
-            <div class="msg" id="ai-msg"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="accordion-item">
-        <button class="accordion-trigger" data-acc="subcategory-prompt-generator">
-          <span class="accordion-title">مولد برومبت التصنيف الفرعي</span>
-          <span class="accordion-icon">⌄</span>
-        </button>
-        <div class="accordion-content">
-          <div class="card">
-            <p class="subtitle">اختر التصنيف والعدد والصعوبة، وسيتم إدراج مفتاح الفرعي ووصفه والصعوبة المطلوبة داخل البرومبت تلقائيًا.</p>
-            <label for="prompt-main-category">التصنيف الرئيسي</label>
-            <select id="prompt-main-category"></select>
-            <label for="prompt-subcategory">التصنيف الفرعي</label>
-            <select id="prompt-subcategory"></select>
-            <label for="prompt-question-count">عدد الأسئلة المطلوب توليدها</label>
-            <input id="prompt-question-count" type="text" inputmode="numeric" value="20" />
-            <label for="prompt-difficulty">الصعوبة المطلوبة للأسئلة</label>
-            <select id="prompt-difficulty">
-              <option value="" selected>اختر الصعوبة</option>
-              <option value="easy">سهل (easy)</option>
-              <option value="medium">متوسط (medium)</option>
-              <option value="hard">متقدم (hard)</option>
-            </select>
-            <label for="prompt-topic">موضوع أدق داخل التصنيف (اختياري)</label>
-            <textarea id="prompt-topic" rows="2" maxlength="500" placeholder="مثال: عجائب الدنيا / جسم الإنسان"></textarea>
-            <div class="btn-row">
-              <button type="button" class="btn btn-secondary" id="prompt-load-categories-btn">تحميل التصنيفات</button>
-              <button type="button" class="btn" id="prompt-generate-btn">إنشاء البرومبت</button>
-              <button type="button" class="btn btn-secondary" id="prompt-copy-btn">نسخ البرومبت</button>
-            </div>
-            <label for="prompt-output">البرومبت الجاهز</label>
-            <textarea id="prompt-output" class="mono" rows="16" readonly spellcheck="false"></textarea>
-            <div class="msg" id="prompt-generator-msg"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="accordion-item">
         <button class="accordion-trigger" data-acc="result-copy">
           <span class="accordion-title">نصوص نتيجة اللعبة</span>
           <span class="accordion-icon">⌄</span>
@@ -744,7 +687,7 @@
 
       <div class="accordion-item">
         <button class="accordion-trigger" data-acc="game-settings">
-          <span class="accordion-title">إعدادات الجولة والمباراة</span>
+          <span class="accordion-title">إعدادات الجولة والمباراة لنمط المذاكرة</span>
           <span class="accordion-icon">⌄</span>
         </button>
         <div class="accordion-content">
@@ -1165,19 +1108,16 @@
         var bankMain = document.getElementById("bank-main-category");
         var bankSub = document.getElementById("bank-subcategory");
         var subMain = document.getElementById("cat-sub-main-id");
-        var promptMain = document.getElementById("prompt-main-category");
         qSub.innerHTML = "";
         editSub.innerHTML = "";
         bankMain.innerHTML = '<option value="">كل التصنيفات الرئيسية</option>';
         bankSub.innerHTML = '<option value="">كل التصنيفات الفرعية</option>';
         subMain.innerHTML = "";
-        if (promptMain) promptMain.innerHTML = '<option value="">اختر التصنيف الرئيسي</option>';
         categoriesCache.forEach(function (m) {
           var optM = document.createElement("option");
           optM.value = m.mainKey;
           optM.textContent = (m.icon || "📚") + " " + m.nameAr;
           bankMain.appendChild(optM);
-          if (promptMain) promptMain.appendChild(optM.cloneNode(true));
           var subMainOpt = document.createElement("option");
           subMainOpt.value = String(m.id);
           subMainOpt.textContent = m.nameAr;
@@ -1197,39 +1137,6 @@
             bankSub.appendChild(optB);
           });
         });
-        syncPromptGeneratorSubcategories();
-      }
-
-      function findPromptMainCategory(mainKey) {
-        return (categoriesCache || []).find(function (m) { return m.mainKey === mainKey; }) || null;
-      }
-
-      function findPromptSubcategory(mainKey, subcategoryKey) {
-        var main = findPromptMainCategory(mainKey);
-        if (!main) return null;
-        return (main.subcategories || []).find(function (s) { return s.subcategoryKey === subcategoryKey; }) || null;
-      }
-
-      function syncPromptGeneratorSubcategories() {
-        var promptMain = document.getElementById("prompt-main-category");
-        var promptSub = document.getElementById("prompt-subcategory");
-        if (!promptMain || !promptSub) return;
-        var selectedMain = promptMain.value || "";
-        var selectedSub = promptSub.value || "";
-        promptSub.innerHTML = '<option value="">اختر التصنيف الفرعي</option>';
-        (categoriesCache || []).forEach(function (m) {
-          if (selectedMain && m.mainKey !== selectedMain) return;
-          (m.subcategories || []).forEach(function (s) {
-            var opt = document.createElement("option");
-            opt.value = s.subcategoryKey;
-            opt.dataset.mainKey = m.mainKey;
-            opt.textContent = (s.icon || "📘") + " " + s.nameAr + " — " + m.nameAr;
-            promptSub.appendChild(opt);
-          });
-        });
-        if (selectedSub && Array.from(promptSub.options).some(function (o) { return o.value === selectedSub; })) {
-          promptSub.value = selectedSub;
-        }
       }
 
       (function () {
@@ -1465,206 +1372,6 @@
             } else setJsonMsg(data.message || "تعذر الاستيراد.", false);
           } catch (e) { setJsonMsg("خطأ في الاتصال.", false); }
           finally { jsonBtn.disabled = false; }
-        });
-      })();
-
-      (function () {
-        var aiMsg = document.getElementById("ai-msg");
-        var loadBtn = document.getElementById("ai-load-btn");
-        var saveBtn = document.getElementById("ai-save-btn");
-        var copyStudy = document.getElementById("copy-study-btn");
-        var study = document.getElementById("ai-prompt-study");
-        function setAiMsg(text, ok) { aiMsg.textContent = text || ""; aiMsg.className = "msg " + (ok ? "ok" : "err"); }
-        function secret() { return document.getElementById("admin-secret").value.trim(); }
-        async function copyText(v) {
-          try { await navigator.clipboard.writeText(v); setAiMsg("تم النسخ.", true); }
-          catch (e) { setAiMsg("تعذر النسخ. المتصفح منع العملية.", false); }
-        }
-        copyStudy.addEventListener("click", function () { copyText(study.value || ""); });
-        loadBtn.addEventListener("click", async function () {
-          var s = secret(); if (!s) return setAiMsg("أدخل مفتاح الإدارة.", false);
-          loadBtn.disabled = true;
-          try {
-            var r = await fetch("/api/admin/ai-prompts", { headers: { "X-Admin-Secret": s } });
-            var j = await r.json();
-            if (r.ok && j.ok) {
-              study.value = j.promptStudy || "";
-              setAiMsg("تم تحميل البرومبتات.", true);
-            } else setAiMsg("تعذر التحميل.", false);
-          } catch (e) { setAiMsg("خطأ في الاتصال.", false); }
-          finally { loadBtn.disabled = false; }
-        });
-        saveBtn.addEventListener("click", async function () {
-          var s = secret(); if (!s) return setAiMsg("أدخل مفتاح الإدارة.", false);
-          var body = { promptStudy: study.value.trim() };
-          if (!body.promptStudy) return setAiMsg("الحقول مطلوبة.", false);
-          saveBtn.disabled = true;
-          try {
-            var r = await fetch("/api/admin/ai-prompts", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json", "X-Admin-Secret": s },
-              body: JSON.stringify(body)
-            });
-            var j = await r.json().catch(function () { return {}; });
-            if (r.ok && j.ok) setAiMsg("تم حفظ البرومبتات.", true);
-            else if (j.error === "invalid_body") setAiMsg("تحقق من طول النص (20-12000).", false);
-            else setAiMsg("تعذر الحفظ.", false);
-          } catch (e) { setAiMsg("خطأ في الاتصال.", false); }
-          finally { saveBtn.disabled = false; }
-        });
-      })();
-
-      (function () {
-        var mainSelect = document.getElementById("prompt-main-category");
-        var subSelect = document.getElementById("prompt-subcategory");
-        var countInput = document.getElementById("prompt-question-count");
-        var difficultySelect = document.getElementById("prompt-difficulty");
-        var topicInput = document.getElementById("prompt-topic");
-        var loadBtn = document.getElementById("prompt-load-categories-btn");
-        var generateBtn = document.getElementById("prompt-generate-btn");
-        var copyBtn = document.getElementById("prompt-copy-btn");
-        var output = document.getElementById("prompt-output");
-        var msg = document.getElementById("prompt-generator-msg");
-        function setPromptMsg(t, ok) { msg.textContent = t || ""; msg.className = "msg " + (ok ? "ok" : "err"); }
-        function secret() { return document.getElementById("admin-secret").value.trim(); }
-        async function ensurePromptCategories() {
-          var s = secret();
-          if (!s) {
-            setPromptMsg("أدخل مفتاح الإدارة أولاً.", false);
-            return false;
-          }
-          if (!categoriesCache.length) {
-            await loadCategoriesForUi(s);
-          }
-          if (!categoriesCache.length) {
-            setPromptMsg("تعذر تحميل التصنيفات.", false);
-            return false;
-          }
-          syncPromptGeneratorSubcategories();
-          return true;
-        }
-        function buildPrompt(main, sub, count, topic, difficulty) {
-          var description = (sub.internalDescription || "").trim() || "لا يوجد وصف داخلي محدد لهذا التصنيف، اعتمد على اسم التصنيف الفرعي وسياقه.";
-          var focusedTopic = topic || sub.nameAr;
-          return [
-            "أنت خبير في تصميم المحتوى التعليمي التفاعلي (Gamified Education) لجميع أنواع العلوم والمعارف. أريد منك كتابة " + count + " سؤالاً تعليمياً حول " + focusedTopic + ".",
-            "",
-            "سياق التصنيف المطلوب:",
-            "- التصنيف الرئيسي: " + main.nameAr,
-            "- التصنيف الفرعي: " + sub.nameAr,
-            "- مفتاح التصنيف الفرعي الذي يجب استخدامه كما هو: " + sub.subcategoryKey,
-            "- الصعوبة المطلوبة لهذه الدفعة: " + difficulty,
-            "",
-            "Scientific Context:",
-            description,
-            "",
-            "يجب أن تلتزم بالقواعد الصارمة التالية لضمان توافقها مع نظامي البرمجي:",
-            "",
-            "هيكل JSON الموحد:",
-            "- يجب أن يكون المخرج مصفوفة JSON واحدة فقط.",
-            "- يجب أن يحتوي كل سؤال دائماً على المفاتيح الثابتة التالية بنفس الأسماء: prompt, options, correctIndex, studyBody, subcategoryKey, difficulty.",
-            "- يجب إدراج subcategoryKey في كل كائن بالقيمة التالية حرفياً: " + sub.subcategoryKey,
-            "- يجب إدراج difficulty في كل كائن بالقيمة التالية حرفياً: " + difficulty,
-            "- لا تحذف subcategoryKey أو difficulty حتى لو كانت القيم مكررة في جميع الأسئلة.",
-            "",
-            "استخدم هذا الهيكل حصراً لكل كائن:",
-            "",
-            "{",
-            '  "prompt": "السؤال هنا؟",',
-            '  "options": ["خيار 1", "خيار 2"] أو ["خيار 1", "خيار 2", "خيار 3", "خيار 4"],',
-            '  "correctIndex": 0,',
-            '  "studyBody": "هنا تضع نص البطاقة التعليمية الشامل والمركز بأسلوب شيق ومبسط.",',
-            '  "subcategoryKey": "' + sub.subcategoryKey + '",',
-            '  "difficulty": "' + difficulty + '"',
-            "}",
-            "",
-            "الاستقلالية الذاتية (Self-Containment):",
-            "- يجب أن يكون كل كائن JSON مستقلاً بذاته تماماً: السؤال، الخيارات، correctIndex، وstudyBody.",
-            "- ممنوع الإشارة إلى أي سؤال سابق أو لاحق.",
-            "- ممنوع استخدام عبارات مثل: كما ذكرنا أعلاه، السؤال السابق، المثال السابق، بناءً على ما سبق.",
-            "",
-            "المحتوى التعليمي (studyBody):",
-            "- لكل سؤال، اكتب نصاً تعليمياً واحداً ومركزاً وشاملاً للمعلومة.",
-            "- يجب أن يحتوي studyBody على كل ما يحتاجه اللاعب لاستخلاص الإجابة مباشرة دون أي ثقافة خارجية.",
-            "- هذا الشرط ينطبق على العلوم التجريبية والنظرية واللغات والتاريخ والثقافة العامة وكل المجالات.",
-            "- اجعل الشرح ممتعاً ومبسّطاً لكنه دقيق علمياً ومناسب لعمق التصنيف.",
-            "",
-            "توزيع الإجابة الصحيحة (Randomize Correct Index):",
-            "- يُمنع منعاً باتاً جعل الإجابة الصحيحة هي الخيار الأول دائماً.",
-            "- إذا كان السؤال بخيارين فـ correctIndex يجب أن يكون 0 أو 1. وإذا كان بأربعة خيارات فـ correctIndex يجب أن يكون بين 0 و 3.",
-            "- يجب أن يطابق correctIndex مكان الإجابة الصحيحة الفعلي داخل مصفوفة options لكل سؤال.",
-            "- عند توليد " + count + " سؤالاً، راقب التوزيع النهائي حتى لا ينحاز إلى رقم واحد أو نمط متكرر واضح.",
-            "",
-            "التصنيف والصعوبة:",
-            "- استخدم subcategoryKey واحد لجميع الأسئلة وهو: " + sub.subcategoryKey,
-            "- استخدم difficulty واحد لجميع الأسئلة وهو: " + difficulty,
-            "- تجنب الأسئلة السطحية جداً، واجعلها مناسبة لمستوى التصنيف.",
-            "",
-            "سلامة بنية JSON والمعادلات:",
-            "- استخدم الرموز الرياضية والعلمية البسيطة فقط مثل H2O و E=mc2 و NaCl.",
-            "- تجنب LaTeX وأي تنسيقات معقدة أو رموز خاصة قد تكسر السلسلة النصية داخل JSON.",
-            "- ممنوع استخدام الرمز \\ داخل أي قيمة نصية.",
-            "- ممنوع استخدام علامات التنصيص المزدوجة داخل القيم النصية مثل prompt وoptions وstudyBody.",
-            "- إذا احتجت للاقتباس داخل النص فاستخدم صياغة بديلة أو علامات اقتباس مفردة فقط عند الضرورة.",
-            "",
-            "تنسيق الخيارات (options):",
-            "- يجب أن يكون عدد الخيارات لكل سؤال 2 أو 4 فقط.",
-            "- لا تجعل أي خيار طويلاً؛ الأفضل أن يكون كلمات معدودة ليناسب واجهة الجوال.",
-            "- يجب أن تكون الخيارات متقاربة في النمط حتى لا تكون الإجابة الصحيحة مكشوفة من طولها أو صياغتها.",
-            "- يجب أن تكون الخيارات الخاطئة Distractors ذكية ومبنية على أخطاء منطقية محتملة للاعب، وليست أرقاماً عشوائية أو إجابات سخيفة.",
-            "- اجعل المموهات قريبة من مجال السؤال لكنها خاطئة بوضوح عند فهم studyBody.",
-            "",
-            "اللغة والقيود:",
-            "- استخدم لغة عربية بيضاء واضحة.",
-            "- تأكد من دقة correctIndex (يبدأ من 0) وسلامة بنية JSON.",
-            "- تأكد من مراجعة كل سؤال بعد كتابته للتأكد من أن مكان الإجابة الصحيحة يتغير من سؤال لآخر في المصفوفة النهائية.",
-            "- تأكد أن JSON صالح مباشرة للنسخ واللصق ولا يحتوي على تعليقات أو فواصل زائدة أو نص خارج المصفوفة.",
-            "",
-            "الإخراج: أريد كود JSON فقط، جاهز للصق مباشرة في حقل الاستيراد، دون أي نصوص ترحيبية أو تفسيرات خارج الكود."
-          ].join("\\n");
-        }
-        mainSelect.addEventListener("change", function () {
-          syncPromptGeneratorSubcategories();
-          setPromptMsg("", true);
-        });
-        loadBtn.addEventListener("click", async function () {
-          loadBtn.disabled = true;
-          try {
-            if (await ensurePromptCategories()) setPromptMsg("تم تحميل التصنيفات.", true);
-          } catch (e) {
-            setPromptMsg("تعذر تحميل التصنيفات.", false);
-          } finally {
-            loadBtn.disabled = false;
-          }
-        });
-        generateBtn.addEventListener("click", async function () {
-          try {
-            if (!(await ensurePromptCategories())) return;
-            var mainKey = mainSelect.value || "";
-            var subKey = subSelect.value || "";
-            var main = findPromptMainCategory(mainKey);
-            var sub = findPromptSubcategory(mainKey, subKey);
-            var count = parseInt(countInput.value, 10);
-            if (!main) return setPromptMsg("اختر التصنيف الرئيسي.", false);
-            if (!sub) return setPromptMsg("اختر التصنيف الفرعي.", false);
-            if (!Number.isFinite(count) || count < 1 || count > 200) return setPromptMsg("أدخل عدد أسئلة بين 1 و 200.", false);
-            var difficulty = (difficultySelect.value || "").trim();
-            if (!["easy", "medium", "hard"].includes(difficulty)) return setPromptMsg("اختر مستوى صعوبة صالحًا.", false);
-            output.value = buildPrompt(main, sub, count, topicInput.value.trim(), difficulty);
-            setPromptMsg("تم إنشاء البرومبت.", true);
-          } catch (e) {
-            setPromptMsg("تعذر إنشاء البرومبت.", false);
-          }
-        });
-        copyBtn.addEventListener("click", async function () {
-          if (!output.value.trim()) return setPromptMsg("أنشئ البرومبت أولاً.", false);
-          try {
-            await navigator.clipboard.writeText(output.value);
-            setPromptMsg("تم نسخ البرومبت.", true);
-          } catch (e) {
-            output.select();
-            setPromptMsg("تعذر النسخ التلقائي، تم تحديد النص.", false);
-          }
         });
       })();
 
