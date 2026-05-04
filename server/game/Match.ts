@@ -97,8 +97,10 @@ export class Match {
   private skipSocketsForQuestion = new Set<string>();
   private revealRemainingBySocket = new Map<string, number>();
   private revealMacroRoundBySocket = new Map<string, number | null>();
-  /** في study_then_quiz فردي: true فقط بعد إكمال جميع جولات المذاكرة/الأسئلة دون خروج مبكر */
+  /** study_then_quiz فردي: إكمال جميع جولات المذاكرة/الأسئلة دون خروج مبكر */
   private soloStudyQuizReachedFullCourse = false;
+  /** direct فردي: إكمال حلقة الأسئلة حتى حد MAX_ROUNDS وهو لا يزال حيًا */
+  private soloDirectReachedFullCourse = false;
   /** في نمط الدرس: تاريخ إجابات لكل مقبس لبناء lessonReview عند game_over */
   private lessonAnswerHistory = new Map<
     string,
@@ -655,6 +657,15 @@ export class Match {
       await this.playOneQuestion(pool, q);
       if (this.finished) return;
     }
+    if (
+      !this.finished &&
+      this.isSoloMatch &&
+      this.gameMode === "direct" &&
+      this.hasEnoughActivePlayersForQuestions() &&
+      this.round >= MAX_ROUNDS
+    ) {
+      this.soloDirectReachedFullCourse = true;
+    }
   }
 
   private async runLessonStudyPhase(
@@ -1136,10 +1147,15 @@ export class Match {
 
     const alivePlayers = bySkillDesc.filter((p) => !p.eliminated && p.hearts > 0);
     const isSoloStudyQuiz = this.isSoloMatch && this.gameMode === "study_then_quiz";
-    if (
-      isSoloStudyQuiz &&
-      (alivePlayers.length === 0 || !this.soloStudyQuizReachedFullCourse)
-    ) {
+    const isSoloDirect = this.isSoloMatch && this.gameMode === "direct";
+    const soloRequiresFullCourse = isSoloStudyQuiz || isSoloDirect;
+    const soloReachedFullCourse = isSoloStudyQuiz
+      ? this.soloStudyQuizReachedFullCourse
+      : isSoloDirect
+        ? this.soloDirectReachedFullCourse
+        : false;
+
+    const emitSoloIncomplete = (reason: "eliminated" | "solo_path_incomplete"): void => {
       const rm = this.resultMessages ?? {
         winner: "",
         loser: "",
@@ -1153,14 +1169,23 @@ export class Match {
         medal: idx === 0 ? "gold" : idx === 1 ? "silver" : idx === 2 ? "bronze" : null,
       }));
       this.emitFinishedGameOver({
-        reason: alivePlayers.length === 0 ? "eliminated" : "solo_study_incomplete",
-        outcomeType: "solo_study_incomplete",
+        reason,
+        outcomeType: "solo_incomplete",
         winner: null,
         winners: [],
         players: this.snapshotPlayers(),
         resultMessages: rm,
         leaderboard,
       });
+    };
+
+    if (this.isSoloMatch && alivePlayers.length === 0) {
+      emitSoloIncomplete("eliminated");
+      return;
+    }
+
+    if (soloRequiresFullCourse && alivePlayers.length === 1 && !soloReachedFullCourse) {
+      emitSoloIncomplete("solo_path_incomplete");
       return;
     }
 

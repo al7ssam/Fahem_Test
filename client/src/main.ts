@@ -4055,6 +4055,7 @@ function connectSocket(
         | "single_winner"
         | "shared_winners"
         | "tie_all_zero"
+        | "solo_incomplete"
         | "solo_study_incomplete";
       winner: { socketId: string; name: string } | null;
       winners?: Array<{ socketId: string; name: string }>;
@@ -4130,7 +4131,10 @@ function connectSocket(
         applyResultScreenPresentation("empty", "");
         return;
       }
-      if (payload.outcomeType === "solo_study_incomplete") {
+      if (
+        payload.outcomeType === "solo_incomplete" ||
+        payload.outcomeType === "solo_study_incomplete"
+      ) {
         matchLessonReviewItems = null;
         title.textContent = loseTitle;
         body.textContent = loseCopy;
