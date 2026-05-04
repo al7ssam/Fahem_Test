@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>الصيانة والتنظيف | فاهم</title>
+    {{ADMIN_DESIGN_SYSTEM}}
+    <style>
+      .wrap { max-width:980px; margin:0 auto; padding:20px; }
+      .panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px; }
+      .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; } .grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+      input,button { background:#0b1330; border:1px solid var(--border); color:var(--text); border-radius:10px; padding:8px 10px; font-family:inherit; }
+      button { cursor:pointer; } .msg { min-height:20px; margin-top:6px; font-size:13px; } .muted{color:var(--muted);}
+      .danger { background:#3b1120; border-color:#7f1d1d; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>الصيانة والتنظيف</h1>
+      <p class="muted">إجمالي الأسئلة: <strong>{{QUESTION_COUNT}}</strong></p>
+      {{ADMIN_NAV}}
+
+      <div class="panel">
+        <div class="row">
+          <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" style="min-width:300px" />
+          <button id="cache-bust">تحديث الكاش/الإصدار</button>
+        </div>
+        <div id="global-msg" class="msg"></div>
+      </div>
+
+      <section class="panel">
+        <h3>تنظيف بيانات الأسئلة</h3>
+        <div class="grid">
+          <label><span class="muted">تفعيل الحذف التلقائي</span><br><input id="cl-enabled" type="checkbox" /></label>
+          <label><span class="muted">عدد أيام الصلاحية</span><br><input id="cl-days" type="number" min="1" max="3650" /></label>
+          <label><span class="muted">آخر تشغيل</span><br><input id="cl-last" disabled /></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="cl-load">تحميل</button>
+          <button id="cl-save">حفظ</button>
+          <button id="cl-preview">معاينة الحذف</button>
+          <button id="cl-run" class="danger">تنفيذ الحذف الآن</button>
+        </div>
+        <div id="cl-msg" class="msg"></div>
+      </section>
+
+      <section class="panel">
+        <h3>تنظيف سجلات الذكاء الاصطناعي</h3>
+        <div class="grid">
+          <label><span class="muted">تفعيل الحذف التلقائي</span><br><input id="af-enabled" type="checkbox" /></label>
+          <label><span class="muted">عدد أيام الصلاحية</span><br><input id="af-days" type="number" min="1" max="3650" /></label>
+          <label><span class="muted">آخر تشغيل</span><br><input id="af-last" disabled /></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="af-load">تحميل</button>
+          <button id="af-save">حفظ</button>
+          <button id="af-preview">معاينة الحذف</button>
+          <button id="af-run" class="danger">تنفيذ الحذف الآن</button>
+        </div>
+        <div id="af-msg" class="msg"></div>
+      </section>
+    </div>
+    <script>
+      (function () {
+        function $(id){ return document.getElementById(id); }
+        function msg(id,t,ok){ $(id).textContent=t||""; $(id).style.color=ok?"#34d399":"#f87171"; }
+        function sec(){ return String($("sec").value||"").trim(); }
+        function hdr(){ return {"X-Admin-Secret":sec(),"Content-Type":"application/json"}; }
+        async function api(url,method,body){ var r=await fetch(url,{method:method||"GET",headers:hdr(),body:body?JSON.stringify(body):undefined}); var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||"request_failed"); return j; }
+        function need(target){ if(!sec()){ msg(target,"أدخل مفتاح الإدارة.",false); return false; } return true; }
+
+        async function loadCleanup(){ if(!need("cl-msg")) return; try{ var j=await api("/api/admin/cleanup-settings","GET"); $("cl-enabled").checked=!!j.autoDeleteEnabled; $("cl-days").value=j.deletionThresholdDays; $("cl-last").value=j.lastRunDate||"—"; msg("cl-msg","تم التحميل.",true);}catch{msg("cl-msg","تعذر التحميل.",false);} }
+        async function saveCleanup(){ if(!need("cl-msg")) return; try{ await api("/api/admin/cleanup-settings","PATCH",{autoDeleteEnabled:$("cl-enabled").checked,deletionThresholdDays:Number($("cl-days").value||30)}); msg("cl-msg","تم الحفظ.",true);}catch{msg("cl-msg","تعذر الحفظ.",false);} }
+        async function previewCleanup(){ if(!need("cl-msg")) return; try{ var j=await api("/api/admin/cleanup/preview","POST",{}); msg("cl-msg","المعاينة: سيُحذف "+j.expiredCount+" سؤال.",true);}catch{msg("cl-msg","تعذر المعاينة.",false);} }
+        async function runCleanup(){ if(!need("cl-msg")) return; if(!confirm("سيتم حذف الأسئلة المنتهية الآن. متابعة؟")) return; try{ var j=await api("/api/admin/cleanup/run","POST",{}); msg("cl-msg","تم الحذف: "+j.deletedCount+" سؤال.",true); await loadCleanup();}catch{msg("cl-msg","تعذر التنفيذ.",false);} }
+
+        async function loadAiLogs(){ if(!need("af-msg")) return; try{ var j=await api("/api/admin/ai-factory-logs-cleanup-settings","GET"); $("af-enabled").checked=!!j.autoDeleteEnabled; $("af-days").value=j.deletionThresholdDays; $("af-last").value=j.lastRunDate||"—"; msg("af-msg","تم التحميل.",true);}catch{msg("af-msg","تعذر التحميل.",false);} }
+        async function saveAiLogs(){ if(!need("af-msg")) return; try{ await api("/api/admin/ai-factory-logs-cleanup-settings","PATCH",{autoDeleteEnabled:$("af-enabled").checked,deletionThresholdDays:Number($("af-days").value||30)}); msg("af-msg","تم الحفظ.",true);}catch{msg("af-msg","تعذر الحفظ.",false);} }
+        async function previewAiLogs(){ if(!need("af-msg")) return; try{ var j=await api("/api/admin/ai-factory-logs-cleanup/preview","POST",{}); msg("af-msg","المعاينة: "+j.expiredCount+" سجل.",true);}catch{msg("af-msg","تعذر المعاينة.",false);} }
+        async function runAiLogs(){ if(!need("af-msg")) return; if(!confirm("سيتم حذف سجلات الذكاء الاصطناعي الآن. متابعة؟")) return; try{ var j=await api("/api/admin/ai-factory-logs-cleanup/run","POST",{}); msg("af-msg","تم الحذف: "+j.deletedCount+" سجل.",true); await loadAiLogs();}catch{msg("af-msg","تعذر التنفيذ.",false);} }
+
+        $("cache-bust").addEventListener("click", async function(){ if(!need("global-msg")) return; try{ var j=await api("/api/admin/cache-bust","POST",{}); msg("global-msg","تم تحديث الإصدار: "+String(j.releaseVersion||""),true);}catch{msg("global-msg","تعذر تحديث الكاش.",false);} });
+        $("cl-load").addEventListener("click",loadCleanup); $("cl-save").addEventListener("click",saveCleanup); $("cl-preview").addEventListener("click",previewCleanup); $("cl-run").addEventListener("click",runCleanup);
+        $("af-load").addEventListener("click",loadAiLogs); $("af-save").addEventListener("click",saveAiLogs); $("af-preview").addEventListener("click",previewAiLogs); $("af-run").addEventListener("click",runAiLogs);
+      })();
+    </script>
+  </body>
+</html>

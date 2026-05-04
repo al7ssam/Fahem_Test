@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>الذكاء الاصطناعي والتكلفة | فاهم</title>
+    {{ADMIN_DESIGN_SYSTEM}}
+    <style>
+      .wrap{max-width:1100px;margin:0 auto;padding:20px;} .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px;}
+      .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;} .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));}
+      input,textarea,button,select{background:#0b1330;border:1px solid var(--border);color:var(--text);border-radius:10px;padding:8px 10px;font-family:inherit;}
+      textarea{min-height:180px;width:100%;font-family:Consolas,monospace;} button{cursor:pointer;} .msg{min-height:20px;font-size:13px;margin-top:6px;}
+      .muted{color:var(--muted);}
+      .jobs{max-height:280px;overflow:auto;border:1px solid var(--border);border-radius:10px;padding:8px;background:#0b1330;}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>الذكاء الاصطناعي والتكلفة (AI Ops)</h1>
+      <p class="muted">إجمالي الأسئلة: <strong>{{QUESTION_COUNT}}</strong></p>
+      {{ADMIN_NAV}}
+
+      <div class="panel">
+        <div class="row">
+          <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" style="min-width:300px" />
+          <button id="load-all">تحميل</button>
+        </div>
+        <div id="global-msg" class="msg"></div>
+      </div>
+
+      <section class="panel">
+        <h3>إعدادات معمل المحتوى الذكي</h3>
+        <div class="grid">
+          <label>تفعيل المعمل <input id="af-enabled" type="checkbox" /></label>
+          <label>الحجم لكل دفعة <input id="af-batch" type="number" /></label>
+          <label>دقائق التكرار <input id="af-interval" type="number" /></label>
+          <label>الهدف الافتراضي <input id="af-target" type="number" /></label>
+          <label>الصعوبة الافتراضية
+            <select id="af-diff"><option value="mix">mix</option><option value="easy">easy</option><option value="medium">medium</option><option value="hard">hard</option></select>
+          </label>
+          <label>نموذج المعماري <input id="af-model-arch" /></label>
+          <label>نموذج المنشئ <input id="af-model-creator" /></label>
+          <label>نموذج المدقق <input id="af-model-auditor" /></label>
+          <label>نموذج المصقل <input id="af-model-refiner" /></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="af-settings-load">تحميل الإعدادات</button>
+          <button id="af-settings-save">حفظ الإعدادات</button>
+          <button id="af-run-now">تشغيل الآن</button>
+          <button id="af-status-load">تحديث الحالة</button>
+        </div>
+        <div id="af-msg" class="msg"></div>
+        <div class="row muted">
+          <span id="af-queued">queued: 0</span>
+          <span id="af-running">running: 0</span>
+          <span id="af-succeeded">succeeded: 0</span>
+          <span id="af-failed">failed: 0</span>
+        </div>
+        <div class="jobs" id="jobs"></div>
+      </section>
+
+      <section class="panel">
+        <h3>تسعير النماذج والتكلفة</h3>
+        <p class="muted">عدّل JSON ثم احفظ. يُستخدم في الحسابات والتقارير وإعدادات fallback.</p>
+        <div class="grid">
+          <div>
+            <label>OpenAI JSON</label>
+            <textarea id="pricing-openai"></textarea>
+          </div>
+          <div>
+            <label>Google JSON</label>
+            <textarea id="pricing-google"></textarea>
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="pricing-load">تحميل التسعير</button>
+          <button id="pricing-save">حفظ التسعير</button>
+        </div>
+        <div id="pricing-msg" class="msg"></div>
+      </section>
+    </div>
+    <script>
+      (function () {
+        function $(id){return document.getElementById(id);}
+        function msg(id,t,ok){$(id).textContent=t||"";$(id).style.color=ok?"#34d399":"#f87171";}
+        function sec(){return String($("sec").value||"").trim();}
+        function hdr(){return {"X-Admin-Secret":sec(),"Content-Type":"application/json"};}
+        async function api(url,method,body){var r=await fetch(url,{method:method||"GET",headers:hdr(),body:body?JSON.stringify(body):undefined});var j=await r.json().catch(function(){return{};});if(!r.ok||!j.ok) throw new Error(j.error||"request_failed");return j;}
+        function need(target){if(!sec()){msg(target,"أدخل مفتاح الإدارة.",false);return false;}return true;}
+
+        async function loadFactorySettings(){
+          if(!need("af-msg")) return;
+          try{
+            var s=await api("/api/admin/ai-factory/settings","GET");
+            $("af-enabled").checked=!!s.enabled;
+            $("af-batch").value=s.batchSize||10; $("af-interval").value=s.intervalMinutes||10; $("af-target").value=s.targetCountDefault||20;
+            $("af-diff").value=s.difficultyModeDefault||"mix";
+            var m=await api("/api/admin/ai-factory/models","GET");
+            var by={}; (m.models||[]).forEach(function(x){by[x.layer]=x;});
+            $("af-model-arch").value=(by.architect&&by.architect.modelId)||"";
+            $("af-model-creator").value=(by.creator&&by.creator.modelId)||"";
+            $("af-model-auditor").value=(by.auditor&&by.auditor.modelId)||"";
+            $("af-model-refiner").value=(by.refiner&&by.refiner.modelId)||"";
+            msg("af-msg","تم التحميل.",true);
+          }catch{msg("af-msg","تعذر التحميل.",false);}
+        }
+        async function saveFactorySettings(){
+          if(!need("af-msg")) return;
+          try{
+            await api("/api/admin/ai-factory/settings","PATCH",{
+              enabled:$("af-enabled").checked,batchSize:Number($("af-batch").value||10),intervalMinutes:Number($("af-interval").value||10),
+              targetCountDefault:Number($("af-target").value||20),difficultyModeDefault:$("af-diff").value
+            });
+            await api("/api/admin/ai-factory/models","PATCH",{
+              architect:{modelId:String($("af-model-arch").value||"").trim()},
+              creator:{modelId:String($("af-model-creator").value||"").trim()},
+              auditor:{modelId:String($("af-model-auditor").value||"").trim()},
+              refiner:{modelId:String($("af-model-refiner").value||"").trim()}
+            });
+            msg("af-msg","تم الحفظ.",true);
+          }catch{msg("af-msg","تعذر الحفظ.",false);}
+        }
+        async function loadFactoryStatus(){
+          if(!need("af-msg")) return;
+          try{
+            var st=await api("/api/admin/ai-factory/status","GET");
+            $("af-queued").textContent="queued: "+Number(st.queued||0);
+            $("af-running").textContent="running: "+Number(st.running||0);
+            $("af-succeeded").textContent="succeeded: "+Number(st.succeeded||0);
+            $("af-failed").textContent="failed: "+Number(st.failed||0);
+            var jobs=await api("/api/admin/ai-factory/jobs?limit=30","GET");
+            var rows=(jobs.jobs||[]).map(function(j){return "#"+j.id+" | "+j.status+" | "+(j.subcategoryKey||"-")+" | "+(j.modelId||"-");});
+            $("jobs").textContent=rows.length?rows.join("\n"):"لا توجد وظائف.";
+            msg("af-msg","تم تحديث الحالة.",true);
+          }catch{msg("af-msg","تعذر تحديث الحالة.",false);}
+        }
+        async function runNow(){
+          if(!need("af-msg")) return;
+          try{
+            await api("/api/admin/ai-factory/run-now","POST",{subcategoryKey:"",difficultyMode:$("af-diff").value});
+            msg("af-msg","تم تشغيل وظيفة جديدة.",true);
+            await loadFactoryStatus();
+          }catch{msg("af-msg","تعذر التشغيل.",false);}
+        }
+        async function loadPricing(){
+          if(!need("pricing-msg")) return;
+          try{
+            var j=await api("/api/admin/pricing/models","GET");
+            $("pricing-openai").value=JSON.stringify(j.openai||{},null,2);
+            $("pricing-google").value=JSON.stringify(j.google||{},null,2);
+            msg("pricing-msg","تم التحميل.",true);
+          }catch{msg("pricing-msg","تعذر التحميل.",false);}
+        }
+        async function savePricing(){
+          if(!need("pricing-msg")) return;
+          try{
+            var openai=JSON.parse($("pricing-openai").value||"{}");
+            var google=JSON.parse($("pricing-google").value||"{}");
+            await api("/api/admin/pricing/models","PUT",{openai:openai,google:google});
+            msg("pricing-msg","تم الحفظ.",true);
+          }catch{msg("pricing-msg","تحقق من JSON أو صلاحية الطلب.",false);}
+        }
+
+        $("load-all").addEventListener("click", async function(){
+          if(!need("global-msg")) return;
+          msg("global-msg","جاري التحميل...",true);
+          await Promise.allSettled([loadFactorySettings(),loadFactoryStatus(),loadPricing()]);
+          msg("global-msg","اكتمل التحميل.",true);
+        });
+        $("af-settings-load").addEventListener("click",loadFactorySettings);
+        $("af-settings-save").addEventListener("click",saveFactorySettings);
+        $("af-status-load").addEventListener("click",loadFactoryStatus);
+        $("af-run-now").addEventListener("click",runNow);
+        $("pricing-load").addEventListener("click",loadPricing);
+        $("pricing-save").addEventListener("click",savePricing);
+      })();
+    </script>
+  </body>
+</html>

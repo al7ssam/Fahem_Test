@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>استعراض وإدارة بنك الأسئلة | فاهم</title>
+    {{ADMIN_DESIGN_SYSTEM}}
+    <style>
+      .wrap { max-width:1200px; margin:0 auto; padding:20px; }
+      h1 { margin:0 0 8px; } .muted { color:var(--muted); }
+      .top, .panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px; }
+      .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+      input,select,button,textarea { background:#0b1330; border:1px solid var(--border); color:var(--text); border-radius:10px; padding:8px 10px; font-family:inherit; }
+      button { cursor:pointer; } button.primary { background:#1f8f55; border-color:#1f8f55; }
+      table { width:100%; border-collapse:collapse; font-size:13px; } th,td { border-bottom:1px solid var(--border); padding:8px; text-align:right; vertical-align:top; }
+      .msg { min-height:20px; font-size:13px; margin-top:6px; }
+      .pager { display:flex; gap:8px; align-items:center; margin-top:8px; }
+      .mono { font-family: Consolas, monospace; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>استعراض وإدارة بنك الأسئلة</h1>
+      <p class="muted">إجمالي الأسئلة: <strong>{{QUESTION_COUNT}}</strong></p>
+      {{ADMIN_NAV}}
+
+      <div class="top">
+        <div class="row">
+          <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" />
+          <input id="q" type="search" placeholder="بحث بالنص..." />
+          <select id="mode">
+            <option value="all">كل الأنماط</option>
+            <option value="study_only">مذاكرة فقط</option>
+          </select>
+          <select id="main"><option value="">كل التصنيفات الرئيسية</option></select>
+          <select id="sub"><option value="">كل التصنيفات الفرعية</option></select>
+          <button id="search">بحث</button>
+          <button id="refresh">تحديث</button>
+          <button id="del-selected">حذف المحدد</button>
+        </div>
+        <div id="msg" class="msg"></div>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="justify-content:space-between">
+          <strong>النتائج</strong>
+          <span id="stats" class="muted"></span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th><input id="check-all" type="checkbox" /></th>
+              <th>ID</th>
+              <th>السؤال</th>
+              <th>الصعوبة</th>
+              <th>التصنيف الفرعي</th>
+              <th>بطاقة مذاكرة</th>
+              <th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+        <div class="pager">
+          <button id="prev">السابق</button>
+          <button id="next">التالي</button>
+          <span id="page" class="muted"></span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var state = { offset: 0, limit: 20, total: 0, rows: [], selected: {} };
+        var $ = function (id) { return document.getElementById(id); };
+        function msg(t, ok) { $("msg").textContent = t || ""; $("msg").style.color = ok ? "#34d399" : "#f87171"; }
+        function sec() { return String($("sec").value || "").trim(); }
+        function hdr() { return { "X-Admin-Secret": sec(), "Content-Type": "application/json" }; }
+        async function api(url, method, body) {
+          var r = await fetch(url, { method: method || "GET", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+          var j = await r.json().catch(function () { return {}; });
+          if (!r.ok || !j.ok) throw new Error(j.error || "request_failed");
+          return j;
+        }
+        async function loadCategories() {
+          var j = await api("/api/admin/categories", "GET");
+          var main = $("main"), sub = $("sub");
+          var selectedMain = main.value || "", selectedSub = sub.value || "";
+          main.innerHTML = '<option value="">كل التصنيفات الرئيسية</option>';
+          sub.innerHTML = '<option value="">كل التصنيفات الفرعية</option>';
+          (j.categories || []).forEach(function (m) {
+            var om = document.createElement("option");
+            om.value = m.mainKey; om.textContent = m.nameAr;
+            main.appendChild(om);
+            (m.subcategories || []).forEach(function (s) {
+              var os = document.createElement("option");
+              os.value = s.subcategoryKey;
+              os.textContent = m.nameAr + " / " + s.nameAr;
+              os.dataset.main = m.mainKey;
+              sub.appendChild(os);
+            });
+          });
+          main.value = selectedMain;
+          if (selectedMain) {
+            Array.from(sub.options).forEach(function (o) {
+              if (!o.value) return;
+              o.hidden = o.dataset.main !== selectedMain;
+            });
+          }
+          if (Array.from(sub.options).some(function (o) { return o.value === selectedSub && !o.hidden; })) sub.value = selectedSub;
+        }
+        function queryUrl() {
+          var q = encodeURIComponent(String($("q").value || "").trim());
+          var mode = encodeURIComponent(String($("mode").value || "all"));
+          var url = "/api/admin/questions?limit=" + state.limit + "&offset=" + state.offset + "&q=" + q + "&mode=" + mode;
+          if ($("sub").value) url += "&subcategoryKey=" + encodeURIComponent($("sub").value);
+          return url;
+        }
+        async function loadRows() {
+          var j = await api(queryUrl(), "GET");
+          state.rows = j.items || [];
+          state.total = Number(j.total || 0);
+          renderRows();
+        }
+        function renderRows() {
+          var tb = $("tbody");
+          if (!state.rows.length) {
+            tb.innerHTML = '<tr><td colspan="7" class="muted">لا توجد نتائج.</td></tr>';
+          } else {
+            tb.innerHTML = state.rows.map(function (r) {
+              var checked = state.selected[r.id] ? "checked" : "";
+              var sb = String(r.studyBody || "").trim();
+              return '<tr>' +
+                '<td><input type="checkbox" data-sel="' + r.id + '" ' + checked + ' /></td>' +
+                '<td class="mono">' + r.id + '</td>' +
+                '<td>' + String(r.prompt || "") + '</td>' +
+                '<td><select data-diff="' + r.id + '"><option value="easy">سهل</option><option value="medium">متوسط</option><option value="hard">صعب</option></select></td>' +
+                '<td class="mono">' + String(r.subcategoryKey || "—") + '</td>' +
+                '<td>' + (sb ? "موجودة" : "غير موجودة") + '</td>' +
+                '<td><button data-save="' + r.id + '">حفظ</button> <button data-del="' + r.id + '">حذف</button></td>' +
+                '</tr>';
+            }).join("");
+          }
+          state.rows.forEach(function (r) {
+            var sel = document.querySelector('[data-diff="' + r.id + '"]');
+            if (sel && r.difficulty) sel.value = r.difficulty;
+          });
+          $("page").textContent = "عرض " + (state.total ? state.offset + 1 : 0) + " - " + Math.min(state.total, state.offset + state.limit) + " من " + state.total;
+          $("stats").textContent = "محدد: " + Object.keys(state.selected).length;
+          document.querySelectorAll("[data-sel]").forEach(function (el) {
+            el.addEventListener("change", function () {
+              var id = Number(el.getAttribute("data-sel"));
+              if (el.checked) state.selected[id] = true; else delete state.selected[id];
+              $("stats").textContent = "محدد: " + Object.keys(state.selected).length;
+            });
+          });
+          document.querySelectorAll("[data-save]").forEach(function (el) {
+            el.addEventListener("click", async function () {
+              var id = Number(el.getAttribute("data-save"));
+              var diff = document.querySelector('[data-diff="' + id + '"]').value;
+              try { await api("/api/admin/questions/" + id, "PATCH", { difficulty: diff }); msg("تم تحديث الصعوبة.", true); }
+              catch { msg("تعذر الحفظ.", false); }
+            });
+          });
+          document.querySelectorAll("[data-del]").forEach(function (el) {
+            el.addEventListener("click", async function () {
+              var id = Number(el.getAttribute("data-del"));
+              if (!confirm("حذف السؤال #" + id + "؟")) return;
+              try { await api("/api/admin/questions/" + id, "DELETE"); delete state.selected[id]; await loadRows(); msg("تم الحذف.", true); }
+              catch { msg("تعذر الحذف.", false); }
+            });
+          });
+        }
+        async function refreshAll() {
+          if (!sec()) return msg("أدخل مفتاح الإدارة.", false);
+          msg("جاري التحميل...", true);
+          try { await loadCategories(); await loadRows(); msg("تم التحميل.", true); }
+          catch { msg("تعذر التحميل.", false); }
+        }
+        $("search").addEventListener("click", function () { state.offset = 0; refreshAll(); });
+        $("refresh").addEventListener("click", refreshAll);
+        $("prev").addEventListener("click", function () { if (state.offset <= 0) return; state.offset = Math.max(0, state.offset - state.limit); refreshAll(); });
+        $("next").addEventListener("click", function () { if (state.offset + state.limit >= state.total) return; state.offset += state.limit; refreshAll(); });
+        $("main").addEventListener("change", function () {
+          var mk = $("main").value;
+          Array.from($("sub").options).forEach(function (o) {
+            if (!o.value) return;
+            o.hidden = mk ? o.dataset.main !== mk : false;
+          });
+          $("sub").value = "";
+        });
+        $("check-all").addEventListener("change", function () {
+          var on = $("check-all").checked;
+          state.rows.forEach(function (r) { if (on) state.selected[r.id] = true; else delete state.selected[r.id]; });
+          renderRows();
+        });
+        $("del-selected").addEventListener("click", async function () {
+          var ids = Object.keys(state.selected).map(function (x) { return Number(x); }).filter(Boolean);
+          if (!ids.length) return msg("حدد أسئلة أولاً.", false);
+          if (!confirm("سيتم حذف " + ids.length + " سؤال. متابعة؟")) return;
+          try { await api("/api/admin/questions/bulk-delete", "POST", { ids: ids }); state.selected = {}; await refreshAll(); msg("تم حذف المحدد.", true); }
+          catch { msg("تعذر الحذف الجماعي.", false); }
+        });
+        msg("أدخل المفتاح ثم اضغط تحديث.", true);
+      })();
+    </script>
+  </body>
+</html>

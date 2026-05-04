@@ -1,0 +1,45 @@
+<style>
+  /* شريط تنقل الأدمن — يُحقن مع الصفحات؛ يعتمد على متغيرات الصفحة مع قيم احتياطية */
+  .admin-nav {
+    background: var(--panel, var(--card, #111936));
+    border: 1px solid var(--border, var(--line, #2a355d));
+    border-radius: 12px;
+    padding: 10px;
+    margin: 10px 0 12px;
+  }
+  .admin-nav-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .admin-nav-group:last-child {
+    margin-bottom: 0;
+  }
+  .admin-nav-title {
+    color: var(--muted, #9ca3af);
+    font-size: 12px;
+    min-width: 7.5rem;
+  }
+  .admin-nav-link {
+    text-decoration: none;
+    color: var(--text, #f8fafc);
+    border: 1px solid var(--border, var(--line, #2a355d));
+    background: var(--admin-nav-link-bg, #0b1330);
+    border-radius: 999px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .admin-nav-link:hover {
+    filter: brightness(1.06);
+  }
+  .admin-nav-link.active {
+    border-color: var(--accent, var(--amber, #60a5fa));
+    color: var(--accent, var(--amber, #bfdbfe));
+    font-weight: 700;
+  }
+</style>
+<nav class="admin-nav" aria-label="تنقل الأدمن">
+{{ADMIN_NAV_BODY}}
+</nav>

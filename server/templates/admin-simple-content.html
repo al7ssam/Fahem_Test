@@ -7,26 +7,18 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    {{ADMIN_DESIGN_SYSTEM}}
     <style>
       :root {
-        --bg-from: #020309;
-        --bg-mid: #090d1f;
-        --bg-to: #121529;
-        --card: rgba(10, 13, 28, 0.85);
-        --border: rgba(223, 187, 106, 0.2);
+        --card: var(--admin-card-glass);
+        --border: var(--admin-border-warm);
         --text: #f8f4ea;
         --muted: #b7ac90;
-        --amber: #e8be66;
-        --danger: #f87171;
-        --ok: #34d399;
         --fs-body: 0.9rem;
         --fs-sm: 0.78rem;
         --fs-title: 1.02rem;
         --pad-card: 0.75rem 0.85rem;
         --radius: 0.85rem;
-      }
-      * {
-        box-sizing: border-box;
       }
       body {
         margin: 0;
@@ -488,13 +480,13 @@
       <p class="subtitle"><span class="badge">مسار بسيط</span> — معاينة ثم تعميد (بدون مصنع الطبقات).</p>
       <h1>المسار البسيط لتوليد المحتوى</h1>
       <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong></p>
+      {{ADMIN_NAV}}
 
       <div class="topbar">
         <div>
           <label for="sc-secret">مفتاح الإدارة</label>
           <input id="sc-secret" type="password" autocomplete="off" placeholder="X-Admin-Secret" />
         </div>
-        <button type="button" class="btn btn-secondary" id="sc-back">← لوحة الإدارة</button>
         <button type="button" class="btn" id="sc-load-cats">تحميل التصنيفات</button>
         <button type="button" class="btn btn-secondary" id="sc-load-templates">قوالب النظام (مرجع)</button>
         <span class="sc-section-status" id="sc-sec-templates-status" aria-live="polite"></span>
@@ -1064,10 +1056,6 @@
           hintFor("sc-auto-preset", "sc-auto-preset-hint");
           hintFor("sc-draft-preset", "sc-draft-preset-hint");
         }
-
-        document.getElementById("sc-back").addEventListener("click", function () {
-          window.location.href = "/admin";
-        });
 
         document.getElementById("sc-load-templates").addEventListener("click", async function () {
           if (!secret()) {

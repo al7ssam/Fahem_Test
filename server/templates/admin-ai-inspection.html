@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Inspection Dashboard</title>
+    {{ADMIN_DESIGN_SYSTEM}}
     <style>
       :root {
         --bg: #070b16;
@@ -13,7 +14,6 @@
         --muted: #c5b48f;
         --accent: #dfbb6a;
       }
-      * { box-sizing: border-box; }
       body {
         margin: 0;
         background: radial-gradient(circle at top, #1a2341 0%, var(--bg) 58%);
@@ -34,7 +34,7 @@
       }
       .toolbar {
         display: grid;
-        grid-template-columns: 1fr 12rem auto auto;
+        grid-template-columns: 1fr 12rem auto;
         gap: 0.6rem;
         align-items: end;
       }
@@ -464,6 +464,7 @@
   </head>
   <body>
     <div class="wrap">
+      {{ADMIN_NAV}}
       <div class="card">
         <h2 style="margin:0 0 0.45rem">AI Inspection Dashboard</h2>
         <div class="muted">إجمالي الأسئلة: {{QUESTION_COUNT}}</div>
@@ -480,9 +481,6 @@
         </div>
         <div>
           <button id="load-btn" type="button">تحميل الفحص</button>
-        </div>
-        <div>
-          <button id="back-btn" type="button">العودة للأدمن</button>
         </div>
       </div>
 
@@ -1207,9 +1205,6 @@
           }
         });
         document.getElementById("load-btn").addEventListener("click", loadInspection);
-        document.getElementById("back-btn").addEventListener("click", function () {
-          window.location.href = "/admin";
-        });
         document.getElementById("preview-final-btn").addEventListener("click", function () {
           if (!buildFinalPreviewFromRaw()) return;
           document.getElementById("final-preview-shell").hidden = false;

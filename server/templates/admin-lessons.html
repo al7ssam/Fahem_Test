@@ -7,9 +7,21 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+    {{ADMIN_DESIGN_SYSTEM}}
     <style>
-      :root { --bg-from:#020309; --bg-mid:#090d1f; --bg-to:#121529; --card:rgba(10,13,28,.85); --border:rgba(223,187,106,.2); --text:#f8f4ea; --muted:#b7ac90; --amber:#e8be66; --ok:#34d399; --danger:#f87171; }
-      * { box-sizing:border-box; } body { margin:0; min-height:100vh; font-family:"Tajawal",system-ui,sans-serif; background:linear-gradient(to bottom,var(--bg-from),var(--bg-mid),var(--bg-to)); color:var(--text); }
+      :root {
+        --card: var(--admin-card-glass);
+        --border: var(--admin-border-warm);
+        --text: #f8f4ea;
+        --muted: #b7ac90;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Tajawal", system-ui, sans-serif;
+        background: linear-gradient(to bottom, var(--bg-from), var(--bg-mid), var(--bg-to));
+        color: var(--text);
+      }
       .wrap { max-width:90rem; margin:0 auto; padding:1.1rem 1rem 2rem; } .subtitle { color:var(--muted); margin:.2rem 0 .7rem; }
       .topbar { position:sticky; top:.5rem; z-index:25; display:flex; flex-wrap:wrap; gap:.55rem; align-items:end; padding:.7rem; background:var(--card); border:1px solid var(--border); border-radius:.9rem; margin-bottom:.8rem; }
       .topbar label { display:block; color:var(--muted); font-size:.82rem; margin-bottom:.2rem; }
@@ -88,6 +100,7 @@
   <body>
     <div class="wrap">
       <h1 style="margin:0;color:var(--amber)">إدارة الدروس</h1>
+      {{ADMIN_NAV}}
       <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong> — أنشئ أسئلة خاصة بالدرس ثم احفظ التسلسل.</p>
 
       <div class="topbar">
@@ -96,7 +109,6 @@
           <input id="sec" type="password" autocomplete="off" placeholder="X-Admin-Secret" />
         </div>
         <button class="btn" id="load-all" type="button">تحميل</button>
-        <button class="btn btn-secondary" id="go-admin" type="button">اللوحة الرئيسية</button>
         <div class="msg" id="msg" aria-live="polite"></div>
       </div>
 
@@ -503,11 +515,6 @@
             ev.preventDefault();
           }
         });
-
-        document.getElementById("go-admin").onclick = function () {
-          if (draftDirty && !window.confirm("تسلسل الأسئلة غير محفوظ على الخادم. المتابعة إلى اللوحة الرئيسية؟")) return;
-          window.location.href = "/admin";
-        };
 
         function formatApiIssues(data) {
           const issues = data && data.issues;

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>إعدادات نمط المذاكرة والمباراة | فاهم</title>
+    {{ADMIN_DESIGN_SYSTEM}}
+    <style>
+      .wrap { max-width:1100px; margin:0 auto; padding:20px; } h1 { margin:0 0 8px; }
+      .muted { color:var(--muted); } .msg { min-height:20px; font-size:13px; margin-top:6px; }
+      .panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px; }
+      .grid { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+      input, textarea, button { background:#0b1330; border:1px solid var(--border); color:var(--text); border-radius:10px; padding:8px 10px; font-family:inherit; width:100%; }
+      textarea { min-height:74px; } button { cursor:pointer; width:auto; }
+      .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+      .switch { display:flex; justify-content:space-between; border:1px solid var(--border); border-radius:10px; padding:8px; background:#0b1330; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>إعدادات نمط المذاكرة والمباراة</h1>
+      <p class="muted">إجمالي الأسئلة: <strong>{{QUESTION_COUNT}}</strong></p>
+      {{ADMIN_NAV}}
+      <div class="panel">
+        <div class="row">
+          <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" style="max-width:340px" />
+          <button id="load-all">تحميل كل الإعدادات</button>
+        </div>
+        <div id="global-msg" class="msg"></div>
+      </div>
+
+      <section class="panel">
+        <h3>نصوص نتيجة اللعبة</h3>
+        <div class="grid">
+          <input id="rm-wt" placeholder="عنوان الفوز" />
+          <input id="rm-lt" placeholder="عنوان الخسارة" />
+          <input id="rm-tt" placeholder="عنوان التعادل" />
+          <textarea id="rm-w" placeholder="نص الفائز"></textarea>
+          <textarea id="rm-l" placeholder="نص الخاسر"></textarea>
+          <textarea id="rm-t" placeholder="نص التعادل"></textarea>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="rm-load">تحميل</button>
+          <button id="rm-save">حفظ</button>
+        </div>
+        <div id="rm-msg" class="msg"></div>
+      </section>
+
+      <section class="panel">
+        <h3>إعدادات الجولة والمباراة</h3>
+        <div class="grid">
+          <input id="gs-rounds" type="number" placeholder="maxStudyRounds" />
+          <input id="gs-size" type="number" placeholder="studyRoundQuestionCount" />
+          <input id="gs-study-ms" type="number" placeholder="studyPhaseMs" />
+          <input id="gs-max-players" type="number" placeholder="maxPlayersPerMatch" />
+          <input id="gs-fill" type="number" placeholder="matchFillWindowSeconds" />
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="gs-load">تحميل</button>
+          <button id="gs-save">حفظ</button>
+        </div>
+        <div id="gs-msg" class="msg"></div>
+      </section>
+
+      <section class="panel">
+        <h3>اقتصاد المفاتيح والقدرات</h3>
+        <div class="grid">
+          <input id="ks-streak" type="number" placeholder="keysStreakPerKey" />
+          <input id="ks-small" type="number" placeholder="keysSmallStreakReward" />
+          <input id="ks-mega-s" type="number" placeholder="keysMegaStreak" />
+          <input id="ks-mega-r" type="number" placeholder="keysMegaReward" />
+          <input id="ks-max" type="number" placeholder="keysMaxPerPlayer" />
+          <input id="ks-boost-pct" type="number" placeholder="keysSkillBoostPercent" />
+          <input id="ks-boost-max" type="number" placeholder="keysSkillBoostMaxMultiplier" />
+          <input id="ks-attack" type="number" placeholder="keysHeartAttackCost" />
+          <input id="ks-shield" type="number" placeholder="keysShieldCost" />
+          <input id="ks-reveal-cost" type="number" placeholder="keysRevealCost" />
+          <input id="ks-rd" type="number" placeholder="keysRevealQuestionsDirect" />
+          <input id="ks-rs" type="number" placeholder="keysRevealQuestionsStudy" />
+          <input id="ks-drop" type="number" step="0.1" placeholder="keysDropRate" />
+        </div>
+        <div class="grid" style="margin-top:8px">
+          <label class="switch"><span>تعزيز مباشر</span><input id="sw-bd" type="checkbox" /></label>
+          <label class="switch"><span>تعزيز مذاكرة</span><input id="sw-bs" type="checkbox" /></label>
+          <label class="switch"><span>تجاوز مباشر</span><input id="sw-sd" type="checkbox" /></label>
+          <label class="switch"><span>تجاوز مذاكرة</span><input id="sw-ss" type="checkbox" /></label>
+          <label class="switch"><span>هجوم مباشر</span><input id="sw-ad" type="checkbox" /></label>
+          <label class="switch"><span>هجوم مذاكرة</span><input id="sw-as" type="checkbox" /></label>
+          <label class="switch"><span>كشف مباشر</span><input id="sw-rd" type="checkbox" /></label>
+          <label class="switch"><span>كشف مذاكرة</span><input id="sw-rs" type="checkbox" /></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button id="ks-load">تحميل</button>
+          <button id="ks-save">حفظ</button>
+        </div>
+        <div id="ks-msg" class="msg"></div>
+      </section>
+    </div>
+
+    <script>
+      (function () {
+        function $(id) { return document.getElementById(id); }
+        function msg(id, t, ok) { $(id).textContent = t || ""; $(id).style.color = ok ? "#34d399" : "#f87171"; }
+        function sec() { return String($("sec").value || "").trim(); }
+        function hdr() { return { "X-Admin-Secret": sec(), "Content-Type": "application/json" }; }
+        async function api(url, method, body) {
+          var r = await fetch(url, { method: method || "GET", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+          var j = await r.json().catch(function () { return {}; });
+          if (!r.ok || !j.ok) throw new Error(j.error || "request_failed");
+          return j;
+        }
+        function needSecret(targetMsg) { if (!sec()) { msg(targetMsg, "أدخل مفتاح الإدارة.", false); return false; } return true; }
+        async function loadResult() {
+          if (!needSecret("rm-msg")) return;
+          try {
+            var j = await api("/api/admin/result-messages", "GET");
+            $("rm-wt").value = j.winnerTitle || ""; $("rm-lt").value = j.loserTitle || ""; $("rm-tt").value = j.tieTitle || "";
+            $("rm-w").value = j.winnerText || ""; $("rm-l").value = j.loserText || ""; $("rm-t").value = j.tieText || "";
+            msg("rm-msg", "تم التحميل.", true);
+          } catch { msg("rm-msg", "تعذر التحميل.", false); }
+        }
+        async function saveResult() {
+          if (!needSecret("rm-msg")) return;
+          try {
+            await api("/api/admin/result-messages", "PATCH", {
+              winnerTitle: $("rm-wt").value.trim(), loserTitle: $("rm-lt").value.trim(), tieTitle: $("rm-tt").value.trim(),
+              winnerText: $("rm-w").value.trim(), loserText: $("rm-l").value.trim(), tieText: $("rm-t").value.trim()
+            });
+            msg("rm-msg", "تم الحفظ.", true);
+          } catch { msg("rm-msg", "تعذر الحفظ.", false); }
+        }
+        async function loadGameSettings() {
+          if (!needSecret("gs-msg")) return;
+          try {
+            var j = await api("/api/admin/game-settings", "GET");
+            $("gs-rounds").value = j.maxStudyRounds; $("gs-size").value = j.studyRoundQuestionCount; $("gs-study-ms").value = j.studyPhaseMs;
+            $("gs-max-players").value = j.maxPlayersPerMatch; $("gs-fill").value = j.matchFillWindowSeconds;
+            msg("gs-msg", "تم التحميل.", true);
+          } catch { msg("gs-msg", "تعذر التحميل.", false); }
+        }
+        async function saveGameSettings() {
+          if (!needSecret("gs-msg")) return;
+          try {
+            await api("/api/admin/game-settings", "PATCH", {
+              maxStudyRounds: Number($("gs-rounds").value || 3),
+              studyRoundQuestionCount: Number($("gs-size").value || 8),
+              studyPhaseMs: Number($("gs-study-ms").value || 60000),
+              maxPlayersPerMatch: Number($("gs-max-players").value || 10),
+              matchFillWindowSeconds: Number($("gs-fill").value || 5),
+            });
+            msg("gs-msg", "تم الحفظ.", true);
+          } catch { msg("gs-msg", "تعذر الحفظ.", false); }
+        }
+        async function loadKeys() {
+          if (!needSecret("ks-msg")) return;
+          try {
+            var j = await api("/api/admin/keys-settings", "GET");
+            $("ks-streak").value = j.keysStreakPerKey; $("ks-small").value = j.keysSmallStreakReward;
+            $("ks-mega-s").value = j.keysMegaStreak; $("ks-mega-r").value = j.keysMegaReward; $("ks-max").value = j.keysMaxPerPlayer;
+            $("ks-boost-pct").value = j.keysSkillBoostPercent; $("ks-boost-max").value = j.keysSkillBoostMaxMultiplier;
+            $("ks-attack").value = j.keysHeartAttackCost; $("ks-shield").value = j.keysShieldCost; $("ks-reveal-cost").value = j.keysRevealCost;
+            $("ks-rd").value = j.keysRevealQuestionsDirect; $("ks-rs").value = j.keysRevealQuestionsStudy; $("ks-drop").value = j.keysDropRate;
+            $("sw-bd").checked = !!j.abilitySkillBoostDirectEnabled; $("sw-bs").checked = !!j.abilitySkillBoostStudyEnabled;
+            $("sw-sd").checked = !!j.abilitySkipDirectEnabled; $("sw-ss").checked = !!j.abilitySkipStudyEnabled;
+            $("sw-ad").checked = !!j.abilityAttackDirectEnabled; $("sw-as").checked = !!j.abilityAttackStudyEnabled;
+            $("sw-rd").checked = !!j.abilityRevealDirectEnabled; $("sw-rs").checked = !!j.abilityRevealStudyEnabled;
+            msg("ks-msg", "تم التحميل.", true);
+          } catch { msg("ks-msg", "تعذر التحميل.", false); }
+        }
+        async function saveKeys() {
+          if (!needSecret("ks-msg")) return;
+          try {
+            await api("/api/admin/keys-settings", "PATCH", {
+              keysStreakPerKey: Number($("ks-streak").value || 5),
+              keysSmallStreakReward: Number($("ks-small").value || 1),
+              keysMegaStreak: Number($("ks-mega-s").value || 8),
+              keysMegaReward: Number($("ks-mega-r").value || 5),
+              keysMaxPerPlayer: Number($("ks-max").value || 20),
+              keysSkillBoostPercent: Number($("ks-boost-pct").value || 30),
+              keysSkillBoostMaxMultiplier: Number($("ks-boost-max").value || 3),
+              keysHeartAttackCost: Number($("ks-attack").value || 2),
+              keysShieldCost: Number($("ks-shield").value || 2),
+              keysRevealCost: Number($("ks-reveal-cost").value || 2),
+              keysRevealQuestionsDirect: Number($("ks-rd").value || 4),
+              keysRevealQuestionsStudy: Number($("ks-rs").value || 4),
+              keysDropRate: Number($("ks-drop").value || 1),
+              abilitySkillBoostDirectEnabled: $("sw-bd").checked,
+              abilitySkillBoostStudyEnabled: $("sw-bs").checked,
+              abilitySkipDirectEnabled: $("sw-sd").checked,
+              abilitySkipStudyEnabled: $("sw-ss").checked,
+              abilityAttackDirectEnabled: $("sw-ad").checked,
+              abilityAttackStudyEnabled: $("sw-as").checked,
+              abilityRevealDirectEnabled: $("sw-rd").checked,
+              abilityRevealStudyEnabled: $("sw-rs").checked
+            });
+            msg("ks-msg", "تم الحفظ.", true);
+          } catch { msg("ks-msg", "تعذر الحفظ.", false); }
+        }
+        $("load-all").addEventListener("click", async function () {
+          if (!needSecret("global-msg")) return;
+          msg("global-msg", "جاري التحميل...", true);
+          await Promise.allSettled([loadResult(), loadGameSettings(), loadKeys()]);
+          msg("global-msg", "اكتمل التحميل.", true);
+        });
+        $("rm-load").addEventListener("click", loadResult);
+        $("rm-save").addEventListener("click", saveResult);
+        $("gs-load").addEventListener("click", loadGameSettings);
+        $("gs-save").addEventListener("click", saveGameSettings);
+        $("ks-load").addEventListener("click", loadKeys);
+        $("ks-save").addEventListener("click", saveKeys);
+      })();
+    </script>
+  </body>
+</html>

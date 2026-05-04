@@ -1,0 +1,169 @@
+<style>
+  /* نظام تصميم موحّد لصفحات الأدمن — يُحقن أولاً في <head> */
+  :root {
+    color-scheme: dark;
+
+    /* Tokens — دلالي */
+    --admin-bg: #0b1020;
+    --admin-surface: #111936;
+    --admin-surface-2: #0b1330;
+    --admin-text: #f8fafc;
+    --admin-text-muted: #9ca3af;
+    --admin-accent: #f59e0b;
+    --admin-accent-secondary: #e8be66;
+    --admin-primary: #1f8f55;
+    --admin-primary-muted: #1f2b52;
+    --admin-success: #34d399;
+    --admin-danger: #f87171;
+    --admin-border: #2a355d;
+    --admin-input-bg: #0b1330;
+
+    --admin-bg-from: #020309;
+    --admin-bg-mid: #090d1f;
+    --admin-bg-to: #121529;
+    --admin-card-glass: rgba(10, 13, 28, 0.85);
+    --admin-border-warm: rgba(223, 187, 106, 0.2);
+
+    --admin-space-1: 4px;
+    --admin-space-2: 8px;
+    --admin-space-3: 12px;
+    --admin-space-4: 16px;
+    --admin-space-5: 24px;
+    --admin-space-6: 32px;
+
+    --admin-radius-sm: 8px;
+    --admin-radius-md: 10px;
+    --admin-radius-lg: 12px;
+    --admin-radius-xl: 14px;
+    --admin-radius-pill: 999px;
+
+    --admin-font-sans: Tahoma, Arial, "Segoe UI", sans-serif;
+    --admin-fs-body: 14px;
+    --admin-fs-sm: 13px;
+    --admin-fs-xs: 12px;
+    --admin-fs-h1: 1.5rem;
+    --admin-fs-h2: 1.15rem;
+    --admin-line-body: 1.5;
+    --admin-line-tight: 1.35;
+
+    --admin-shadow-sm: 0 4px 18px rgba(0, 0, 0, 0.25);
+    --admin-shadow-none: none;
+
+    /* Aliases — توافق مع القوالب الحالية */
+    --bg: var(--admin-bg);
+    --panel: var(--admin-surface);
+    --text: var(--admin-text);
+    --muted: var(--admin-text-muted);
+    --border: var(--admin-border);
+    --accent: var(--admin-accent);
+    --card: var(--admin-surface);
+    --amber: var(--admin-accent-secondary);
+    --ok: var(--admin-success);
+    --danger: var(--admin-danger);
+    --err: var(--admin-danger);
+    --line: var(--admin-border);
+    --bg-from: var(--admin-bg-from);
+    --bg-mid: var(--admin-bg-mid);
+    --bg-to: var(--admin-bg-to);
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg, var(--admin-bg, #0b1020));
+    color: var(--text, var(--admin-text, #f8fafc));
+    font-family: var(--admin-font-sans);
+    font-size: var(--admin-fs-body, 14px);
+    line-height: var(--admin-line-body, 1.5);
+  }
+
+  .muted {
+    color: var(--muted, var(--admin-text-muted, #9ca3af));
+  }
+
+  /* مكوّنات اختيارية — بادئة admin-ui- */
+  .admin-ui-card,
+  .admin-ui-panel {
+    background: var(--panel, var(--card, var(--admin-surface, #111936)));
+    border: 1px solid var(--border, var(--admin-border, #2a355d));
+    border-radius: var(--admin-radius-lg, 12px);
+    padding: var(--admin-space-4, 14px);
+  }
+
+  .admin-ui-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--admin-space-2, 8px);
+    padding: var(--admin-space-3, 10px) var(--admin-space-4, 14px);
+    border-radius: var(--admin-radius-md, 10px);
+    border: 1px solid var(--border, var(--admin-border, #2a355d));
+    background: var(--admin-primary-muted, #1f2b52);
+    color: var(--text, var(--admin-text, #f8fafc));
+    font-family: inherit;
+    font-size: var(--admin-fs-sm, 13px);
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .admin-ui-btn:hover {
+    filter: brightness(1.08);
+  }
+  .admin-ui-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .admin-ui-btn--primary {
+    background: var(--admin-primary, #1f8f55);
+    border-color: var(--admin-primary, #1f8f55);
+    color: #f0fdf4;
+  }
+  .admin-ui-btn--accent {
+    background: var(--accent, var(--admin-accent, #f59e0b));
+    border-color: var(--accent, var(--admin-accent, #f59e0b));
+    color: #1b1405;
+  }
+  .admin-ui-btn--danger {
+    background: rgba(248, 113, 113, 0.14);
+    border-color: rgba(248, 113, 113, 0.45);
+    color: #fecaca;
+  }
+
+  .admin-ui-input,
+  .admin-ui-input input,
+  .admin-ui-input select,
+  .admin-ui-input textarea {
+    width: 100%;
+  }
+  input.admin-ui-input,
+  select.admin-ui-input,
+  textarea.admin-ui-input {
+    border-radius: var(--admin-radius-md, 10px);
+    border: 1px solid var(--border, var(--admin-border, #2a355d));
+    background: var(--admin-input-bg, #0b1330);
+    color: var(--text, var(--admin-text, #f8fafc));
+    padding: var(--admin-space-3, 10px) var(--admin-space-3, 12px);
+    font-family: inherit;
+    font-size: var(--admin-fs-sm, 13px);
+  }
+
+  .admin-ui-msg {
+    min-height: 1.25rem;
+    font-size: var(--admin-fs-sm, 13px);
+    margin-top: var(--admin-space-2, 8px);
+  }
+  .admin-ui-msg--ok {
+    color: var(--ok, var(--admin-success, #34d399));
+  }
+  .admin-ui-msg--err {
+    color: var(--danger, var(--err, var(--admin-danger, #f87171)));
+  }
+  .admin-ui-msg--loading {
+    color: var(--muted, var(--admin-text-muted, #9ca3af));
+  }
+</style>

@@ -557,6 +557,142 @@ function adminLessonsTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-lessons.html");
 }
 
+function adminQuestionBankTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-question-bank.html");
+}
+
+function adminMatchBalanceTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-match-balance.html");
+}
+
+function adminMaintenanceTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-maintenance.html");
+}
+
+function adminAiOpsTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-ai-ops.html");
+}
+
+function adminNavPartialPath(): string {
+  return path.join(process.cwd(), "server", "templates", "partials", "admin-nav.html");
+}
+
+function adminDesignSystemPartialPath(): string {
+  return path.join(process.cwd(), "server", "templates", "partials", "admin-design-system.html");
+}
+
+let cachedAdminDesignSystem: string | null = null;
+
+function renderAdminDesignSystem(): string {
+  if (!cachedAdminDesignSystem) {
+    cachedAdminDesignSystem = fs.readFileSync(adminDesignSystemPartialPath(), "utf8");
+  }
+  return cachedAdminDesignSystem;
+}
+
+type AdminNavPageId =
+  | "hub"
+  | "questionBank"
+  | "categories"
+  | "matchBalance"
+  | "lessons"
+  | "aiOps"
+  | "simpleContent"
+  | "usageAnalytics"
+  | "aiInspection"
+  | "maintenance";
+
+type AdminNavLinkRow = {
+  id: AdminNavPageId;
+  href: string;
+  labelAr: string;
+  groupKey: "general" | "content" | "match" | "lessons" | "ai" | "maintenance";
+};
+
+const ADMIN_NAV_GROUP_LABELS: Record<AdminNavLinkRow["groupKey"], string> = {
+  general: "عام",
+  content: "المحتوى والأسئلة",
+  match: "المذاكرة والمباراة",
+  lessons: "الدروس",
+  ai: "الذكاء الاصطناعي والتكلفة",
+  maintenance: "الصيانة",
+};
+
+const ADMIN_NAV_LINK_ROWS: AdminNavLinkRow[] = [
+  { id: "hub", href: "/admin", labelAr: "مركز الإدارة", groupKey: "general" },
+  { id: "questionBank", href: "/admin/question-bank", labelAr: "بنك الأسئلة", groupKey: "content" },
+  { id: "categories", href: "/admin/categories", labelAr: "تصنيفات نمط المذاكرة", groupKey: "content" },
+  { id: "matchBalance", href: "/admin/match-balance", labelAr: "موازنة المباراة", groupKey: "match" },
+  { id: "lessons", href: "/admin/lessons", labelAr: "إدارة الدروس", groupKey: "lessons" },
+  { id: "aiOps", href: "/admin/ai-ops", labelAr: "AI Ops", groupKey: "ai" },
+  { id: "simpleContent", href: "/admin/simple-content", labelAr: "المسار البسيط", groupKey: "ai" },
+  { id: "usageAnalytics", href: "/admin/usage-analytics", labelAr: "تحليلات الاستخدام", groupKey: "ai" },
+  { id: "aiInspection", href: "/admin/ai-inspection", labelAr: "فحص الوظائف", groupKey: "ai" },
+  { id: "maintenance", href: "/admin/maintenance", labelAr: "الصيانة والتنظيف", groupKey: "maintenance" },
+];
+
+const ADMIN_NAV_GROUP_ORDER: AdminNavLinkRow["groupKey"][] = [
+  "general",
+  "content",
+  "match",
+  "lessons",
+  "ai",
+  "maintenance",
+];
+
+function escapeAdminNavHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildAdminNavBody(active: AdminNavPageId): string {
+  const byGroup = new Map<AdminNavLinkRow["groupKey"], AdminNavLinkRow[]>();
+  for (const key of ADMIN_NAV_GROUP_ORDER) {
+    byGroup.set(key, []);
+  }
+  for (const row of ADMIN_NAV_LINK_ROWS) {
+    byGroup.get(row.groupKey)!.push(row);
+  }
+  const parts: string[] = [];
+  for (const groupKey of ADMIN_NAV_GROUP_ORDER) {
+    const rows = byGroup.get(groupKey);
+    if (!rows?.length) continue;
+    parts.push('<div class="admin-nav-group">');
+    parts.push(`<span class="admin-nav-title">${escapeAdminNavHtml(ADMIN_NAV_GROUP_LABELS[groupKey])}</span>`);
+    for (const row of rows) {
+      const cls = row.id === active ? "admin-nav-link active" : "admin-nav-link";
+      parts.push(
+        `<a class="${cls}" href="${escapeAdminNavHtml(row.href)}">${escapeAdminNavHtml(row.labelAr)}</a>`,
+      );
+    }
+    parts.push("</div>");
+  }
+  return parts.join("\n");
+}
+
+let cachedAdminNavShell: string | null = null;
+
+function renderAdminNav(active: AdminNavPageId): string {
+  if (!cachedAdminNavShell) {
+    cachedAdminNavShell = fs.readFileSync(adminNavPartialPath(), "utf8");
+  }
+  return cachedAdminNavShell.replace(/\{\{ADMIN_NAV_BODY\}\}/g, buildAdminNavBody(active));
+}
+
+function applyAdminTemplate(
+  raw: string,
+  opts: { questionCount: number | null; nav: AdminNavPageId },
+): string {
+  const display = opts.questionCount === null ? "—" : String(opts.questionCount);
+  return raw
+    .replace(/\{\{ADMIN_DESIGN_SYSTEM\}\}/g, renderAdminDesignSystem())
+    .replace(/\{\{ADMIN_NAV\}\}/g, renderAdminNav(opts.nav))
+    .replace(/\{\{QUESTION_COUNT\}\}/g, display);
+}
+
 async function countQuestions(): Promise<number | null> {
   try {
     const pool = getPool();
@@ -570,39 +706,73 @@ async function countQuestions(): Promise<number | null> {
 }
 
 function readAdminHtml(questionCount: number | null): string {
-  const raw = fs.readFileSync(adminTemplatePath(), "utf8");
-  const display = questionCount === null ? "—" : String(questionCount);
-  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+  return applyAdminTemplate(fs.readFileSync(adminTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "hub",
+  });
 }
 
 function readAdminInspectionHtml(questionCount: number | null): string {
-  const raw = fs.readFileSync(adminInspectionTemplatePath(), "utf8");
-  const display = questionCount === null ? "—" : String(questionCount);
-  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+  return applyAdminTemplate(fs.readFileSync(adminInspectionTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "aiInspection",
+  });
 }
 
 function readAdminUsageAnalyticsHtml(questionCount: number | null): string {
-  const raw = fs.readFileSync(adminUsageAnalyticsTemplatePath(), "utf8");
-  const display = questionCount === null ? "—" : String(questionCount);
-  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+  return applyAdminTemplate(fs.readFileSync(adminUsageAnalyticsTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "usageAnalytics",
+  });
 }
 
 function readAdminSimpleContentHtml(questionCount: number | null): string {
-  const raw = fs.readFileSync(adminSimpleContentTemplatePath(), "utf8");
-  const display = questionCount === null ? "—" : String(questionCount);
-  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+  return applyAdminTemplate(fs.readFileSync(adminSimpleContentTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "simpleContent",
+  });
 }
 
 function readAdminCategoriesHtml(questionCount: number | null): string {
-  const raw = fs.readFileSync(adminCategoriesTemplatePath(), "utf8");
-  const display = questionCount === null ? "—" : String(questionCount);
-  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+  return applyAdminTemplate(fs.readFileSync(adminCategoriesTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "categories",
+  });
 }
 
 function readAdminLessonsHtml(questionCount: number | null): string {
-  const raw = fs.readFileSync(adminLessonsTemplatePath(), "utf8");
-  const display = questionCount === null ? "—" : String(questionCount);
-  return raw.replace(/\{\{QUESTION_COUNT\}\}/g, display);
+  return applyAdminTemplate(fs.readFileSync(adminLessonsTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "lessons",
+  });
+}
+
+function readAdminQuestionBankHtml(questionCount: number | null): string {
+  return applyAdminTemplate(fs.readFileSync(adminQuestionBankTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "questionBank",
+  });
+}
+
+function readAdminMatchBalanceHtml(questionCount: number | null): string {
+  return applyAdminTemplate(fs.readFileSync(adminMatchBalanceTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "matchBalance",
+  });
+}
+
+function readAdminMaintenanceHtml(questionCount: number | null): string {
+  return applyAdminTemplate(fs.readFileSync(adminMaintenanceTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "maintenance",
+  });
+}
+
+function readAdminAiOpsHtml(questionCount: number | null): string {
+  return applyAdminTemplate(fs.readFileSync(adminAiOpsTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "aiOps",
+  });
 }
 
 function extractQuestionsArray(body: unknown): unknown[] | null {
@@ -1021,6 +1191,46 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminLessonsHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة إدارة الدروس.");
+    }
+  });
+
+  app.get("/admin/question-bank", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminQuestionBankHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة بنك الأسئلة.");
+    }
+  });
+
+  app.get("/admin/match-balance", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminMatchBalanceHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة موازنة المباراة.");
+    }
+  });
+
+  app.get("/admin/maintenance", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminMaintenanceHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة الصيانة.");
+    }
+  });
+
+  app.get("/admin/ai-ops", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminAiOpsHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة الذكاء الاصطناعي والتكلفة.");
     }
   });
 

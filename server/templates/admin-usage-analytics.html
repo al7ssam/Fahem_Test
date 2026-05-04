@@ -4,20 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Usage Analytics</title>
+    {{ADMIN_DESIGN_SYSTEM}}
     <style>
-      :root { color-scheme: dark; }
       body {
         margin: 0;
-        background: #0f1115;
-        color: #f2f4f7;
-        font-family: "Tajawal", "Segoe UI", sans-serif;
+        background: var(--bg, var(--admin-bg, #0b1020));
+        color: var(--text, var(--admin-text, #f8fafc));
+        font-family: "Tajawal", "Segoe UI", var(--admin-font-sans);
       }
       .wrap { max-width: 1200px; margin: 0 auto; padding: 1rem; }
-      .subtitle { color: #a2a9b5; margin-top: 0.1rem; }
+      .subtitle { color: var(--muted, var(--admin-text-muted, #9ca3af)); margin-top: 0.1rem; }
       .card {
-        background: #171a20;
-        border: 1px solid #2a2f3a;
-        border-radius: 12px;
+        background: var(--panel, var(--admin-surface, #111936));
+        border: 1px solid var(--border, var(--admin-border, #2a355d));
+        border-radius: var(--admin-radius-lg, 12px);
         padding: 0.9rem;
         margin-top: 0.8rem;
       }
@@ -30,7 +30,7 @@
       .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 0.25rem; }
       .toolbar {
         display: grid;
-        grid-template-columns: 1.2fr 1fr 1fr auto auto auto;
+        grid-template-columns: 1.2fr 1fr 1fr auto auto;
         gap: 0.6rem;
       }
       .time-toolbar {
@@ -40,29 +40,30 @@
         margin-top: 0.6rem;
       }
       input, select, button {
-        border-radius: 10px;
-        border: 1px solid #2f3544;
-        background: #10141c;
-        color: #f2f4f7;
+        border-radius: var(--admin-radius-md, 10px);
+        border: 1px solid var(--border, var(--admin-border, #2a355d));
+        background: var(--admin-input-bg, #0b1330);
+        color: var(--text, var(--admin-text, #f8fafc));
         padding: 0.6rem 0.7rem;
         font-size: 0.95rem;
       }
       button { cursor: pointer; font-weight: 700; }
       table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
-      th, td { border-bottom: 1px solid #2a2f3a; padding: 0.55rem; text-align: right; font-size: 0.92rem; }
-      th { color: #9da5b5; font-weight: 700; }
+      th, td { border-bottom: 1px solid var(--border, var(--admin-border, #2a355d)); padding: 0.55rem; text-align: right; font-size: 0.92rem; }
+      th { color: var(--muted, var(--admin-text-muted, #9ca3af)); font-weight: 700; }
       .bars { display: grid; gap: 0.5rem; margin-top: 0.5rem; }
       .bar-row { display: grid; grid-template-columns: 105px 1fr 120px; gap: 0.5rem; align-items: center; }
-      .bar-track { background: #10141c; border: 1px solid #2f3544; border-radius: 999px; height: 12px; overflow: hidden; }
+      .bar-track { background: var(--admin-input-bg, #0b1330); border: 1px solid var(--border, var(--admin-border, #2a355d)); border-radius: var(--admin-radius-pill, 999px); height: 12px; overflow: hidden; }
       .bar-fill { background: linear-gradient(90deg, #35c2ff, #6f7bff); height: 100%; }
       .row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
-      .muted { color: #95a0b2; }
+      .muted { color: var(--muted, var(--admin-text-muted, #9ca3af)); }
       .msg { margin-top: 0.6rem; min-height: 1.2rem; }
       @media (max-width: 800px) { .toolbar { grid-template-columns: 1fr; } .bar-row { grid-template-columns: 90px 1fr 100px; } }
     </style>
   </head>
   <body>
     <div class="wrap">
+      {{ADMIN_NAV}}
       <div class="row" style="justify-content:space-between; align-items:center;">
         <div>
           <h1 style="margin-bottom:0.2rem;">Usage Analytics</h1>
@@ -78,7 +79,6 @@
           <select id="model-filter"><option value="">كل الموديلات</option></select>
           <button id="save-secret-btn" type="button">حفظ المفتاح</button>
           <button id="refresh-btn" type="button">تحديث</button>
-          <button id="back-btn" type="button" onclick="window.location.href='/admin'">العودة للوحة الإدارة</button>
         </div>
         <div class="time-toolbar">
           <button id="preset-today" type="button">اليوم</button>
