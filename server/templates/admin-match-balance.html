@@ -51,7 +51,8 @@
         <div class="grid">
           <input id="gs-rounds" type="number" placeholder="maxStudyRounds" />
           <input id="gs-size" type="number" placeholder="studyRoundQuestionCount" />
-          <input id="gs-study-ms" type="number" placeholder="studyPhaseMs" />
+          <input id="gs-question-ms" type="number" placeholder="زمن الإجابة الافتراضي (مللي ث)" title="game_question_ms" />
+          <input id="gs-study-ms" type="number" placeholder="زمن المذاكرة الافتراضي (مللي ث)" title="game_study_phase_ms" />
           <input id="gs-max-players" type="number" placeholder="maxPlayersPerMatch" />
           <input id="gs-fill" type="number" placeholder="matchFillWindowSeconds" />
         </div>
@@ -133,7 +134,9 @@
           if (!needSecret("gs-msg")) return;
           try {
             var j = await api("/api/admin/game-settings", "GET");
-            $("gs-rounds").value = j.maxStudyRounds; $("gs-size").value = j.studyRoundQuestionCount; $("gs-study-ms").value = j.studyPhaseMs;
+            $("gs-rounds").value = j.maxStudyRounds; $("gs-size").value = j.studyRoundQuestionCount;
+            $("gs-question-ms").value = j.questionMs != null ? j.questionMs : 15000;
+            $("gs-study-ms").value = j.studyPhaseMs;
             $("gs-max-players").value = j.maxPlayersPerMatch; $("gs-fill").value = j.matchFillWindowSeconds;
             msg("gs-msg", "تم التحميل.", true);
           } catch { msg("gs-msg", "تعذر التحميل.", false); }
@@ -145,6 +148,7 @@
               maxStudyRounds: Number($("gs-rounds").value || 3),
               studyRoundQuestionCount: Number($("gs-size").value || 8),
               studyPhaseMs: Number($("gs-study-ms").value || 60000),
+              questionMs: Number($("gs-question-ms").value || 15000),
               maxPlayersPerMatch: Number($("gs-max-players").value || 10),
               matchFillWindowSeconds: Number($("gs-fill").value || 5),
             });

@@ -186,7 +186,8 @@ const aiPromptsPatchSchema = z.object({
 const gameSettingsPatchSchema = z.object({
   maxStudyRounds: z.number().int().min(1).max(10),
   studyRoundQuestionCount: z.number().int().min(1).max(30),
-  studyPhaseMs: z.number().int().min(5000).max(300000),
+  studyPhaseMs: z.number().int().min(10000).max(300000),
+  questionMs: z.number().int().min(5000).max(120000),
   maxPlayersPerMatch: z.number().int().min(2).max(100),
   matchFillWindowSeconds: z.number().int().min(1).max(120),
 });
@@ -1464,12 +1465,13 @@ export function registerAdminRoutes(app: Express): void {
       const rows = await pool.query<{ key: string; value: string }>(
         `SELECT key, value
          FROM app_settings
-         WHERE key IN ('game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms', 'max_players_per_match', 'match_fill_window_seconds')`,
+         WHERE key IN ('game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms', 'game_question_ms', 'max_players_per_match', 'match_fill_window_seconds')`,
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
       const maxStudyRounds = Number(map.get("game_max_study_rounds") ?? "3");
       const studyRoundQuestionCount = Number(map.get("game_study_round_size") ?? "8");
       const studyPhaseMs = Number(map.get("game_study_phase_ms") ?? "60000");
+      const questionMs = Number(map.get("game_question_ms") ?? "15000");
       const maxPlayersRaw = Number(map.get("max_players_per_match") ?? "10");
       const maxPlayersPerMatch = Math.min(
         100,
@@ -1485,6 +1487,7 @@ export function registerAdminRoutes(app: Express): void {
         maxStudyRounds,
         studyRoundQuestionCount,
         studyPhaseMs,
+        questionMs,
         maxPlayersPerMatch,
         matchFillWindowSeconds,
       });
@@ -1512,13 +1515,15 @@ export function registerAdminRoutes(app: Express): void {
            ('game_max_study_rounds', $1),
            ('game_study_round_size', $2),
            ('game_study_phase_ms', $3),
-           ('max_players_per_match', $4),
-           ('match_fill_window_seconds', $5)
+           ('game_question_ms', $4),
+           ('max_players_per_match', $5),
+           ('match_fill_window_seconds', $6)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [
           String(parsed.data.maxStudyRounds),
           String(parsed.data.studyRoundQuestionCount),
           String(parsed.data.studyPhaseMs),
+          String(parsed.data.questionMs),
           String(parsed.data.maxPlayersPerMatch),
           String(parsed.data.matchFillWindowSeconds),
         ],

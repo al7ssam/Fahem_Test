@@ -13,14 +13,20 @@ import {
   type StudyPhaseCardPayload,
 } from "../db/questions";
 import { getResultMessages, type ResultMessages } from "../db/resultCopy";
+import {
+  DEFAULT_GAME_QUESTION_MS,
+  DEFAULT_GAME_STUDY_PHASE_MS,
+  clampGameQuestionMs,
+  clampGameStudyPhaseMs,
+  resolveQuestionMsFromAppSetting,
+  resolveStudyPhaseMsFromAppSetting,
+} from "./runtimeGameTiming";
 
-const QUESTION_MS = 15_000;
 /** بعد انتهاء الإجابات يبقى استقبال القدرات مفعّلاً لهذا الوقت (تخفيف سباق الشبكة مع finishRound). */
 const ABILITY_GRACE_MS = 500;
 const MAX_ROUNDS = 50;
 const DEFAULT_MAX_STUDY_ROUNDS = 3;
 const DEFAULT_STUDY_ROUND_SIZE = 8;
-const DEFAULT_STUDY_PHASE_MS = 60_000;
 const DEFAULT_ROUND_READY_MS = 12_000;
 const RUNTIME_SETTINGS_CACHE_MS = 15_000;
 
@@ -90,7 +96,7 @@ export class Match {
   private resultMessages: ResultMessages | null = null;
   private maxStudyRounds = DEFAULT_MAX_STUDY_ROUNDS;
   private studyRoundSize = DEFAULT_STUDY_ROUND_SIZE;
-  private studyPhaseMs = DEFAULT_STUDY_PHASE_MS;
+  private studyPhaseMs = DEFAULT_GAME_STUDY_PHASE_MS;
   private roundReady = new Set<string>();
   private roundReadyResolve: (() => void) | null = null;
   private roundReadyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -134,7 +140,7 @@ export class Match {
   private abilityAttackStudyEnabled = true;
   private abilityRevealDirectEnabled = true;
   private abilityRevealStudyEnabled = true;
-  private questionMs = QUESTION_MS;
+  private questionMs = DEFAULT_GAME_QUESTION_MS;
 
   constructor(
     private readonly io: Server,
@@ -540,7 +546,7 @@ export class Match {
           `SELECT key, value
            FROM app_settings
            WHERE key IN (
-             'game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms',
+             'game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms', 'game_question_ms',
              'keys_streak_per_key', 'keys_small_streak_reward', 'keys_mega_streak', 'keys_mega_reward', 'keys_max_per_player',
              'keys_skill_boost_percent', 'keys_skill_boost_max_multiplier',
              'keys_heart_attack_cost', 'keys_shield_cost', 'keys_reveal_cost',
@@ -560,10 +566,10 @@ export class Match {
       }
       const maxRounds = Number(map.get("game_max_study_rounds") ?? DEFAULT_MAX_STUDY_ROUNDS);
       const roundSize = Number(map.get("game_study_round_size") ?? DEFAULT_STUDY_ROUND_SIZE);
-      const phaseMs = Number(map.get("game_study_phase_ms") ?? DEFAULT_STUDY_PHASE_MS);
       this.maxStudyRounds = Math.min(10, Math.max(1, Number.isFinite(maxRounds) ? maxRounds : DEFAULT_MAX_STUDY_ROUNDS));
       this.studyRoundSize = Math.min(30, Math.max(1, Number.isFinite(roundSize) ? roundSize : DEFAULT_STUDY_ROUND_SIZE));
-      this.studyPhaseMs = Math.min(300_000, Math.max(5_000, Number.isFinite(phaseMs) ? phaseMs : DEFAULT_STUDY_PHASE_MS));
+      this.questionMs = resolveQuestionMsFromAppSetting(map.get("game_question_ms"));
+      this.studyPhaseMs = resolveStudyPhaseMsFromAppSetting(map.get("game_study_phase_ms"));
 
       this.keysStreakPerKey = Math.min(50, Math.max(1, Number(map.get("keys_streak_per_key") ?? 5)));
       this.keysSmallStreakReward = Math.min(50, Math.max(0, Number(map.get("keys_small_streak_reward") ?? 1)));
@@ -587,23 +593,24 @@ export class Match {
       this.abilityRevealDirectEnabled = String(map.get("ability_reveal_direct_enabled") ?? "1").trim() !== "0";
       this.abilityRevealStudyEnabled = String(map.get("ability_reveal_study_enabled") ?? "1").trim() !== "0";
       if (this.timeOverrides?.questionMsOverride !== undefined) {
-        this.questionMs = Math.min(120_000, Math.max(5_000, Math.floor(this.timeOverrides.questionMsOverride)));
+        this.questionMs = clampGameQuestionMs(this.timeOverrides.questionMsOverride);
       }
       if (this.timeOverrides?.studyPhaseMsOverride !== undefined) {
-        this.studyPhaseMs = Math.min(300_000, Math.max(10_000, Math.floor(this.timeOverrides.studyPhaseMsOverride)));
+        this.studyPhaseMs = clampGameStudyPhaseMs(this.timeOverrides.studyPhaseMsOverride);
       }
     } catch {
       this.maxStudyRounds = DEFAULT_MAX_STUDY_ROUNDS;
       this.studyRoundSize = DEFAULT_STUDY_ROUND_SIZE;
-      this.studyPhaseMs = DEFAULT_STUDY_PHASE_MS;
+      this.questionMs = DEFAULT_GAME_QUESTION_MS;
+      this.studyPhaseMs = DEFAULT_GAME_STUDY_PHASE_MS;
       this.keysSmallStreakReward = 1;
       this.keysRevealQuestionsDirect = 4;
       this.keysRevealQuestionsStudy = 4;
       if (this.timeOverrides?.questionMsOverride !== undefined) {
-        this.questionMs = Math.min(120_000, Math.max(5_000, Math.floor(this.timeOverrides.questionMsOverride)));
+        this.questionMs = clampGameQuestionMs(this.timeOverrides.questionMsOverride);
       }
       if (this.timeOverrides?.studyPhaseMsOverride !== undefined) {
-        this.studyPhaseMs = Math.min(300_000, Math.max(10_000, Math.floor(this.timeOverrides.studyPhaseMsOverride)));
+        this.studyPhaseMs = clampGameStudyPhaseMs(this.timeOverrides.studyPhaseMsOverride);
       }
     }
   }

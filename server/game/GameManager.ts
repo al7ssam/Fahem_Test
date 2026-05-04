@@ -6,6 +6,11 @@ import { getPublishedLessonPlaybackById, type LessonPlaybackPayload } from "../d
 import { getCustomLessonPlayback } from "../customLessonSessions";
 import { countQuestionsBySubcategory, getStudyModeTimingOverridesBySubcategoryKey } from "../db/questions";
 import { Match, type DifficultyMode, type GameMode } from "./Match";
+import {
+  clampGameQuestionMs,
+  clampGameStudyPhaseMs,
+  fetchGameTimingFromAppSettings,
+} from "./runtimeGameTiming";
 
 const joinLobbySchema = z
   .object({
@@ -398,11 +403,29 @@ export class GameManager {
             return;
           }
         }
-        const questionMsRaw = Number((raw as { questionMs?: unknown }).questionMs ?? 15_000);
-        const studyPhaseMsRaw = Number((raw as { studyPhaseMs?: unknown }).studyPhaseMs ?? 60_000);
+        const timingDefaults = await fetchGameTimingFromAppSettings(getPool());
+        const rawBody = raw as Record<string, unknown>;
+        const hasQuestionMs =
+          rawBody != null &&
+          typeof rawBody === "object" &&
+          "questionMs" in rawBody &&
+          rawBody.questionMs !== undefined &&
+          rawBody.questionMs !== null;
+        const hasStudyPhaseMs =
+          rawBody != null &&
+          typeof rawBody === "object" &&
+          "studyPhaseMs" in rawBody &&
+          rawBody.studyPhaseMs !== undefined &&
+          rawBody.studyPhaseMs !== null;
+        const questionMsRaw = hasQuestionMs ? Number(rawBody.questionMs) : timingDefaults.questionMs;
+        const studyPhaseMsRaw = hasStudyPhaseMs ? Number(rawBody.studyPhaseMs) : timingDefaults.studyPhaseMs;
         const settings: PrivateRoomSettings = {
-          questionMs: Math.min(120_000, Math.max(5_000, Number.isFinite(questionMsRaw) ? questionMsRaw : 15_000)),
-          studyPhaseMs: Math.min(300_000, Math.max(10_000, Number.isFinite(studyPhaseMsRaw) ? studyPhaseMsRaw : 60_000)),
+          questionMs: clampGameQuestionMs(
+            Number.isFinite(questionMsRaw) ? questionMsRaw : timingDefaults.questionMs,
+          ),
+          studyPhaseMs: clampGameStudyPhaseMs(
+            Number.isFinite(studyPhaseMsRaw) ? studyPhaseMsRaw : timingDefaults.studyPhaseMs,
+          ),
         };
         if (mode === "study_then_quiz" && subcategoryKey) {
           const subOv = await getStudyModeTimingOverridesBySubcategoryKey(getPool(), subcategoryKey);
