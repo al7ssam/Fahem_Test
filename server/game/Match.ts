@@ -97,6 +97,8 @@ export class Match {
   private skipSocketsForQuestion = new Set<string>();
   private revealRemainingBySocket = new Map<string, number>();
   private revealMacroRoundBySocket = new Map<string, number | null>();
+  /** في study_then_quiz فردي: true فقط بعد إكمال جميع جولات المذاكرة/الأسئلة دون خروج مبكر */
+  private soloStudyQuizReachedFullCourse = false;
   /** في نمط الدرس: تاريخ إجابات لكل مقبس لبناء lessonReview عند game_over */
   private lessonAnswerHistory = new Map<
     string,
@@ -859,6 +861,15 @@ export class Match {
         await this.playOneQuestion(pool, q);
       }
     }
+    if (
+      !this.finished &&
+      this.isSoloMatch &&
+      this.gameMode === "study_then_quiz" &&
+      this.hasEnoughActivePlayersForQuestions() &&
+      this.macroRound >= this.maxStudyRounds
+    ) {
+      this.soloStudyQuizReachedFullCourse = true;
+    }
   }
 
   private emitNoQuestions(): void {
@@ -1124,6 +1135,35 @@ export class Match {
       .sort((a, b) => b.skillPoints - a.skillPoints);
 
     const alivePlayers = bySkillDesc.filter((p) => !p.eliminated && p.hearts > 0);
+    const isSoloStudyQuiz = this.isSoloMatch && this.gameMode === "study_then_quiz";
+    if (
+      isSoloStudyQuiz &&
+      (alivePlayers.length === 0 || !this.soloStudyQuizReachedFullCourse)
+    ) {
+      const rm = this.resultMessages ?? {
+        winner: "",
+        loser: "",
+        tie: "",
+      };
+      const leaderboard = bySkillDesc.map((row, idx) => ({
+        socketId: row.socketId,
+        name: row.name,
+        skillPoints: row.skillPoints,
+        rank: idx + 1,
+        medal: idx === 0 ? "gold" : idx === 1 ? "silver" : idx === 2 ? "bronze" : null,
+      }));
+      this.emitFinishedGameOver({
+        reason: alivePlayers.length === 0 ? "eliminated" : "solo_study_incomplete",
+        outcomeType: "solo_study_incomplete",
+        winner: null,
+        winners: [],
+        players: this.snapshotPlayers(),
+        resultMessages: rm,
+        leaderboard,
+      });
+      return;
+    }
+
     if (alivePlayers.length === 1) {
       const winner = {
         socketId: alivePlayers[0].socketId,

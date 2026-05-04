@@ -4050,7 +4050,12 @@ function connectSocket(
   s.on(
     "game_over",
     (payload: {
-      outcomeType?: "no_questions" | "single_winner" | "shared_winners" | "tie_all_zero";
+      outcomeType?:
+        | "no_questions"
+        | "single_winner"
+        | "shared_winners"
+        | "tie_all_zero"
+        | "solo_study_incomplete";
       winner: { socketId: string; name: string } | null;
       winners?: Array<{ socketId: string; name: string }>;
       players: {
@@ -4123,6 +4128,24 @@ function connectSocket(
         if (stats) stats.classList.add("hidden");
         if (againBtn) againBtn.textContent = "العودة والمحاولة لاحقًا";
         applyResultScreenPresentation("empty", "");
+        return;
+      }
+      if (payload.outcomeType === "solo_study_incomplete") {
+        matchLessonReviewItems = null;
+        title.textContent = loseTitle;
+        body.textContent = loseCopy;
+        if (againBtn) againBtn.textContent = "حاول مرة أخرى";
+        if (stats) {
+          if (me) {
+            stats.innerHTML = `<span class="result-screen__stat-chip">❤️ القلوب: ${me.hearts}</span><span class="result-screen__stat-chip">⭐ النقاط: ${me.skillPoints ?? 0}</span>`;
+            stats.classList.remove("hidden");
+          } else {
+            stats.classList.add("hidden");
+            stats.innerHTML = "";
+          }
+        }
+        renderLeaderboard();
+        applyResultScreenPresentation("lose", "💔");
         return;
       }
       const winners = payload.winners ?? (payload.winner ? [payload.winner] : []);
