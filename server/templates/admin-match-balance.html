@@ -14,6 +14,8 @@
       textarea { min-height:74px; } button { cursor:pointer; width:auto; }
       .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
       .switch { display:flex; justify-content:space-between; align-items:center; gap:8px; border:1px solid var(--border); border-radius:10px; padding:8px; background:#0b1330; }
+      .field-block { display:flex; flex-direction:column; gap:5px; min-width:0; }
+      .field-label { font-size:12px; font-weight:600; color:var(--muted); line-height:1.35; }
       .field-row { display:flex; gap:8px; align-items:stretch; }
       .field-row > input, .field-row > textarea { flex:1; min-width:0; width:auto; }
       .help-q {
@@ -42,13 +44,21 @@
       <p class="muted">إجمالي الأسئلة: <strong>{{QUESTION_COUNT}}</strong></p>
       {{ADMIN_NAV}}
       <div class="panel">
-        <div class="row">
-          <div class="field-row" style="max-width:380px;flex:1">
-            <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" />
-            <button type="button" class="help-q" data-help-key="sec" aria-label="شرح مفتاح الإدارة">؟</button>
+        <div class="row" style="align-items:flex-end">
+          <div class="field-block" style="max-width:380px;flex:1">
+            <div class="field-label">مفتاح الإدارة (X-Admin-Secret)</div>
+            <div class="field-row">
+              <input id="sec" type="password" placeholder="الصق المفتاح هنا" autocomplete="off" />
+              <button type="button" class="help-q" data-help-key="sec" aria-label="شرح مفتاح الإدارة">؟</button>
+            </div>
           </div>
-          <button id="load-all">تحميل كل الإعدادات</button>
-          <button type="button" class="help-q" data-help-key="loadAll" aria-label="شرح تحميل الإعدادات">؟</button>
+          <div class="field-block">
+            <div class="field-label">تحميل مجمع</div>
+            <div class="field-row" style="align-items:center">
+              <button id="load-all" style="width:auto">تحميل كل الإعدادات</button>
+              <button type="button" class="help-q" data-help-key="loadAll" aria-label="شرح تحميل الإعدادات">؟</button>
+            </div>
+          </div>
         </div>
         <div id="global-msg" class="msg"></div>
       </div>
@@ -56,14 +66,33 @@
       <section class="panel">
         <h3>نصوص نتيجة اللعبة</h3>
         <div class="grid">
-          <div class="field-row"><input id="rm-wt" placeholder="عنوان الفوز" /><button type="button" class="help-q" data-help-key="rmWt" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="rm-lt" placeholder="عنوان الخسارة" /><button type="button" class="help-q" data-help-key="rmLt" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="rm-tt" placeholder="عنوان التعادل" /><button type="button" class="help-q" data-help-key="rmTt" aria-label="شرح">؟</button></div>
-          <div class="field-row"><textarea id="rm-w" placeholder="نص الفائز"></textarea><button type="button" class="help-q" data-help-key="rmW" aria-label="شرح">؟</button></div>
-          <div class="field-row"><textarea id="rm-l" placeholder="نص الخاسر"></textarea><button type="button" class="help-q" data-help-key="rmL" aria-label="شرح">؟</button></div>
-          <div class="field-row"><textarea id="rm-t" placeholder="نص التعادل"></textarea><button type="button" class="help-q" data-help-key="rmT" aria-label="شرح">؟</button></div>
+          <div class="field-block">
+            <div class="field-label">عنوان شاشة الفوز</div>
+            <div class="field-row"><input id="rm-wt" placeholder="مثال: أحسنت!" /><button type="button" class="help-q" data-help-key="rmWt" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">عنوان شاشة الخسارة</div>
+            <div class="field-row"><input id="rm-lt" placeholder="مثال: حاول مجدداً" /><button type="button" class="help-q" data-help-key="rmLt" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">عنوان شاشة التعادل</div>
+            <div class="field-row"><input id="rm-tt" placeholder="مثال: تعادل!" /><button type="button" class="help-q" data-help-key="rmTt" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">نص ترحيبي للفائز (فقرة)</div>
+            <div class="field-row"><textarea id="rm-w" placeholder="نص يظهر للفائز"></textarea><button type="button" class="help-q" data-help-key="rmW" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">نص للخاسر (فقرة)</div>
+            <div class="field-row"><textarea id="rm-l" placeholder="نص يظهر للخاسر"></textarea><button type="button" class="help-q" data-help-key="rmL" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">نص عند التعادل (فقرة)</div>
+            <div class="field-row"><textarea id="rm-t" placeholder="نص يظهر عند التعادل"></textarea><button type="button" class="help-q" data-help-key="rmT" aria-label="شرح">؟</button></div>
+          </div>
         </div>
-        <div class="row" style="margin-top:8px">
+        <div class="field-label" style="margin-top:12px">تحميل القيم من السيرفر أو حفظ تعديلات هذا المقطع</div>
+        <div class="row" style="margin-top:6px">
           <button id="rm-load">تحميل</button>
           <button id="rm-save">حفظ</button>
           <button type="button" class="help-q" data-help-key="rmActions" aria-label="شرح التحميل والحفظ">؟</button>
@@ -74,14 +103,33 @@
       <section class="panel">
         <h3>إعدادات الجولة والمباراة</h3>
         <div class="grid">
-          <div class="field-row"><input id="gs-rounds" type="number" placeholder="maxStudyRounds" /><button type="button" class="help-q" data-help-key="gsRounds" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="gs-size" type="number" placeholder="studyRoundQuestionCount" /><button type="button" class="help-q" data-help-key="gsSize" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="gs-question-ms" type="number" placeholder="زمن الإجابة الافتراضي (مللي ث)" title="game_question_ms" /><button type="button" class="help-q" data-help-key="gsQuestionMs" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="gs-study-ms" type="number" placeholder="زمن المذاكرة الافتراضي (مللي ث)" title="game_study_phase_ms" /><button type="button" class="help-q" data-help-key="gsStudyMs" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="gs-max-players" type="number" placeholder="maxPlayersPerMatch" /><button type="button" class="help-q" data-help-key="gsMaxPlayers" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="gs-fill" type="number" placeholder="matchFillWindowSeconds" /><button type="button" class="help-q" data-help-key="gsFill" aria-label="شرح">؟</button></div>
+          <div class="field-block">
+            <div class="field-label">أقصى جولات مذاكرة (ماكرو جولة)</div>
+            <div class="field-row"><input id="gs-rounds" type="number" placeholder="مثال: 3" /><button type="button" class="help-q" data-help-key="gsRounds" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">عدد أسئلة جولة المذاكرة</div>
+            <div class="field-row"><input id="gs-size" type="number" placeholder="مثال: 8" /><button type="button" class="help-q" data-help-key="gsSize" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">زمن الإجابة الافتراضي (ملّي ثانية)</div>
+            <div class="field-row"><input id="gs-question-ms" type="number" placeholder="مثال: 15000" title="game_question_ms" /><button type="button" class="help-q" data-help-key="gsQuestionMs" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">زمن مرحلة المذاكرة (ملّي ثانية)</div>
+            <div class="field-row"><input id="gs-study-ms" type="number" placeholder="مثال: 60000" title="game_study_phase_ms" /><button type="button" class="help-q" data-help-key="gsStudyMs" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">أقصى لاعبين في المباراة</div>
+            <div class="field-row"><input id="gs-max-players" type="number" placeholder="مثال: 10" /><button type="button" class="help-q" data-help-key="gsMaxPlayers" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">نافذة انتظار اكتمال اللاعبين (ثوانٍ)</div>
+            <div class="field-row"><input id="gs-fill" type="number" placeholder="مثال: 5" /><button type="button" class="help-q" data-help-key="gsFill" aria-label="شرح">؟</button></div>
+          </div>
         </div>
-        <div class="row" style="margin-top:8px">
+        <div class="field-label" style="margin-top:12px">تحميل أو حفظ إعدادات الجولة والمباراة</div>
+        <div class="row" style="margin-top:6px">
           <button id="gs-load">تحميل</button>
           <button id="gs-save">حفظ</button>
           <button type="button" class="help-q" data-help-key="gsActions" aria-label="شرح التحميل والحفظ">؟</button>
@@ -92,31 +140,95 @@
       <section class="panel">
         <h3>اقتصاد المفاتيح والقدرات</h3>
         <div class="grid">
-          <div class="field-row"><input id="ks-streak" type="number" placeholder="keysStreakPerKey" /><button type="button" class="help-q" data-help-key="ksStreak" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-small" type="number" placeholder="keysSmallStreakReward" /><button type="button" class="help-q" data-help-key="ksSmall" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-mega-s" type="number" placeholder="keysMegaStreak" /><button type="button" class="help-q" data-help-key="ksMegaS" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-mega-r" type="number" placeholder="keysMegaReward" /><button type="button" class="help-q" data-help-key="ksMegaR" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-max" type="number" placeholder="keysMaxPerPlayer" /><button type="button" class="help-q" data-help-key="ksMax" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-boost-pct" type="number" placeholder="keysSkillBoostPercent" /><button type="button" class="help-q" data-help-key="ksBoostPct" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-boost-max" type="number" placeholder="keysSkillBoostMaxMultiplier" /><button type="button" class="help-q" data-help-key="ksBoostMax" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-attack" type="number" placeholder="keysHeartAttackCost" /><button type="button" class="help-q" data-help-key="ksAttack" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-shield" type="number" placeholder="keysShieldCost" /><button type="button" class="help-q" data-help-key="ksShield" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-reveal-cost" type="number" placeholder="keysRevealCost" /><button type="button" class="help-q" data-help-key="ksRevealCost" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-rd" type="number" placeholder="keysRevealQuestionsDirect" /><button type="button" class="help-q" data-help-key="ksRd" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-rs" type="number" placeholder="keysRevealQuestionsStudy" /><button type="button" class="help-q" data-help-key="ksRs" aria-label="شرح">؟</button></div>
-          <div class="field-row"><input id="ks-drop" type="number" step="0.1" placeholder="keysDropRate" /><button type="button" class="help-q" data-help-key="ksDrop" aria-label="شرح">؟</button></div>
+          <div class="field-block">
+            <div class="field-label">إجابات متتالية لمنح مفتاح</div>
+            <div class="field-row"><input id="ks-streak" type="number" placeholder="مثال: 5" /><button type="button" class="help-q" data-help-key="ksStreak" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">مكافأة السلسلة الصغيرة (مفاتيح)</div>
+            <div class="field-row"><input id="ks-small" type="number" placeholder="مثال: 1" /><button type="button" class="help-q" data-help-key="ksSmall" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">عتبة السلسلة الكبرى (إجابات)</div>
+            <div class="field-row"><input id="ks-mega-s" type="number" placeholder="مثال: 8" /><button type="button" class="help-q" data-help-key="ksMegaS" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">مكافأة السلسلة الكبرى (مفاتيح)</div>
+            <div class="field-row"><input id="ks-mega-r" type="number" placeholder="مثال: 5" /><button type="button" class="help-q" data-help-key="ksMegaR" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">سقف المفاتيح للاعب</div>
+            <div class="field-row"><input id="ks-max" type="number" placeholder="مثال: 20" /><button type="button" class="help-q" data-help-key="ksMax" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">نسبة تعزيز المهارة (%)</div>
+            <div class="field-row"><input id="ks-boost-pct" type="number" placeholder="مثال: 30" /><button type="button" class="help-q" data-help-key="ksBoostPct" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">أقصى مضاعف للتعزيز</div>
+            <div class="field-row"><input id="ks-boost-max" type="number" placeholder="مثال: 3" /><button type="button" class="help-q" data-help-key="ksBoostMax" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">تكلفة هجوم القلب (مفاتيح)</div>
+            <div class="field-row"><input id="ks-attack" type="number" placeholder="مثال: 2" /><button type="button" class="help-q" data-help-key="ksAttack" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">تكلفة الدرع (مفاتيح)</div>
+            <div class="field-row"><input id="ks-shield" type="number" placeholder="مثال: 2" /><button type="button" class="help-q" data-help-key="ksShield" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">تكلفة الكشف (مفاتيح)</div>
+            <div class="field-row"><input id="ks-reveal-cost" type="number" placeholder="مثال: 2" /><button type="button" class="help-q" data-help-key="ksRevealCost" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">كشف — عدد أسئلة النمط المباشر</div>
+            <div class="field-row"><input id="ks-rd" type="number" placeholder="مثال: 4" /><button type="button" class="help-q" data-help-key="ksRd" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">كشف — عدد أسئلة نمط المذاكرة</div>
+            <div class="field-row"><input id="ks-rs" type="number" placeholder="مثال: 4" /><button type="button" class="help-q" data-help-key="ksRs" aria-label="شرح">؟</button></div>
+          </div>
+          <div class="field-block">
+            <div class="field-label">معدل منح المفاتيح (إسقاط)</div>
+            <div class="field-row"><input id="ks-drop" type="number" step="0.1" placeholder="مثال: 1" /><button type="button" class="help-q" data-help-key="ksDrop" aria-label="شرح">؟</button></div>
+          </div>
         </div>
         <div class="grid" style="margin-top:8px">
-          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تعزيز مباشر<button type="button" class="help-q" data-help-key="swBd" aria-label="شرح">؟</button></span><input id="sw-bd" type="checkbox" /></label>
-          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تعزيز مذاكرة<button type="button" class="help-q" data-help-key="swBs" aria-label="شرح">؟</button></span><input id="sw-bs" type="checkbox" /></label>
-          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تجاوز مباشر<button type="button" class="help-q" data-help-key="swSd" aria-label="شرح">؟</button></span><input id="sw-sd" type="checkbox" /></label>
-          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تجاوز مذاكرة<button type="button" class="help-q" data-help-key="swSs" aria-label="شرح">؟</button></span><input id="sw-ss" type="checkbox" /></label>
-          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">هجوم مباشر<button type="button" class="help-q" data-help-key="swAd" aria-label="شرح">؟</button></span><input id="sw-ad" type="checkbox" /></label>
-          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">هجوم مذاكرة<button type="button" class="help-q" data-help-key="swAs" aria-label="شرح">؟</button></span><input id="sw-as" type="checkbox" /></label>
-          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">كشف مباشر<button type="button" class="help-q" data-help-key="swRd" aria-label="شرح">؟</button></span><input id="sw-rd" type="checkbox" /></label>
-          <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">كشف مذاكرة<button type="button" class="help-q" data-help-key="swRs" aria-label="شرح">؟</button></span><input id="sw-rs" type="checkbox" /></label>
+          <div class="field-block">
+            <div class="field-label">قدرة التعزيز — النمط المباشر</div>
+            <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تفعيل في اللعب<button type="button" class="help-q" data-help-key="swBd" aria-label="شرح">؟</button></span><input id="sw-bd" type="checkbox" /></label>
+          </div>
+          <div class="field-block">
+            <div class="field-label">قدرة التعزيز — نمط المذاكرة</div>
+            <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تفعيل في اللعب<button type="button" class="help-q" data-help-key="swBs" aria-label="شرح">؟</button></span><input id="sw-bs" type="checkbox" /></label>
+          </div>
+          <div class="field-block">
+            <div class="field-label">تجاوز السؤال — النمط المباشر</div>
+            <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تفعيل في اللعب<button type="button" class="help-q" data-help-key="swSd" aria-label="شرح">؟</button></span><input id="sw-sd" type="checkbox" /></label>
+          </div>
+          <div class="field-block">
+            <div class="field-label">تجاوز السؤال — نمط المذاكرة</div>
+            <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تفعيل في اللعب<button type="button" class="help-q" data-help-key="swSs" aria-label="شرح">؟</button></span><input id="sw-ss" type="checkbox" /></label>
+          </div>
+          <div class="field-block">
+            <div class="field-label">هجوم القلوب — النمط المباشر</div>
+            <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تفعيل في اللعب<button type="button" class="help-q" data-help-key="swAd" aria-label="شرح">؟</button></span><input id="sw-ad" type="checkbox" /></label>
+          </div>
+          <div class="field-block">
+            <div class="field-label">هجوم القلوب — نمط المذاكرة</div>
+            <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تفعيل في اللعب<button type="button" class="help-q" data-help-key="swAs" aria-label="شرح">؟</button></span><input id="sw-as" type="checkbox" /></label>
+          </div>
+          <div class="field-block">
+            <div class="field-label">كشف الخيارات — النمط المباشر</div>
+            <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تفعيل في اللعب<button type="button" class="help-q" data-help-key="swRd" aria-label="شرح">؟</button></span><input id="sw-rd" type="checkbox" /></label>
+          </div>
+          <div class="field-block">
+            <div class="field-label">كشف الخيارات — نمط المذاكرة</div>
+            <label class="switch"><span class="row" style="gap:6px;align-items:center;margin:0">تفعيل في اللعب<button type="button" class="help-q" data-help-key="swRs" aria-label="شرح">؟</button></span><input id="sw-rs" type="checkbox" /></label>
+          </div>
         </div>
-        <div class="row" style="margin-top:8px">
+        <div class="field-label" style="margin-top:12px">تحميل أو حفظ أرقام المفاتيح وحالات القدرات</div>
+        <div class="row" style="margin-top:6px">
           <button id="ks-load">تحميل</button>
           <button id="ks-save">حفظ</button>
           <button type="button" class="help-q" data-help-key="ksActions" aria-label="شرح التحميل والحفظ">؟</button>
