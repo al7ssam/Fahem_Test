@@ -674,9 +674,7 @@ function render(): void {
                 }" data-mode="direct" aria-pressed="${selectedModeInName === "direct" ? "true" : "false"}">
                   <span class="mode-option-icon" aria-hidden="true">⚡</span>
                   <span class="mode-option-title">نمط مباشر</span>
-                  <span class="mode-option-desc">اضغط للدخول فوراً إلى البحث عن تحدي (${difficultyModeLabelAr(
-                    selectedDifficultyMode,
-                  )}) — أسئلة متتالية</span>
+                  <span class="mode-option-desc">أسئلة فورية متتالية بدون مراجعة مسبقة</span>
                 </button>
                 <button type="button" class="mode-option-btn ${
                   selectedModeInName === "study_then_quiz" ? "mode-option-btn--selected" : ""
@@ -720,16 +718,10 @@ function render(): void {
                 }</button>
               </div>
               <button id="solo-learning-btn" class="ui-btn ui-btn--primary w-full py-3 text-lg ${
-                !isPrivateEntryFlow &&
-                (renderDifficultyPicker || (renderModePicker && selectedModeInName === "direct"))
-                  ? ""
-                  : "hidden"
+                renderDifficultyPicker && !isPrivateEntryFlow ? "" : "hidden"
               }">التعلم الفردي</button>
               <div class="${
-                !isPrivateEntryFlow &&
-                (renderDifficultyPicker || (renderModePicker && selectedModeInName === "direct"))
-                  ? "space-y-2"
-                  : "hidden"
+                renderDifficultyPicker && !isPrivateEntryFlow ? "space-y-2" : "hidden"
               }">
                 <button id="create-private-room-btn" class="ui-btn ui-btn--ghost w-full py-3 text-lg">إنشاء غرفة خاصة</button>
                 <div class="flex gap-2">
@@ -860,18 +852,8 @@ function render(): void {
             return;
           }
           err.textContent = "";
-          const name = input.value.trim();
-          if (!name) {
-            err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
-            return;
-          }
-          storePlayerName(name);
-          playerNameDraft = name;
-          phase = "matchmaking";
-          soloLearningPending = false;
-          lobbyNotice = `جاري الاتصال بالخادم... (${difficultyModeLabelAr(selectedDifficultyMode)})`;
+          nameFlowStep = "difficulty";
           render();
-          connectSocket(name, "direct", null, selectedDifficultyMode);
         });
       });
     } else if (nameFlowStep === "main_categories") {
