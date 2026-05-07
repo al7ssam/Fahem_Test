@@ -15,6 +15,21 @@ const AI_FACTORY_LOGS_SETTINGS_KEYS = {
   lastRunDate: "ai_factory_logs_cleanup_last_run_date",
 } as const;
 
+const AI_FACTORY_JOBS_SETTINGS_KEYS = {
+  enabled: "ai_factory_jobs_cleanup_enabled",
+  lastRunDate: "ai_factory_jobs_cleanup_last_run_date",
+} as const;
+
+const SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS = {
+  enabled: "simple_content_pricing_audit_cleanup_enabled",
+  lastRunDate: "simple_content_pricing_audit_cleanup_last_run_date",
+} as const;
+
+const AI_RETENTION_SETTINGS_KEYS = {
+  retentionDays: "ai_cleanup_retention_days",
+  pricingAuditRetentionDays: "ai_pricing_audit_retention_days",
+} as const;
+
 type CleanupSettings = {
   autoDeleteEnabled: boolean;
   deletionThresholdDays: number;
@@ -44,8 +59,31 @@ type AiFactoryLogsCleanupResult = AiFactoryLogsCleanupCounts & {
   runDate: string;
 };
 
+type AiFactoryJobsCleanupSettings = {
+  autoDeleteEnabled: boolean;
+  deletionThresholdDays: number;
+  lastRunDate: string;
+};
+
+type AiFactoryJobsCleanupResult = {
+  deletedCount: number;
+  thresholdDays: number;
+  runDate: string;
+};
+
+export type CleanupTableStatsRow = {
+  tableName: string;
+  rowCount: number;
+  totalBytes: number;
+  totalSize: string;
+  oldestCreatedAt: string | null;
+  newestCreatedAt: string | null;
+};
+
 let runningCleanup: Promise<CleanupResult> | null = null;
 let runningAiFactoryLogsCleanup: Promise<AiFactoryLogsCleanupResult> | null = null;
+let runningAiFactoryJobsCleanup: Promise<AiFactoryJobsCleanupResult> | null = null;
+let runningSimpleContentPricingAuditCleanup: Promise<SimpleContentPricingAuditCleanupResult> | null = null;
 
 function parseEnabled(raw: string | undefined): boolean {
   const v = String(raw ?? "").trim().toLowerCase();
@@ -55,6 +93,12 @@ function parseEnabled(raw: string | undefined): boolean {
 function parseThreshold(raw: string | undefined): number {
   const n = Number(raw ?? "30");
   if (!Number.isFinite(n)) return 30;
+  return Math.max(1, Math.floor(n));
+}
+
+function parseThresholdWithDefault(raw: string | undefined, fallback: number): number {
+  const n = Number(raw ?? fallback);
+  if (!Number.isFinite(n)) return fallback;
   return Math.max(1, Math.floor(n));
 }
 
@@ -73,6 +117,19 @@ async function readSettingsMap(client: PoolClient): Promise<Map<string, string>>
     SETTINGS_KEYS.enabled,
     SETTINGS_KEYS.thresholdDays,
     SETTINGS_KEYS.lastRunDate,
+  ];
+  const rows = await client.query<{ key: string; value: string }>(
+    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    [keys],
+  );
+  return new Map(rows.rows.map((r) => [r.key, r.value]));
+}
+
+async function readAiRetentionMap(client: PoolClient): Promise<Map<string, string>> {
+  const keys = [
+    AI_RETENTION_SETTINGS_KEYS.retentionDays,
+    AI_RETENTION_SETTINGS_KEYS.pricingAuditRetentionDays,
+    SETTINGS_KEYS.thresholdDays,
   ];
   const rows = await client.query<{ key: string; value: string }>(
     `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
@@ -130,6 +187,10 @@ export async function updateCleanupSettings(input: {
         key: SETTINGS_KEYS.thresholdDays,
         value: String(thresholdDays),
       },
+      {
+        key: AI_RETENTION_SETTINGS_KEYS.retentionDays,
+        value: String(thresholdDays),
+      },
     ]);
     const map = await readSettingsMap(client);
     return {
@@ -140,6 +201,20 @@ export async function updateCleanupSettings(input: {
   } finally {
     client.release();
   }
+}
+
+async function resolveUnifiedAiRetentionDays(client: PoolClient): Promise<number> {
+  const map = await readAiRetentionMap(client);
+  const explicit = map.get(AI_RETENTION_SETTINGS_KEYS.retentionDays);
+  if (explicit != null && String(explicit).trim() !== "") {
+    return parseThreshold(explicit);
+  }
+  return parseThreshold(map.get(SETTINGS_KEYS.thresholdDays));
+}
+
+async function resolvePricingAuditRetentionDays(client: PoolClient): Promise<number> {
+  const map = await readAiRetentionMap(client);
+  return parseThresholdWithDefault(map.get(AI_RETENTION_SETTINGS_KEYS.pricingAuditRetentionDays), 180);
 }
 
 export async function countExpiredQuestions(
@@ -254,9 +329,10 @@ export async function getAiFactoryLogsCleanupSettings(): Promise<AiFactoryLogsCl
   const client = await pool.connect();
   try {
     const map = await readAiFactoryLogsSettingsMap(client);
+    const unifiedThreshold = await resolveUnifiedAiRetentionDays(client);
     return {
       autoDeleteEnabled: parseEnabled(map.get(AI_FACTORY_LOGS_SETTINGS_KEYS.enabled)),
-      deletionThresholdDays: parseThreshold(map.get(AI_FACTORY_LOGS_SETTINGS_KEYS.thresholdDays)),
+      deletionThresholdDays: unifiedThreshold,
       lastRunDate: normalizeRunDate(map.get(AI_FACTORY_LOGS_SETTINGS_KEYS.lastRunDate)),
     };
   } finally {
@@ -281,11 +357,15 @@ export async function updateAiFactoryLogsCleanupSettings(input: {
         key: AI_FACTORY_LOGS_SETTINGS_KEYS.thresholdDays,
         value: String(thresholdDays),
       },
+      {
+        key: AI_RETENTION_SETTINGS_KEYS.retentionDays,
+        value: String(thresholdDays),
+      },
     ]);
     const map = await readAiFactoryLogsSettingsMap(client);
     return {
       autoDeleteEnabled: parseEnabled(map.get(AI_FACTORY_LOGS_SETTINGS_KEYS.enabled)),
-      deletionThresholdDays: parseThreshold(map.get(AI_FACTORY_LOGS_SETTINGS_KEYS.thresholdDays)),
+      deletionThresholdDays: thresholdDays,
       lastRunDate: normalizeRunDate(map.get(AI_FACTORY_LOGS_SETTINGS_KEYS.lastRunDate)),
     };
   } finally {
@@ -302,13 +382,23 @@ export async function countExpiredAiFactoryLogs(
     const inspectionResult = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
        FROM ai_factory_inspection_logs
-       WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+       WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')
+         AND EXISTS (
+           SELECT 1 FROM ai_factory_jobs j
+           WHERE j.id = ai_factory_inspection_logs.job_id
+             AND j.status IN ('succeeded', 'failed', 'cancelled')
+         )`,
       [threshold],
     );
     const jobLogsResult = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
        FROM ai_factory_job_logs
-       WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+       WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')
+         AND EXISTS (
+           SELECT 1 FROM ai_factory_jobs j
+           WHERE j.id = ai_factory_job_logs.job_id
+             AND j.status IN ('succeeded', 'failed', 'cancelled')
+         )`,
       [threshold],
     );
     const inspectionLogsDeletedCount = Number(inspectionResult.rows[0]?.c ?? 0);
@@ -343,7 +433,7 @@ export async function performAiFactoryLogsCleanup(input: {
       await client.query("BEGIN");
       const settingsMap = await readAiFactoryLogsSettingsMap(client);
       const enabled = parseEnabled(settingsMap.get(AI_FACTORY_LOGS_SETTINGS_KEYS.enabled));
-      const thresholdDays = parseThreshold(settingsMap.get(AI_FACTORY_LOGS_SETTINGS_KEYS.thresholdDays));
+      const thresholdDays = await resolveUnifiedAiRetentionDays(client);
       const today = toISODate();
 
       if (!input.forceRun && !enabled) {
@@ -361,12 +451,22 @@ export async function performAiFactoryLogsCleanup(input: {
       const counts = await countExpiredAiFactoryLogs(thresholdDays, client);
       await client.query(
         `DELETE FROM ai_factory_inspection_logs
-         WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+         WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')
+           AND EXISTS (
+             SELECT 1 FROM ai_factory_jobs j
+             WHERE j.id = ai_factory_inspection_logs.job_id
+               AND j.status IN ('succeeded', 'failed', 'cancelled')
+           )`,
         [thresholdDays],
       );
       await client.query(
         `DELETE FROM ai_factory_job_logs
-         WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+         WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')
+           AND EXISTS (
+             SELECT 1 FROM ai_factory_jobs j
+             WHERE j.id = ai_factory_job_logs.job_id
+               AND j.status IN ('succeeded', 'failed', 'cancelled')
+           )`,
         [thresholdDays],
       );
 
@@ -451,9 +551,10 @@ export async function getSimpleContentRunsCleanupSettings(): Promise<SimpleConte
   const client = await pool.connect();
   try {
     const map = await readSimpleContentRunsSettingsMap(client);
+    const unifiedThreshold = await resolveUnifiedAiRetentionDays(client);
     return {
       autoDeleteEnabled: parseEnabled(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.enabled)),
-      deletionThresholdDays: parseThreshold(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays)),
+      deletionThresholdDays: unifiedThreshold,
       lastRunDate: normalizeRunDate(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.lastRunDate)),
     };
   } finally {
@@ -478,11 +579,15 @@ export async function updateSimpleContentRunsCleanupSettings(input: {
         key: SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays,
         value: String(thresholdDays),
       },
+      {
+        key: AI_RETENTION_SETTINGS_KEYS.retentionDays,
+        value: String(thresholdDays),
+      },
     ]);
     const map = await readSimpleContentRunsSettingsMap(client);
     return {
       autoDeleteEnabled: parseEnabled(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.enabled)),
-      deletionThresholdDays: parseThreshold(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays)),
+      deletionThresholdDays: thresholdDays,
       lastRunDate: normalizeRunDate(map.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.lastRunDate)),
     };
   } finally {
@@ -499,7 +604,9 @@ export async function countExpiredSimpleContentRuns(
     const r = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
        FROM simple_content_runs
-       WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+       WHERE status IN ('succeeded', 'failed', 'pending_review')
+         AND finished_at IS NOT NULL
+         AND finished_at < NOW() - ($1::int * INTERVAL '1 day')`,
       [threshold],
     );
     return Number(r.rows[0]?.c ?? 0);
@@ -527,7 +634,7 @@ export async function performSimpleContentRunsCleanup(input: {
       await client.query("BEGIN");
       const settingsMap = await readSimpleContentRunsSettingsMap(client);
       const enabled = parseEnabled(settingsMap.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.enabled));
-      const thresholdDays = parseThreshold(settingsMap.get(SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.thresholdDays));
+      const thresholdDays = await resolveUnifiedAiRetentionDays(client);
       const today = toISODate();
 
       if (!input.forceRun && !enabled) {
@@ -543,7 +650,9 @@ export async function performSimpleContentRunsCleanup(input: {
       const expiredCount = await countExpiredSimpleContentRuns(thresholdDays, client);
       await client.query(
         `DELETE FROM simple_content_runs
-         WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+         WHERE status IN ('succeeded', 'failed', 'pending_review')
+           AND finished_at IS NOT NULL
+           AND finished_at < NOW() - ($1::int * INTERVAL '1 day')`,
         [thresholdDays],
       );
 
@@ -588,4 +697,354 @@ export async function maybeRunStartupSimpleContentRunsCleanup(): Promise<SimpleC
     return null;
   }
   return performSimpleContentRunsCleanup({ source: "startup" });
+}
+
+type SimpleContentPricingAuditCleanupSettings = {
+  autoDeleteEnabled: boolean;
+  deletionThresholdDays: number;
+  lastRunDate: string;
+};
+
+type SimpleContentPricingAuditCleanupResult = {
+  deletedCount: number;
+  thresholdDays: number;
+  runDate: string;
+};
+
+async function readAiFactoryJobsSettingsMap(client: PoolClient): Promise<Map<string, string>> {
+  const keys = [
+    AI_FACTORY_JOBS_SETTINGS_KEYS.enabled,
+    AI_FACTORY_JOBS_SETTINGS_KEYS.lastRunDate,
+  ];
+  const rows = await client.query<{ key: string; value: string }>(
+    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    [keys],
+  );
+  return new Map(rows.rows.map((r) => [r.key, r.value]));
+}
+
+export async function getAiFactoryJobsCleanupSettings(): Promise<AiFactoryJobsCleanupSettings> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const map = await readAiFactoryJobsSettingsMap(client);
+    const thresholdDays = await resolveUnifiedAiRetentionDays(client);
+    return {
+      autoDeleteEnabled: parseEnabled(map.get(AI_FACTORY_JOBS_SETTINGS_KEYS.enabled)),
+      deletionThresholdDays: thresholdDays,
+      lastRunDate: normalizeRunDate(map.get(AI_FACTORY_JOBS_SETTINGS_KEYS.lastRunDate)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateAiFactoryJobsCleanupSettings(input: {
+  autoDeleteEnabled: boolean;
+  deletionThresholdDays: number;
+}): Promise<AiFactoryJobsCleanupSettings> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const thresholdDays = Math.max(1, Math.floor(input.deletionThresholdDays));
+    await upsertSettings(client, [
+      {
+        key: AI_FACTORY_JOBS_SETTINGS_KEYS.enabled,
+        value: input.autoDeleteEnabled ? "1" : "0",
+      },
+      {
+        key: AI_RETENTION_SETTINGS_KEYS.retentionDays,
+        value: String(thresholdDays),
+      },
+    ]);
+    const map = await readAiFactoryJobsSettingsMap(client);
+    return {
+      autoDeleteEnabled: parseEnabled(map.get(AI_FACTORY_JOBS_SETTINGS_KEYS.enabled)),
+      deletionThresholdDays: thresholdDays,
+      lastRunDate: normalizeRunDate(map.get(AI_FACTORY_JOBS_SETTINGS_KEYS.lastRunDate)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function countExpiredAiFactoryJobs(
+  thresholdDays: number,
+  clientArg?: PoolClient,
+): Promise<number> {
+  const threshold = Math.max(1, Math.floor(thresholdDays));
+  const run = async (client: PoolClient): Promise<number> => {
+    const r = await client.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
+       FROM ai_factory_jobs
+       WHERE status IN ('succeeded', 'failed', 'cancelled')
+         AND finished_at IS NOT NULL
+         AND finished_at < NOW() - ($1::int * INTERVAL '1 day')`,
+      [threshold],
+    );
+    return Number(r.rows[0]?.c ?? 0);
+  };
+  if (clientArg) return run(clientArg);
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    return await run(client);
+  } finally {
+    client.release();
+  }
+}
+
+export async function performAiFactoryJobsCleanup(input: {
+  source: CleanupSource;
+  forceRun?: boolean;
+}): Promise<AiFactoryJobsCleanupResult> {
+  if (runningAiFactoryJobsCleanup) return runningAiFactoryJobsCleanup;
+  const pool = getPool();
+  runningAiFactoryJobsCleanup = (async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const settingsMap = await readAiFactoryJobsSettingsMap(client);
+      const enabled = parseEnabled(settingsMap.get(AI_FACTORY_JOBS_SETTINGS_KEYS.enabled));
+      const thresholdDays = await resolveUnifiedAiRetentionDays(client);
+      const today = toISODate();
+
+      if (!input.forceRun && !enabled) {
+        await client.query("ROLLBACK");
+        return {
+          deletedCount: 0,
+          thresholdDays,
+          runDate: normalizeRunDate(settingsMap.get(AI_FACTORY_JOBS_SETTINGS_KEYS.lastRunDate)),
+        };
+      }
+
+      const expiredCount = await countExpiredAiFactoryJobs(thresholdDays, client);
+      await client.query(
+        `DELETE FROM ai_factory_jobs
+         WHERE status IN ('succeeded', 'failed', 'cancelled')
+           AND finished_at IS NOT NULL
+           AND finished_at < NOW() - ($1::int * INTERVAL '1 day')`,
+        [thresholdDays],
+      );
+
+      await upsertSettings(client, [
+        { key: AI_FACTORY_JOBS_SETTINGS_KEYS.lastRunDate, value: today },
+      ]);
+      await client.query("COMMIT");
+      return { deletedCount: expiredCount, thresholdDays, runDate: today };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore rollback error */
+      }
+      throw error;
+    } finally {
+      client.release();
+      runningAiFactoryJobsCleanup = null;
+    }
+  })();
+  return runningAiFactoryJobsCleanup;
+}
+
+export async function maybeRunStartupAiFactoryJobsCleanup(): Promise<AiFactoryJobsCleanupResult | null> {
+  const settings = await getAiFactoryJobsCleanupSettings();
+  const today = toISODate();
+  if (!settings.autoDeleteEnabled || settings.lastRunDate === today) {
+    return null;
+  }
+  return performAiFactoryJobsCleanup({ source: "startup" });
+}
+
+async function readSimpleContentPricingAuditSettingsMap(client: PoolClient): Promise<Map<string, string>> {
+  const keys = [
+    SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.enabled,
+    SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.lastRunDate,
+    AI_RETENTION_SETTINGS_KEYS.pricingAuditRetentionDays,
+  ];
+  const rows = await client.query<{ key: string; value: string }>(
+    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    [keys],
+  );
+  return new Map(rows.rows.map((r) => [r.key, r.value]));
+}
+
+export async function getSimpleContentPricingAuditCleanupSettings(): Promise<SimpleContentPricingAuditCleanupSettings> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const map = await readSimpleContentPricingAuditSettingsMap(client);
+    return {
+      autoDeleteEnabled: parseEnabled(map.get(SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.enabled)),
+      deletionThresholdDays: await resolvePricingAuditRetentionDays(client),
+      lastRunDate: normalizeRunDate(map.get(SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.lastRunDate)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateSimpleContentPricingAuditCleanupSettings(input: {
+  autoDeleteEnabled: boolean;
+  deletionThresholdDays: number;
+}): Promise<SimpleContentPricingAuditCleanupSettings> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const thresholdDays = Math.max(1, Math.floor(input.deletionThresholdDays));
+    await upsertSettings(client, [
+      {
+        key: SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.enabled,
+        value: input.autoDeleteEnabled ? "1" : "0",
+      },
+      {
+        key: AI_RETENTION_SETTINGS_KEYS.pricingAuditRetentionDays,
+        value: String(thresholdDays),
+      },
+    ]);
+    const map = await readSimpleContentPricingAuditSettingsMap(client);
+    return {
+      autoDeleteEnabled: parseEnabled(map.get(SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.enabled)),
+      deletionThresholdDays: thresholdDays,
+      lastRunDate: normalizeRunDate(map.get(SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.lastRunDate)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function countExpiredSimpleContentPricingAuditLogs(
+  thresholdDays: number,
+  clientArg?: PoolClient,
+): Promise<number> {
+  const threshold = Math.max(1, Math.floor(thresholdDays));
+  const run = async (client: PoolClient): Promise<number> => {
+    const r = await client.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
+       FROM simple_content_pricing_audit_logs
+       WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+      [threshold],
+    );
+    return Number(r.rows[0]?.c ?? 0);
+  };
+  if (clientArg) return run(clientArg);
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    return await run(client);
+  } finally {
+    client.release();
+  }
+}
+
+export async function performSimpleContentPricingAuditCleanup(input: {
+  source: CleanupSource;
+  forceRun?: boolean;
+}): Promise<SimpleContentPricingAuditCleanupResult> {
+  if (runningSimpleContentPricingAuditCleanup) return runningSimpleContentPricingAuditCleanup;
+  const pool = getPool();
+  runningSimpleContentPricingAuditCleanup = (async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const settingsMap = await readSimpleContentPricingAuditSettingsMap(client);
+      const enabled = parseEnabled(settingsMap.get(SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.enabled));
+      const thresholdDays = await resolvePricingAuditRetentionDays(client);
+      const today = toISODate();
+
+      if (!input.forceRun && !enabled) {
+        await client.query("ROLLBACK");
+        return {
+          deletedCount: 0,
+          thresholdDays,
+          runDate: normalizeRunDate(settingsMap.get(SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.lastRunDate)),
+        };
+      }
+
+      const expiredCount = await countExpiredSimpleContentPricingAuditLogs(thresholdDays, client);
+      await client.query(
+        `DELETE FROM simple_content_pricing_audit_logs
+         WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+        [thresholdDays],
+      );
+
+      await upsertSettings(client, [
+        { key: SIMPLE_CONTENT_PRICING_AUDIT_SETTINGS_KEYS.lastRunDate, value: today },
+      ]);
+      await client.query("COMMIT");
+      return { deletedCount: expiredCount, thresholdDays, runDate: today };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore rollback error */
+      }
+      throw error;
+    } finally {
+      client.release();
+      runningSimpleContentPricingAuditCleanup = null;
+    }
+  })();
+  return runningSimpleContentPricingAuditCleanup;
+}
+
+export async function maybeRunStartupSimpleContentPricingAuditCleanup(): Promise<SimpleContentPricingAuditCleanupResult | null> {
+  const settings = await getSimpleContentPricingAuditCleanupSettings();
+  const today = toISODate();
+  if (!settings.autoDeleteEnabled || settings.lastRunDate === today) {
+    return null;
+  }
+  return performSimpleContentPricingAuditCleanup({ source: "startup" });
+}
+
+type CleanupStatsSqlRow = {
+  row_count: string;
+  total_bytes: string | null;
+  total_size: string | null;
+  oldest_created_at: string | null;
+  newest_created_at: string | null;
+};
+
+async function readCleanupStatsForTable(client: PoolClient, tableName: string): Promise<CleanupTableStatsRow> {
+  const r = await client.query<CleanupStatsSqlRow>(
+    `SELECT
+       COUNT(*)::text AS row_count,
+       pg_total_relation_size($1::regclass)::text AS total_bytes,
+       pg_size_pretty(pg_total_relation_size($1::regclass)) AS total_size,
+       MIN(created_at)::text AS oldest_created_at,
+       MAX(created_at)::text AS newest_created_at
+     FROM ${tableName}`,
+    [tableName],
+  );
+  const row = r.rows[0];
+  return {
+    tableName,
+    rowCount: Number(row?.row_count ?? 0),
+    totalBytes: Number(row?.total_bytes ?? 0),
+    totalSize: String(row?.total_size ?? "0 bytes"),
+    oldestCreatedAt: row?.oldest_created_at ?? null,
+    newestCreatedAt: row?.newest_created_at ?? null,
+  };
+}
+
+export async function getAiCleanupTableStats(): Promise<CleanupTableStatsRow[]> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const tables = [
+      "ai_factory_jobs",
+      "ai_factory_job_logs",
+      "ai_factory_inspection_logs",
+      "ai_usage_logs",
+      "simple_content_runs",
+      "simple_content_pricing_audit_logs",
+    ];
+    const out: CleanupTableStatsRow[] = [];
+    for (const tableName of tables) {
+      out.push(await readCleanupStatsForTable(client, tableName));
+    }
+    return out;
+  } finally {
+    client.release();
+  }
 }

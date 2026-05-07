@@ -5,15 +5,20 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { GameManager } from "./game/GameManager";
 import {
+  maybeRunStartupAiFactoryJobsCleanup,
   maybeRunStartupAiFactoryLogsCleanup,
   maybeRunStartupCleanup,
+  maybeRunStartupSimpleContentPricingAuditCleanup,
   maybeRunStartupSimpleContentRunsCleanup,
+  performAiFactoryJobsCleanup,
   performAiFactoryLogsCleanup,
   performCleanup,
+  performSimpleContentPricingAuditCleanup,
   performSimpleContentRunsCleanup,
 } from "./services/cleanup";
 import { aiFactoryRuntime } from "./services/aiFactory/runtime";
 import { startSimpleContentScheduler, stopSimpleContentScheduler } from "./services/simpleContent/scheduler";
+import { setReleaseVersionListener } from "./releaseVersionBus";
 
 if (!config.databaseUrl) {
   console.error("DATABASE_URL is required");
@@ -33,7 +38,17 @@ function scheduleCleanupCron(): void {
       // detailed log is emitted inside cleanup service
     }
     try {
+      await performAiFactoryJobsCleanup({ source: "cron" });
+    } catch {
+      // detailed log is emitted inside cleanup service
+    }
+    try {
       await performSimpleContentRunsCleanup({ source: "cron" });
+    } catch {
+      // detailed log is emitted inside cleanup service
+    }
+    try {
+      await performSimpleContentPricingAuditCleanup({ source: "cron" });
     } catch {
       // detailed log is emitted inside cleanup service
     }
@@ -55,6 +70,9 @@ async function startServer(): Promise<void> {
   io.on("connection", (socket) => {
     game.attachSocket(socket);
   });
+  setReleaseVersionListener((releaseVersion) => {
+    io.emit("release_updated", { releaseVersion, serverNow: Date.now() });
+  });
 
   try {
     await maybeRunStartupCleanup();
@@ -67,7 +85,17 @@ async function startServer(): Promise<void> {
     // detailed log is emitted inside cleanup service
   }
   try {
+    await maybeRunStartupAiFactoryJobsCleanup();
+  } catch {
+    // detailed log is emitted inside cleanup service
+  }
+  try {
     await maybeRunStartupSimpleContentRunsCleanup();
+  } catch {
+    // detailed log is emitted inside cleanup service
+  }
+  try {
+    await maybeRunStartupSimpleContentPricingAuditCleanup();
   } catch {
     // detailed log is emitted inside cleanup service
   }
@@ -80,6 +108,7 @@ async function startServer(): Promise<void> {
   });
 
   const shutdown = async () => {
+    setReleaseVersionListener(null);
     try {
       stopSimpleContentScheduler();
     } catch {

@@ -242,9 +242,27 @@ const DEFAULT_RESULT_MESSAGES = {
 const PLAYER_NAME_STORAGE_KEY = "fahem.playerName";
 const PLAYER_SESSION_STORAGE_KEY = "fahem.playerSessionId";
 const RELEASE_VERSION_QUERY_KEY = "v";
-const RELEASE_WATCH_INTERVAL_MS = 30000;
+const RELEASE_WATCH_FOREGROUND_INTERVAL_MS = 30_000;
+const RELEASE_WATCH_FOREGROUND_MAX_MS = 60_000;
+const RELEASE_WATCH_BACKGROUND_INTERVAL_MS = 3 * 60_000;
+const RELEASE_WATCH_BACKGROUND_MAX_MS = 5 * 60_000;
+const RELEASE_WATCH_MAX_FAILURE_BACKOFF_STEP = 4;
 let releaseWatchHandle: number | null = null;
 let lastKnownReleaseVersion: string | null = null;
+let lastKnownReleaseEtag: string | null = null;
+let releaseWatchInFlight = false;
+let releaseWatchFailureCount = 0;
+let releaseWatchDeferredVersion: string | null = null;
+let releaseWatchDeferredReason: string | null = null;
+const releaseWatchMetrics = {
+  totalChecks: 0,
+  successChecks: 0,
+  failedChecks: 0,
+  notModifiedChecks: 0,
+  deferredRefreshes: 0,
+  immediateRefreshes: 0,
+  socketRefreshSignals: 0,
+};
 
 const RESULT_VIDEO_SRC = {
   win: "/videos/win.mp4",
@@ -356,42 +374,190 @@ async function ensurePrivateQrDataUrl(inviteUrl: string): Promise<void> {
   }
 }
 
-async function fetchReleaseVersion(): Promise<string | null> {
+type ReleaseVersionFetchResult =
+  | { status: "ok"; releaseVersion: string; etag: string | null }
+  | { status: "not_modified"; etag: string | null }
+  | { status: "error" };
+
+function isReleaseReloadSensitivePhase(current: Phase): boolean {
+  return current === "playing"
+    || current === "studying"
+    || current === "countdown"
+    || current === "lesson_quiz"
+    || current === "lesson_study";
+}
+
+function computeReleaseWatchDelayMs(): number {
+  const failureStep = Math.min(releaseWatchFailureCount, RELEASE_WATCH_MAX_FAILURE_BACKOFF_STEP);
+  const multiplier = 2 ** failureStep;
+  const base = document.hidden
+    ? RELEASE_WATCH_BACKGROUND_INTERVAL_MS
+    : RELEASE_WATCH_FOREGROUND_INTERVAL_MS;
+  const max = document.hidden
+    ? RELEASE_WATCH_BACKGROUND_MAX_MS
+    : RELEASE_WATCH_FOREGROUND_MAX_MS;
+  const withBackoff = Math.min(max, base * multiplier);
+  const jitter = Math.floor(withBackoff * 0.15 * Math.random());
+  return withBackoff + jitter;
+}
+
+function setReleaseWatchMetricsToWindow(): void {
   try {
+    (window as typeof window & { __fahemReleaseWatchMetrics?: unknown }).__fahemReleaseWatchMetrics = {
+      ...releaseWatchMetrics,
+      releaseWatchFailureCount,
+      lastKnownReleaseVersion,
+      releaseWatchDeferredVersion,
+      releaseWatchDeferredReason,
+    };
+  } catch {
+    /* ignore metrics exposure failures */
+  }
+}
+
+function performReleaseRefresh(releaseVersion: string): void {
+  const target = new URL(window.location.href);
+  target.searchParams.set(RELEASE_VERSION_QUERY_KEY, releaseVersion);
+  window.location.replace(target.toString());
+}
+
+function applyReleaseVersionUpdate(
+  releaseVersion: string,
+  options?: { source?: "polling" | "socket"; forceImmediate?: boolean },
+): void {
+  lastKnownReleaseVersion = releaseVersion;
+  const shouldDefer = !options?.forceImmediate && isReleaseReloadSensitivePhase(phase);
+  if (shouldDefer) {
+    releaseWatchDeferredVersion = releaseVersion;
+    releaseWatchDeferredReason = options?.source ?? "polling";
+    releaseWatchMetrics.deferredRefreshes += 1;
+    setReleaseWatchMetricsToWindow();
+    return;
+  }
+  releaseWatchMetrics.immediateRefreshes += 1;
+  setReleaseWatchMetricsToWindow();
+  performReleaseRefresh(releaseVersion);
+}
+
+function maybeApplyDeferredReleaseRefresh(): void {
+  if (!releaseWatchDeferredVersion) return;
+  if (isReleaseReloadSensitivePhase(phase)) return;
+  const next = releaseWatchDeferredVersion;
+  releaseWatchDeferredVersion = null;
+  releaseWatchDeferredReason = null;
+  applyReleaseVersionUpdate(next, { source: "polling", forceImmediate: true });
+}
+
+async function fetchReleaseVersion(): Promise<ReleaseVersionFetchResult> {
+  try {
+    const headers = new Headers({ "Cache-Control": "no-cache" });
+    if (lastKnownReleaseEtag) {
+      headers.set("If-None-Match", lastKnownReleaseEtag);
+    }
     const res = await fetch("/api/release-version", {
       cache: "no-store",
-      headers: { "Cache-Control": "no-cache" },
+      headers,
     });
-    if (!res.ok) return null;
+    const etag = res.headers.get("etag");
+    if (etag) {
+      lastKnownReleaseEtag = etag;
+    }
+    if (res.status === 304) {
+      return { status: "not_modified", etag };
+    }
+    if (!res.ok) return { status: "error" };
     const data = (await res.json()) as { ok?: boolean; releaseVersion?: string };
-    if (!data?.ok || typeof data.releaseVersion !== "string") return null;
+    if (!data?.ok || typeof data.releaseVersion !== "string") return { status: "error" };
     const value = data.releaseVersion.trim();
-    return value.length > 0 ? value : null;
+    if (!value.length) return { status: "error" };
+    return { status: "ok", releaseVersion: value, etag };
   } catch {
-    return null;
+    return { status: "error" };
   }
 }
 
 async function checkReleaseVersionForRefresh(): Promise<void> {
-  const remoteVersion = await fetchReleaseVersion();
-  if (!remoteVersion) return;
-  if (!lastKnownReleaseVersion) {
-    lastKnownReleaseVersion = remoteVersion;
+  if (releaseWatchInFlight) return;
+  releaseWatchInFlight = true;
+  releaseWatchMetrics.totalChecks += 1;
+  const result = await fetchReleaseVersion();
+  releaseWatchInFlight = false;
+  if (result.status === "error") {
+    releaseWatchFailureCount += 1;
+    releaseWatchMetrics.failedChecks += 1;
+    setReleaseWatchMetricsToWindow();
     return;
   }
-  if (remoteVersion === lastKnownReleaseVersion) return;
-  const target = new URL(window.location.href);
-  target.searchParams.set(RELEASE_VERSION_QUERY_KEY, remoteVersion);
-  window.location.replace(target.toString());
+  releaseWatchFailureCount = 0;
+  if (result.status === "not_modified") {
+    releaseWatchMetrics.notModifiedChecks += 1;
+    maybeApplyDeferredReleaseRefresh();
+    setReleaseWatchMetricsToWindow();
+    return;
+  }
+  releaseWatchMetrics.successChecks += 1;
+  const remoteVersion = result.releaseVersion;
+  if (!lastKnownReleaseVersion) {
+    lastKnownReleaseVersion = remoteVersion;
+    maybeApplyDeferredReleaseRefresh();
+    setReleaseWatchMetricsToWindow();
+    return;
+  }
+  if (remoteVersion !== lastKnownReleaseVersion) {
+    applyReleaseVersionUpdate(remoteVersion, { source: "polling" });
+    return;
+  }
+  maybeApplyDeferredReleaseRefresh();
+  setReleaseWatchMetricsToWindow();
+}
+
+function scheduleNextReleaseVersionCheck(delayMs?: number): void {
+  if (releaseWatchHandle != null) {
+    window.clearTimeout(releaseWatchHandle);
+    releaseWatchHandle = null;
+  }
+  const nextDelay = delayMs ?? computeReleaseWatchDelayMs();
+  releaseWatchHandle = window.setTimeout(() => {
+    void runReleaseVersionCheckCycle();
+  }, Math.max(0, nextDelay));
+}
+
+async function runReleaseVersionCheckCycle(forceImmediate = false): Promise<void> {
+  if (forceImmediate) {
+    releaseWatchFailureCount = 0;
+  }
+  await checkReleaseVersionForRefresh();
+  scheduleNextReleaseVersionCheck();
+}
+
+function handleReleaseVersionPush(rawVersion: unknown): void {
+  const next = String(rawVersion ?? "").trim();
+  if (!next) return;
+  releaseWatchMetrics.socketRefreshSignals += 1;
+  if (next !== lastKnownReleaseVersion) {
+    applyReleaseVersionUpdate(next, { source: "socket" });
+    return;
+  }
+  maybeApplyDeferredReleaseRefresh();
+  setReleaseWatchMetricsToWindow();
 }
 
 function startReleaseVersionWatch(): void {
   if (releaseWatchHandle !== null) return;
   lastKnownReleaseVersion = getReleaseVersionFromUrl();
-  void checkReleaseVersionForRefresh();
-  releaseWatchHandle = window.setInterval(() => {
-    void checkReleaseVersionForRefresh();
-  }, RELEASE_WATCH_INTERVAL_MS);
+  void runReleaseVersionCheckCycle(true);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      scheduleNextReleaseVersionCheck(RELEASE_WATCH_BACKGROUND_INTERVAL_MS);
+      return;
+    }
+    maybeApplyDeferredReleaseRefresh();
+    void runReleaseVersionCheckCycle(true);
+  });
+  window.addEventListener("online", () => {
+    void runReleaseVersionCheckCycle(true);
+  });
+  setReleaseWatchMetricsToWindow();
 }
 
 function applyResultScreenPresentation(kind: ResultScreenKind, emoji: string): void {
@@ -3432,6 +3598,10 @@ function connectSocket(
     updateConnectionBadge();
     const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
     if (noticeEl) noticeEl.textContent = "انقطع الاتصال مؤقتًا... جاري إعادة الاتصال";
+  });
+
+  s.on("release_updated", (payload: { releaseVersion?: string }) => {
+    handleReleaseVersionPush(payload?.releaseVersion);
   });
 
   s.on(

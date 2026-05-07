@@ -27,17 +27,26 @@ import {
 import { getResultMessages } from "../db/resultCopy";
 import { Match } from "../game/Match";
 import {
+  countExpiredAiFactoryJobs,
   countExpiredAiFactoryLogs,
   countExpiredQuestions,
+  countExpiredSimpleContentPricingAuditLogs,
   countExpiredSimpleContentRuns,
+  getAiCleanupTableStats,
+  getAiFactoryJobsCleanupSettings,
   getAiFactoryLogsCleanupSettings,
   getCleanupSettings,
+  getSimpleContentPricingAuditCleanupSettings,
   getSimpleContentRunsCleanupSettings,
+  performAiFactoryJobsCleanup,
   performAiFactoryLogsCleanup,
   performCleanup,
+  performSimpleContentPricingAuditCleanup,
   performSimpleContentRunsCleanup,
+  updateAiFactoryJobsCleanupSettings,
   updateAiFactoryLogsCleanupSettings,
   updateCleanupSettings,
+  updateSimpleContentPricingAuditCleanupSettings,
   updateSimpleContentRunsCleanupSettings,
 } from "../services/cleanup";
 import {
@@ -97,6 +106,7 @@ import {
   lessonImportBodySchema,
   normalizeLessonImportPayload,
 } from "../lessonImportPayload";
+import { emitReleaseVersionUpdated } from "../releaseVersionBus";
 
 const questionBodySchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
@@ -227,6 +237,16 @@ const aiFactoryLogsCleanupSettingsPatchSchema = z.object({
 });
 
 const simpleContentRunsCleanupSettingsPatchSchema = z.object({
+  autoDeleteEnabled: z.boolean(),
+  deletionThresholdDays: z.number().int().min(1).max(3650),
+});
+
+const aiFactoryJobsCleanupSettingsPatchSchema = z.object({
+  autoDeleteEnabled: z.boolean(),
+  deletionThresholdDays: z.number().int().min(1).max(3650),
+});
+
+const simpleContentPricingAuditCleanupSettingsPatchSchema = z.object({
   autoDeleteEnabled: z.boolean(),
   deletionThresholdDays: z.number().int().min(1).max(3650),
 });
@@ -1090,6 +1110,55 @@ const categoriesCoverageCache = new Map<
 >();
 const CATEGORIES_COVERAGE_CACHE_TTL_MS = 10_000;
 
+const RELEASE_VERSION_CACHE_TTL_MS = 30_000;
+const DEFAULT_RELEASE_VERSION = "1";
+
+type ReleaseVersionCacheState = {
+  value: string;
+  expiresAtMs: number;
+};
+
+const releaseVersionMetrics = {
+  totalHits: 0,
+  cacheHits: 0,
+  dbReads: 0,
+  etagNotModified: 0,
+  writeUpdates: 0,
+  readFailures: 0,
+};
+
+let releaseVersionCache: ReleaseVersionCacheState | null = null;
+
+function normalizeReleaseVersion(value: string | null | undefined): string {
+  return String(value ?? DEFAULT_RELEASE_VERSION).trim() || DEFAULT_RELEASE_VERSION;
+}
+
+function getReleaseVersionEtag(releaseVersion: string): string {
+  return `"rv-${crypto.createHash("sha1").update(releaseVersion).digest("hex")}"`;
+}
+
+function getCachedReleaseVersion(): string | null {
+  if (!releaseVersionCache) return null;
+  if (Date.now() > releaseVersionCache.expiresAtMs) {
+    releaseVersionCache = null;
+    return null;
+  }
+  return releaseVersionCache.value;
+}
+
+function cacheReleaseVersion(releaseVersion: string): void {
+  releaseVersionCache = {
+    value: normalizeReleaseVersion(releaseVersion),
+    expiresAtMs: Date.now() + RELEASE_VERSION_CACHE_TTL_MS,
+  };
+}
+
+function setReleaseVersionResponseHeaders(res: Response, etag: string): void {
+  res.setHeader("ETag", etag);
+  res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+  res.setHeader("Vary", "If-None-Match");
+}
+
 export function registerAdminRoutes(app: Express): void {
   app.get("/api/categories", async (_req: Request, res: Response) => {
     try {
@@ -1122,17 +1191,59 @@ export function registerAdminRoutes(app: Express): void {
       res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
-  app.get("/api/release-version", async (_req: Request, res: Response) => {
+  app.get("/api/release-version", async (req: Request, res: Response) => {
+    releaseVersionMetrics.totalHits += 1;
     try {
-      const pool = getPool();
-      const r = await pool.query<{ value: string }>(
-        `SELECT value FROM app_settings WHERE key = 'release_version' LIMIT 1`,
-      );
-      const releaseVersion = String(r.rows[0]?.value ?? "1").trim() || "1";
+      let releaseVersion = getCachedReleaseVersion();
+      if (releaseVersion) {
+        releaseVersionMetrics.cacheHits += 1;
+      } else {
+        const pool = getPool();
+        const r = await pool.query<{ value: string }>(
+          `SELECT value FROM app_settings WHERE key = 'release_version' LIMIT 1`,
+        );
+        releaseVersionMetrics.dbReads += 1;
+        releaseVersion = normalizeReleaseVersion(r.rows[0]?.value);
+        cacheReleaseVersion(releaseVersion);
+      }
+      const etag = getReleaseVersionEtag(releaseVersion);
+      setReleaseVersionResponseHeaders(res, etag);
+      if (req.headers["if-none-match"] === etag) {
+        releaseVersionMetrics.etagNotModified += 1;
+        res.status(304).end();
+        return;
+      }
       res.json({ ok: true, releaseVersion });
     } catch {
+      releaseVersionMetrics.readFailures += 1;
       res.status(500).json({ ok: false, error: "read_failed" });
     }
+  });
+
+  app.get("/api/admin/release-version-metrics", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const cacheState =
+      releaseVersionCache && Date.now() <= releaseVersionCache.expiresAtMs
+        ? {
+            value: releaseVersionCache.value,
+            ttlRemainingMs: Math.max(0, releaseVersionCache.expiresAtMs - Date.now()),
+          }
+        : null;
+    res.json({
+      ok: true,
+      metrics: {
+        ...releaseVersionMetrics,
+        cacheHitRate:
+          releaseVersionMetrics.totalHits > 0
+            ? Number((releaseVersionMetrics.cacheHits / releaseVersionMetrics.totalHits).toFixed(4))
+            : 0,
+      },
+      cacheState,
+      baselineEstimate: {
+        pollIntervalSeconds: 30,
+        requestsPerTabPerDay: 2880,
+      },
+    });
   });
 
   app.get("/admin", async (_req: Request, res: Response) => {
@@ -1408,6 +1519,9 @@ export function registerAdminRoutes(app: Express): void {
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [releaseVersion],
       );
+      releaseVersionMetrics.writeUpdates += 1;
+      cacheReleaseVersion(releaseVersion);
+      emitReleaseVersionUpdated(releaseVersion);
       res.json({ ok: true, releaseVersion });
     } catch {
       res.status(500).json({ ok: false, error: "cache_bust_failed" });
@@ -1543,6 +1657,7 @@ export function registerAdminRoutes(app: Express): void {
         ok: true,
         autoDeleteEnabled: settings.autoDeleteEnabled,
         deletionThresholdDays: settings.deletionThresholdDays,
+        aiCleanupRetentionDays: settings.deletionThresholdDays,
         lastRunDate: settings.lastRunDate,
       });
     } catch {
@@ -1567,6 +1682,7 @@ export function registerAdminRoutes(app: Express): void {
         ok: true,
         autoDeleteEnabled: settings.autoDeleteEnabled,
         deletionThresholdDays: settings.deletionThresholdDays,
+        aiCleanupRetentionDays: settings.deletionThresholdDays,
         lastRunDate: settings.lastRunDate,
       });
     } catch {
@@ -1670,6 +1786,75 @@ export function registerAdminRoutes(app: Express): void {
         jobLogsDeletedCount: result.jobLogsDeletedCount,
         inspectionLogsDeletedCount: result.inspectionLogsDeletedCount,
         deletedCount: result.totalDeletedCount,
+        runDate: result.runDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "cleanup_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-factory-jobs-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getAiFactoryJobsCleanupSettings();
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/ai-factory-jobs-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = aiFactoryJobsCleanupSettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const settings = await updateAiFactoryJobsCleanupSettings(parsed.data);
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/ai-factory-jobs-cleanup/preview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getAiFactoryJobsCleanupSettings();
+      const expiredCount = await countExpiredAiFactoryJobs(settings.deletionThresholdDays);
+      res.json({
+        ok: true,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        expiredCount,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "preview_failed" });
+    }
+  });
+
+  app.post("/api/admin/ai-factory-jobs-cleanup/run", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const result = await performAiFactoryJobsCleanup({ source: "manual", forceRun: true });
+      res.json({
+        ok: true,
+        deletionThresholdDays: result.thresholdDays,
+        deletedCount: result.deletedCount,
         runDate: result.runDate,
       });
     } catch {
@@ -2213,6 +2398,85 @@ export function registerAdminRoutes(app: Express): void {
       });
     } catch {
       res.status(500).json({ ok: false, error: "cleanup_failed" });
+    }
+  });
+
+  app.get("/api/admin/simple-content/pricing-audit-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getSimpleContentPricingAuditCleanupSettings();
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/simple-content/pricing-audit-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = simpleContentPricingAuditCleanupSettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const settings = await updateSimpleContentPricingAuditCleanupSettings(parsed.data);
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/simple-content/pricing-audit-cleanup/preview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getSimpleContentPricingAuditCleanupSettings();
+      const expiredCount = await countExpiredSimpleContentPricingAuditLogs(settings.deletionThresholdDays);
+      res.json({
+        ok: true,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        expiredCount,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "preview_failed" });
+    }
+  });
+
+  app.post("/api/admin/simple-content/pricing-audit-cleanup/run", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const result = await performSimpleContentPricingAuditCleanup({ source: "manual", forceRun: true });
+      res.json({
+        ok: true,
+        deletionThresholdDays: result.thresholdDays,
+        deletedCount: result.deletedCount,
+        runDate: result.runDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "cleanup_failed" });
+    }
+  });
+
+  app.get("/api/admin/ai-cleanup/overview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const rows = await getAiCleanupTableStats();
+      res.json({ ok: true, rows });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
 
