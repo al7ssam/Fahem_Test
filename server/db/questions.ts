@@ -41,7 +41,7 @@ export async function getRandomQuestion(
     whereParts.length > 0 ? `WHERE ${whereParts.join(" AND ")}` : "";
   const sql = `
     SELECT id, prompt, options, correct_index, study_body, subcategory_key
-    FROM questions
+    FROM public.questions
     ${where}
     ORDER BY RANDOM()
     LIMIT 1
@@ -88,7 +88,7 @@ export async function getStudyPhaseCardsFromQuestionIds(
   for (const qid of questionIdsOrdered) {
     if (out.length >= maxCards) break;
     const res = await pool.query<{ study_body: string | null }>(
-      `SELECT study_body FROM questions WHERE id = $1`,
+      `SELECT study_body FROM public.questions WHERE id = $1`,
       [qid],
     );
     const body = res.rows[0]?.study_body?.trim();
@@ -137,7 +137,7 @@ export async function countQuestionsBySubcategory(
   }
   const where = `WHERE ${whereParts.join(" AND ")}`;
   const r = await pool.query<{ c: string }>(
-    `SELECT COUNT(*)::text AS c FROM questions ${where}`,
+    `SELECT COUNT(*)::text AS c FROM public.questions ${where}`,
     params,
   );
   return Number(r.rows[0]?.c ?? 0);
@@ -155,7 +155,7 @@ export async function getStudyModeTimingOverridesBySubcategoryKey(
     study_mode_study_phase_ms: number | null;
   }>(
     `SELECT study_mode_question_ms, study_mode_study_phase_ms
-     FROM question_subcategories WHERE subcategory_key = $1 LIMIT 1`,
+     FROM public.question_subcategories WHERE subcategory_key = $1 LIMIT 1`,
     [key],
   );
   const row = r.rows[0];

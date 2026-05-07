@@ -25,7 +25,7 @@ export async function fetchGameTimingFromAppSettings(
   pool: Pool,
 ): Promise<{ questionMs: number; studyPhaseMs: number }> {
   const r = await pool.query<{ key: string; value: string }>(
-    `SELECT key, value FROM app_settings WHERE key IN ('game_question_ms', 'game_study_phase_ms')`,
+    `SELECT key, value FROM public.app_settings WHERE key IN ('game_question_ms', 'game_study_phase_ms')`,
   );
   const map = new Map(r.rows.map((row) => [row.key, row.value]));
   return {

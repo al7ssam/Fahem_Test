@@ -26,7 +26,7 @@ async function main(): Promise<void> {
        COUNT(*) FILTER (WHERE status = 'failed')::text AS failed,
        COUNT(*) FILTER (WHERE COALESCE(last_error, '') ILIKE '%layer_output_truncated_max_tokens%')::text AS truncated,
        COUNT(*) FILTER (WHERE COALESCE(last_error, '') ILIKE '%invalid_json%')::text AS json_fail
-     FROM ai_factory_jobs
+     FROM public.ai_factory_jobs
      WHERE created_at >= NOW() - ($1::text || ' days')::interval
      GROUP BY 1
      ORDER BY 1`,
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({ windowDays: days, byVariant: r.rows }, null, 2));
 
   const cfg = await pool.query<{ layer_name: string; reasoning_level: string; max_output_tokens: number }>(
-    `SELECT layer_name, reasoning_level, max_output_tokens FROM ai_factory_model_config ORDER BY layer_name`,
+    `SELECT layer_name, reasoning_level, max_output_tokens FROM public.ai_factory_model_config ORDER BY layer_name`,
   );
   const refiner = cfg.rows.find((x) => x.layer_name === "refiner");
   if (refiner && refiner.reasoning_level !== "none") {

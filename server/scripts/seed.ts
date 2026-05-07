@@ -47,7 +47,7 @@ async function main() {
     process.exit(1);
   }
   const pool = getPool();
-  const count = await pool.query("SELECT COUNT(*)::int AS c FROM questions");
+  const count = await pool.query("SELECT COUNT(*)::int AS c FROM public.questions");
   if (count.rows[0].c > 0) {
     console.log("Questions already exist, skipping seed.");
     await closePool();
@@ -55,7 +55,7 @@ async function main() {
   }
   for (const q of samples) {
     await pool.query(
-      `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body)
+      `INSERT INTO public.questions (prompt, options, correct_index, difficulty, study_body)
        VALUES ($1, $2::jsonb, $3, $4, $5)`,
       [
         q.prompt,

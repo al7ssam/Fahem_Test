@@ -139,7 +139,7 @@ async function loadUsageLogCrossCheck(jobId: number): Promise<EfficiencyUsageLog
             COALESCE(SUM(input_tokens), 0)::text AS input_sum,
             COALESCE(SUM(output_tokens), 0)::text AS output_sum,
             COALESCE(SUM(cost_usd), 0)::text AS cost_sum
-     FROM ai_usage_logs
+     FROM public.ai_usage_logs
      WHERE job_id = $1
      GROUP BY layer_type
      ORDER BY layer_type`,

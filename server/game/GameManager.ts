@@ -1126,7 +1126,7 @@ export class GameManager {
     try {
       const pool = getPool();
       const rows = await pool.query<{ value: string }>(
-        `SELECT value FROM app_settings WHERE key = 'max_players_per_match' LIMIT 1`,
+        `SELECT value FROM public.app_settings WHERE key = 'max_players_per_match' LIMIT 1`,
       );
       const raw = Number(rows.rows[0]?.value ?? DEFAULT_MAX_PLAYERS_PER_MATCH);
       const next = Math.min(100, Math.max(2, Number.isFinite(raw) ? raw : DEFAULT_MAX_PLAYERS_PER_MATCH));
@@ -1148,7 +1148,7 @@ export class GameManager {
     try {
       const pool = getPool();
       const rows = await pool.query<{ value: string }>(
-        `SELECT value FROM app_settings WHERE key = 'match_fill_window_seconds' LIMIT 1`,
+        `SELECT value FROM public.app_settings WHERE key = 'match_fill_window_seconds' LIMIT 1`,
       );
       const raw = Number(rows.rows[0]?.value ?? DEFAULT_MATCH_FILL_WINDOW_SECONDS);
       const next = Math.min(

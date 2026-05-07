@@ -9,7 +9,7 @@ export async function insertSimpleContentQuestions(questions: FactoryQuestion[])
     await client.query("BEGIN");
     for (const q of questions) {
       const ins = await client.query<{ id: number }>(
-        `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, question_type)
+        `INSERT INTO public.questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, question_type)
          VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)
          RETURNING id`,
         [

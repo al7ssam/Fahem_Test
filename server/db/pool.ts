@@ -1,4 +1,4 @@
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import { config } from "../config";
 
 function useSslForConnectionString(url: string): boolean {
@@ -18,10 +18,30 @@ function createPool(): Pool {
     useSslForConnectionString(config.databaseUrl) || config.isProduction
       ? { rejectUnauthorized: false }
       : undefined;
-  return new Pool({
+  const pool = new Pool({
     connectionString: config.databaseUrl,
     ssl,
+    max: config.isProduction ? 20 : 10,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    application_name: "fahem-server",
   });
+  pool.on("connect", (client) => {
+    void applySessionDefaults(client);
+  });
+  pool.on("error", (error) => {
+    console.error("[db_pool] unexpected_client_error", error);
+  });
+  return pool;
+}
+
+async function applySessionDefaults(client: PoolClient): Promise<void> {
+  try {
+    // Deterministic SQL should always use public.<table>. This remains fallback only.
+    await client.query("SET search_path TO public");
+  } catch (error) {
+    console.error("[db_pool] session_init_failed", error);
+  }
 }
 
 let pool: Pool | null = null;

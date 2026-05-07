@@ -22,7 +22,7 @@ async function main(): Promise<void> {
             length(prompt_text)::text AS prompt_chars,
             raw_response_text,
             created_at::text
-     FROM ai_factory_inspection_logs
+     FROM public.ai_factory_inspection_logs
      ORDER BY id DESC
      LIMIT $1`,
     [limit],
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   }
 
   const cfg = await pool.query<{ layer_name: string; reasoning_level: string; max_output_tokens: number }>(
-    `SELECT layer_name, reasoning_level, max_output_tokens FROM ai_factory_model_config ORDER BY layer_name`,
+    `SELECT layer_name, reasoning_level, max_output_tokens FROM public.ai_factory_model_config ORDER BY layer_name`,
   );
   console.log("\nModel config (reasoning / max_output_tokens):");
   for (const c of cfg.rows) {

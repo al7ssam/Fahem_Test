@@ -22,7 +22,7 @@ export async function getStudyCardsForQuestions(
       sort_order: number;
     }>(
       `SELECT id, body, sort_order
-       FROM question_study_cards
+       FROM public.question_study_cards
        WHERE question_id = $1
        ORDER BY sort_order ASC, id ASC`,
       [qid],

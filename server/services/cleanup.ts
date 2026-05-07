@@ -119,7 +119,7 @@ async function readSettingsMap(client: PoolClient): Promise<Map<string, string>>
     SETTINGS_KEYS.lastRunDate,
   ];
   const rows = await client.query<{ key: string; value: string }>(
-    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
     [keys],
   );
   return new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -132,7 +132,7 @@ async function readAiRetentionMap(client: PoolClient): Promise<Map<string, strin
     SETTINGS_KEYS.thresholdDays,
   ];
   const rows = await client.query<{ key: string; value: string }>(
-    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
     [keys],
   );
   return new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -148,7 +148,7 @@ async function upsertSettings(
     .join(", ");
   const params = rows.flatMap((row) => [row.key, row.value]);
   await client.query(
-    `INSERT INTO app_settings (key, value)
+    `INSERT INTO public.app_settings (key, value)
      VALUES ${valuesSql}
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     params,
@@ -225,7 +225,7 @@ export async function countExpiredQuestions(
     const threshold = Math.max(1, Math.floor(thresholdDays));
     const result = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
-       FROM questions
+       FROM public.questions
        WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
       [threshold],
     );
@@ -266,7 +266,7 @@ export async function performCleanup(input: {
 
       const expiredCount = await countExpiredQuestions(thresholdDays, client);
       await client.query(
-        `DELETE FROM questions
+        `DELETE FROM public.questions
          WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
         [thresholdDays],
       );
@@ -318,7 +318,7 @@ async function readAiFactoryLogsSettingsMap(client: PoolClient): Promise<Map<str
     AI_FACTORY_LOGS_SETTINGS_KEYS.lastRunDate,
   ];
   const rows = await client.query<{ key: string; value: string }>(
-    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
     [keys],
   );
   return new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -381,10 +381,10 @@ export async function countExpiredAiFactoryLogs(
     const threshold = Math.max(1, Math.floor(thresholdDays));
     const inspectionResult = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
-       FROM ai_factory_inspection_logs
+       FROM public.ai_factory_inspection_logs
        WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')
          AND EXISTS (
-           SELECT 1 FROM ai_factory_jobs j
+           SELECT 1 FROM public.ai_factory_jobs j
            WHERE j.id = ai_factory_inspection_logs.job_id
              AND j.status IN ('succeeded', 'failed', 'cancelled')
          )`,
@@ -392,10 +392,10 @@ export async function countExpiredAiFactoryLogs(
     );
     const jobLogsResult = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
-       FROM ai_factory_job_logs
+       FROM public.ai_factory_job_logs
        WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')
          AND EXISTS (
-           SELECT 1 FROM ai_factory_jobs j
+           SELECT 1 FROM public.ai_factory_jobs j
            WHERE j.id = ai_factory_job_logs.job_id
              AND j.status IN ('succeeded', 'failed', 'cancelled')
          )`,
@@ -450,20 +450,20 @@ export async function performAiFactoryLogsCleanup(input: {
 
       const counts = await countExpiredAiFactoryLogs(thresholdDays, client);
       await client.query(
-        `DELETE FROM ai_factory_inspection_logs
+        `DELETE FROM public.ai_factory_inspection_logs
          WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')
            AND EXISTS (
-             SELECT 1 FROM ai_factory_jobs j
+             SELECT 1 FROM public.ai_factory_jobs j
              WHERE j.id = ai_factory_inspection_logs.job_id
                AND j.status IN ('succeeded', 'failed', 'cancelled')
            )`,
         [thresholdDays],
       );
       await client.query(
-        `DELETE FROM ai_factory_job_logs
+        `DELETE FROM public.ai_factory_job_logs
          WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')
            AND EXISTS (
-             SELECT 1 FROM ai_factory_jobs j
+             SELECT 1 FROM public.ai_factory_jobs j
              WHERE j.id = ai_factory_job_logs.job_id
                AND j.status IN ('succeeded', 'failed', 'cancelled')
            )`,
@@ -540,7 +540,7 @@ async function readSimpleContentRunsSettingsMap(client: PoolClient): Promise<Map
     SIMPLE_CONTENT_RUNS_SETTINGS_KEYS.lastRunDate,
   ];
   const rows = await client.query<{ key: string; value: string }>(
-    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
     [keys],
   );
   return new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -603,7 +603,7 @@ export async function countExpiredSimpleContentRuns(
   const run = async (client: PoolClient): Promise<number> => {
     const r = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
-       FROM simple_content_runs
+       FROM public.simple_content_runs
        WHERE status IN ('succeeded', 'failed', 'pending_review')
          AND finished_at IS NOT NULL
          AND finished_at < NOW() - ($1::int * INTERVAL '1 day')`,
@@ -649,7 +649,7 @@ export async function performSimpleContentRunsCleanup(input: {
 
       const expiredCount = await countExpiredSimpleContentRuns(thresholdDays, client);
       await client.query(
-        `DELETE FROM simple_content_runs
+        `DELETE FROM public.simple_content_runs
          WHERE status IN ('succeeded', 'failed', 'pending_review')
            AND finished_at IS NOT NULL
            AND finished_at < NOW() - ($1::int * INTERVAL '1 day')`,
@@ -717,7 +717,7 @@ async function readAiFactoryJobsSettingsMap(client: PoolClient): Promise<Map<str
     AI_FACTORY_JOBS_SETTINGS_KEYS.lastRunDate,
   ];
   const rows = await client.query<{ key: string; value: string }>(
-    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
     [keys],
   );
   return new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -776,7 +776,7 @@ export async function countExpiredAiFactoryJobs(
   const run = async (client: PoolClient): Promise<number> => {
     const r = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
-       FROM ai_factory_jobs
+       FROM public.ai_factory_jobs
        WHERE status IN ('succeeded', 'failed', 'cancelled')
          AND finished_at IS NOT NULL
          AND finished_at < NOW() - ($1::int * INTERVAL '1 day')`,
@@ -820,7 +820,7 @@ export async function performAiFactoryJobsCleanup(input: {
 
       const expiredCount = await countExpiredAiFactoryJobs(thresholdDays, client);
       await client.query(
-        `DELETE FROM ai_factory_jobs
+        `DELETE FROM public.ai_factory_jobs
          WHERE status IN ('succeeded', 'failed', 'cancelled')
            AND finished_at IS NOT NULL
            AND finished_at < NOW() - ($1::int * INTERVAL '1 day')`,
@@ -863,7 +863,7 @@ async function readSimpleContentPricingAuditSettingsMap(client: PoolClient): Pro
     AI_RETENTION_SETTINGS_KEYS.pricingAuditRetentionDays,
   ];
   const rows = await client.query<{ key: string; value: string }>(
-    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
     [keys],
   );
   return new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -921,7 +921,7 @@ export async function countExpiredSimpleContentPricingAuditLogs(
   const run = async (client: PoolClient): Promise<number> => {
     const r = await client.query<{ c: string }>(
       `SELECT COUNT(*)::text AS c
-       FROM simple_content_pricing_audit_logs
+       FROM public.simple_content_pricing_audit_logs
        WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
       [threshold],
     );
@@ -963,7 +963,7 @@ export async function performSimpleContentPricingAuditCleanup(input: {
 
       const expiredCount = await countExpiredSimpleContentPricingAuditLogs(thresholdDays, client);
       await client.query(
-        `DELETE FROM simple_content_pricing_audit_logs
+        `DELETE FROM public.simple_content_pricing_audit_logs
          WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
         [thresholdDays],
       );

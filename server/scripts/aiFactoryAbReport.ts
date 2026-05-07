@@ -36,7 +36,7 @@ async function main(): Promise<void> {
          status,
          COALESCE((result_summary->>'inserted')::int, 0) AS inserted,
          COALESCE((result_summary->>'refinerSkipped')::boolean, false) AS refiner_skipped
-       FROM ai_factory_jobs
+       FROM public.ai_factory_jobs
        WHERE created_at >= NOW() - ($1::text || ' days')::interval
          ${subFilter}
      ),
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
          COALESCE(SUM(input_tokens), 0) AS input_tokens,
          COALESCE(SUM(output_tokens), 0) AS output_tokens,
          COALESCE(SUM(cost_usd), 0) AS cost_usd
-       FROM ai_usage_logs
+       FROM public.ai_usage_logs
        WHERE created_at >= NOW() - ($1::text || ' days')::interval
        GROUP BY job_id
      )

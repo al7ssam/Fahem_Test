@@ -55,7 +55,7 @@ async function appendJobLog(
 ): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO ai_factory_job_logs (job_id, layer_name, level, message, details)
+    `INSERT INTO public.ai_factory_job_logs (job_id, layer_name, level, message, details)
      VALUES ($1, $2, $3, $4, $5::jsonb)`,
     [jobId, layer ?? null, level, message, JSON.stringify(details ?? {})],
   );
@@ -72,7 +72,7 @@ async function appendInspectionLog(input: {
 }): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO ai_factory_inspection_logs
+    `INSERT INTO public.ai_factory_inspection_logs
       (job_id, layer_name, prompt_text, raw_response_text, provider, model_name, api_version)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
@@ -131,7 +131,7 @@ async function appendAiUsageLogSafe(input: {
 async function isJobCancelled(jobId: number): Promise<boolean> {
   const pool = getPool();
   const r = await pool.query<{ status: string }>(
-    `SELECT status FROM ai_factory_jobs WHERE id = $1 LIMIT 1`,
+    `SELECT status FROM public.ai_factory_jobs WHERE id = $1 LIMIT 1`,
     [jobId],
   );
   return String(r.rows[0]?.status || "") === "cancelled";
@@ -146,7 +146,7 @@ async function assertNotCancelled(jobId: number, layer: FactoryLayer | null): Pr
 async function saveJobFinalOutput(jobId: number, questions: FactoryQuestion[]): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `UPDATE ai_factory_jobs
+    `UPDATE public.ai_factory_jobs
      SET final_output_json = $1::jsonb, updated_at = NOW()
      WHERE id = $2`,
     [JSON.stringify(questions), jobId],
@@ -195,7 +195,7 @@ async function setJobState(
   updates.push(`updated_at = NOW()`);
   params.push(jobId);
   await pool.query(
-    `UPDATE ai_factory_jobs SET ${updates.join(", ")} WHERE id = $${params.length}`,
+    `UPDATE public.ai_factory_jobs SET ${updates.join(", ")} WHERE id = $${params.length}`,
     params,
   );
 }
@@ -215,8 +215,8 @@ async function readSubcategoryContext(subcategoryKey: string): Promise<{
        COALESCE(sc.name_ar, sc.subcategory_key) AS sub_name_ar,
        COALESCE(sc.internal_description, '') AS sub_desc,
        COALESCE(mc.name_ar, '') AS main_name_ar
-     FROM question_subcategories sc
-     LEFT JOIN question_main_categories mc ON mc.id = sc.main_category_id
+     FROM public.question_subcategories sc
+     LEFT JOIN public.question_main_categories mc ON mc.id = sc.main_category_id
      WHERE sc.subcategory_key = $1
      LIMIT 1`,
     [subcategoryKey],
@@ -734,7 +734,7 @@ async function insertQuestionsAllOrNothing(questions: FactoryQuestion[]): Promis
     await client.query("BEGIN");
     for (const q of questions) {
       await client.query(
-        `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, question_type)
+        `INSERT INTO public.questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, question_type)
          VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)`,
         [
           q.prompt,
@@ -773,7 +773,7 @@ async function refreshPipelineState(
 ): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO ai_factory_pipeline_state (
+    `INSERT INTO public.ai_factory_pipeline_state (
        subcategory_key, last_job_id, last_status, last_layer, last_error, generated_count, target_count, last_run_at, last_success_at, updated_at
      )
      VALUES ($1, $2, $3, $4, $5, $6, 200, NOW(), CASE WHEN $3 = 'succeeded' THEN NOW() ELSE NULL END, NOW())
@@ -803,7 +803,7 @@ async function refreshPipelineState(
  */
 export async function recoverFactoryJobAfterUnhandledError(job: JobRow, err: unknown): Promise<void> {
   const r = await getPool().query<{ status: string }>(
-    `SELECT status FROM ai_factory_jobs WHERE id = $1 LIMIT 1`,
+    `SELECT status FROM public.ai_factory_jobs WHERE id = $1 LIMIT 1`,
     [job.id],
   );
   if (String(r.rows[0]?.status || "") !== "running") return;
@@ -858,7 +858,7 @@ export async function reclaimStaleRunningJobsOnStartup(): Promise<number> {
     subcategory_key: string;
   }>(
     `SELECT id, attempt_count, max_attempts, subcategory_key
-     FROM ai_factory_jobs
+     FROM public.ai_factory_jobs
      WHERE status = 'running'
        AND updated_at < NOW() - (INTERVAL '1 minute' * $1::int)`,
     [STALE_RUNNING_THRESHOLD_MINUTES],
@@ -1264,7 +1264,7 @@ export async function listFactoryJobs(limit = 50): Promise<FactoryJobPublic[]> {
   }>(
     `SELECT id, subcategory_key, difficulty_mode, target_count, batch_size, status, current_layer,
             attempt_count, max_attempts, last_error, created_at, started_at, finished_at, result_summary
-     FROM ai_factory_jobs
+     FROM public.ai_factory_jobs
      ORDER BY id DESC
      LIMIT $1`,
     [Math.min(200, Math.max(1, limit))],
@@ -1305,7 +1305,7 @@ export async function getFactoryJobLogs(jobId: number): Promise<Array<{
     created_at: string;
   }>(
     `SELECT id, layer_name, level, message, details, created_at
-     FROM ai_factory_job_logs
+     FROM public.ai_factory_job_logs
      WHERE job_id = $1
      ORDER BY id ASC`,
     [jobId],
@@ -1338,7 +1338,7 @@ export async function getFactoryJobErrorTimeline(jobId: number): Promise<Factory
     created_at: string;
   }>(
     `SELECT id, layer_name, message, details, created_at
-     FROM ai_factory_job_logs
+     FROM public.ai_factory_job_logs
      WHERE job_id = $1
        AND level = 'error'
      ORDER BY id ASC`,
@@ -1377,7 +1377,7 @@ export async function getFactoryInspectionLogs(jobId: number): Promise<FactoryIn
     created_at: string;
   }>(
     `SELECT id, layer_name, prompt_text, raw_response_text, provider, model_name, api_version, created_at
-     FROM ai_factory_inspection_logs
+     FROM public.ai_factory_inspection_logs
      WHERE job_id = $1
      ORDER BY id ASC`,
     [jobId],

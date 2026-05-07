@@ -288,7 +288,7 @@ async function readLayerConfig(layer: FactoryLayer): Promise<LayerModelConfig> {
     reasoning_level: FactoryReasoningLevel;
   }>(
     `SELECT layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled, reasoning_level
-     FROM ai_factory_model_config
+     FROM public.ai_factory_model_config
      WHERE layer_name = $1
      LIMIT 1`,
     [layer],
@@ -328,7 +328,7 @@ export async function listModelConfigs(): Promise<LayerModelConfig[]> {
     reasoning_level: FactoryReasoningLevel;
   }>(
     `SELECT layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled, reasoning_level
-     FROM ai_factory_model_config
+     FROM public.ai_factory_model_config
      ORDER BY layer_name ASC`,
   );
   return r.rows.map((row) => ({
@@ -356,7 +356,7 @@ export async function saveModelConfig(input: LayerModelConfig): Promise<void> {
   }
   const pool = getPool();
   await pool.query(
-    `INSERT INTO ai_factory_model_config (layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled, reasoning_level, updated_at)
+    `INSERT INTO public.ai_factory_model_config (layer_name, provider, model_name, api_key_env, temperature, max_output_tokens, is_enabled, reasoning_level, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
      ON CONFLICT (layer_name) DO UPDATE SET
        provider = EXCLUDED.provider,

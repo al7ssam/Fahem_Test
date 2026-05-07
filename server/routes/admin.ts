@@ -520,7 +520,7 @@ async function readGooglePricingSettingsForAdmin(): Promise<{
 }> {
   const pool = getPool();
   const keys = ["pricing_models_google_v1", "pricing_fallback_policy_google"];
-  const r = await pool.query<{ key: string; value: string }>(`SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`, [keys]);
+  const r = await pool.query<{ key: string; value: string }>(`SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`, [keys]);
   const m = new Map(r.rows.map((x) => [x.key, x.value]));
   const fallbackRaw = String(m.get("pricing_fallback_policy_google") ?? "use_default").trim().toLowerCase();
   const fallbackPolicy: "use_default" | "block" = fallbackRaw === "block" ? "block" : "use_default";
@@ -541,14 +541,14 @@ async function saveGooglePricingSettingsForAdmin(input: {
 }): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO app_settings (key, value) VALUES
+    `INSERT INTO public.app_settings (key, value) VALUES
       ('pricing_models_google_v1', $1),
       ('pricing_fallback_policy_google', $2)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [JSON.stringify(input.models), input.fallbackPolicy],
   );
   await pool.query(
-    `INSERT INTO simple_content_pricing_audit_logs (actor, action, details_json)
+    `INSERT INTO public.simple_content_pricing_audit_logs (actor, action, details_json)
      VALUES ($1, 'google_pricing_updated', $2::jsonb)`,
     [input.actor, JSON.stringify({ fallbackPolicy: input.fallbackPolicy, modelCount: Object.keys(input.models).length })],
   );
@@ -718,7 +718,7 @@ async function countQuestions(): Promise<number | null> {
   try {
     const pool = getPool();
     const r = await pool.query<{ c: string }>(
-      "SELECT COUNT(*)::text AS c FROM questions",
+      "SELECT COUNT(*)::text AS c FROM public.questions",
     );
     return Number(r.rows[0]?.c ?? 0);
   } catch {
@@ -859,7 +859,7 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
     is_active: boolean;
   }>(
     `SELECT id, main_key, name_ar, icon, sort_order, is_active
-     FROM question_main_categories
+     FROM public.question_main_categories
      ORDER BY sort_order ASC, id ASC`,
   );
   const subs = await pool.query<{
@@ -878,7 +878,7 @@ async function readCategoriesTree(pool: ReturnType<typeof getPool>): Promise<Arr
             COALESCE(internal_description, '') AS internal_description,
             study_mode_question_ms,
             study_mode_study_phase_ms
-     FROM question_subcategories
+     FROM public.question_subcategories
      ORDER BY sort_order ASC, id ASC`,
   );
   const subsByMain = new Map<number, typeof subs.rows>();
@@ -950,14 +950,14 @@ async function countAffectedForMainDelete(
   mainId: number,
 ): Promise<{ subcategories: number; questions: number }> {
   const s = await pool.query<{ c: string }>(
-    `SELECT COUNT(*)::text AS c FROM question_subcategories WHERE main_category_id = $1`,
+    `SELECT COUNT(*)::text AS c FROM public.question_subcategories WHERE main_category_id = $1`,
     [mainId],
   );
   const q = await pool.query<{ c: string }>(
     `SELECT COUNT(*)::text AS c
-     FROM questions
+     FROM public.questions
      WHERE subcategory_key IN (
-       SELECT subcategory_key FROM question_subcategories WHERE main_category_id = $1
+       SELECT subcategory_key FROM public.question_subcategories WHERE main_category_id = $1
      )`,
     [mainId],
   );
@@ -973,9 +973,9 @@ async function countAffectedForSubDelete(
 ): Promise<{ questions: number }> {
   const q = await pool.query<{ c: string }>(
     `SELECT COUNT(*)::text AS c
-     FROM questions
+     FROM public.questions
      WHERE subcategory_key = (
-       SELECT subcategory_key FROM question_subcategories WHERE id = $1
+       SELECT subcategory_key FROM public.question_subcategories WHERE id = $1
      )`,
     [subId],
   );
@@ -1018,9 +1018,9 @@ async function getCategoriesCoverageSummary(
 }> {
   const totalR = await pool.query<{ main_categories: string; subcategories: string; questions: string }>(
     `SELECT
-       (SELECT COUNT(*)::text FROM question_main_categories) AS main_categories,
-       (SELECT COUNT(*)::text FROM question_subcategories) AS subcategories,
-       (SELECT COUNT(*)::text FROM questions) AS questions`,
+       (SELECT COUNT(*)::text FROM public.question_main_categories) AS main_categories,
+       (SELECT COUNT(*)::text FROM public.question_subcategories) AS subcategories,
+       (SELECT COUNT(*)::text FROM public.questions) AS questions`,
   );
 
   const bySub = await pool.query<{
@@ -1052,9 +1052,9 @@ async function getCategoriesCoverageSummary(
            q.difficulty IS NULL OR q.difficulty NOT IN ('easy', 'medium', 'hard')
          )
        ), 0)::text AS unknown_count
-     FROM question_subcategories sc
-     JOIN question_main_categories mc ON mc.id = sc.main_category_id
-     LEFT JOIN questions q ON q.subcategory_key = sc.subcategory_key
+     FROM public.question_subcategories sc
+     JOIN public.question_main_categories mc ON mc.id = sc.main_category_id
+     LEFT JOIN public.questions q ON q.subcategory_key = sc.subcategory_key
      GROUP BY sc.id, sc.subcategory_key, sc.name_ar, mc.id, mc.main_key, mc.name_ar
      ORDER BY mc.sort_order ASC, mc.id ASC, sc.sort_order ASC, sc.id ASC`,
   );
@@ -1200,7 +1200,7 @@ export function registerAdminRoutes(app: Express): void {
       } else {
         const pool = getPool();
         const r = await pool.query<{ value: string }>(
-          `SELECT value FROM app_settings WHERE key = 'release_version' LIMIT 1`,
+          `SELECT value FROM public.app_settings WHERE key = 'release_version' LIMIT 1`,
         );
         releaseVersionMetrics.dbReads += 1;
         releaseVersion = normalizeReleaseVersion(r.rows[0]?.value);
@@ -1357,7 +1357,7 @@ export function registerAdminRoutes(app: Express): void {
         sort_order: number;
       }>(
         `SELECT id, parent_id, name_ar, icon, sort_order
-         FROM lesson_categories
+         FROM public.lesson_categories
          WHERE is_active = TRUE
          ORDER BY parent_id NULLS FIRST, sort_order ASC, id ASC`,
       );
@@ -1445,8 +1445,8 @@ export function registerAdminRoutes(app: Express): void {
         with_study: string;
       }>(
         `SELECT
-           (SELECT COUNT(*)::text FROM questions) AS total,
-           (SELECT COUNT(*)::text FROM questions
+           (SELECT COUNT(*)::text FROM public.questions) AS total,
+           (SELECT COUNT(*)::text FROM public.questions
             WHERE study_body IS NOT NULL AND btrim(study_body) <> '') AS with_study`,
       );
       const total = Number(r.rows[0]?.total ?? 0);
@@ -1496,7 +1496,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       await pool.query(
-        `UPDATE game_result_copy
+        `UPDATE public.game_result_copy
          SET winner_title = $1, loser_title = $2, tie_title = $3,
              winner_text = $4, loser_text = $5, tie_text = $6
          WHERE id = 1`,
@@ -1514,7 +1514,7 @@ export function registerAdminRoutes(app: Express): void {
       const pool = getPool();
       const releaseVersion = String(Date.now());
       await pool.query(
-        `INSERT INTO app_settings (key, value)
+        `INSERT INTO public.app_settings (key, value)
          VALUES ('release_version', $1)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [releaseVersion],
@@ -1534,7 +1534,7 @@ export function registerAdminRoutes(app: Express): void {
       const pool = getPool();
       const rows = await pool.query<{ key: string; value: string }>(
         `SELECT key, value
-         FROM app_settings
+         FROM public.app_settings
          WHERE key IN ('prompt_study')`,
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -1561,7 +1561,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       await pool.query(
-        `INSERT INTO app_settings (key, value)
+        `INSERT INTO public.app_settings (key, value)
          VALUES ('prompt_study', $1)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         [parsed.data.promptStudy],
@@ -1578,7 +1578,7 @@ export function registerAdminRoutes(app: Express): void {
       const pool = getPool();
       const rows = await pool.query<{ key: string; value: string }>(
         `SELECT key, value
-         FROM app_settings
+         FROM public.app_settings
          WHERE key IN ('game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms', 'game_question_ms', 'max_players_per_match', 'match_fill_window_seconds')`,
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -1624,7 +1624,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       await pool.query(
-        `INSERT INTO app_settings (key, value)
+        `INSERT INTO public.app_settings (key, value)
          VALUES
            ('game_max_study_rounds', $1),
            ('game_study_round_size', $2),
@@ -2134,7 +2134,7 @@ export function registerAdminRoutes(app: Express): void {
       }>(
         `SELECT id, subcategory_key, difficulty_mode, status, current_layer,
                 attempt_count, max_attempts, last_error, final_output_json, created_at, started_at, finished_at
-         FROM ai_factory_jobs
+         FROM public.ai_factory_jobs
          WHERE id = $1
          LIMIT 1`,
         [id],
@@ -2906,7 +2906,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       const rows = await pool.query<{ key: string; value: string }>(
-        `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+        `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
         [keys],
       );
       const map = new Map(rows.rows.map((r) => [r.key, r.value]));
@@ -2955,7 +2955,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       await pool.query(
-        `INSERT INTO app_settings (key, value) VALUES
+        `INSERT INTO public.app_settings (key, value) VALUES
            ('keys_streak_per_key', $1),
            ('keys_small_streak_reward', $2),
            ('keys_mega_streak', $3),
@@ -3065,7 +3065,7 @@ export function registerAdminRoutes(app: Express): void {
       const pool = getPool();
       const d = parsed.data;
       await pool.query(
-        `INSERT INTO question_main_categories (main_key, name_ar, icon, sort_order, is_active)
+        `INSERT INTO public.question_main_categories (main_key, name_ar, icon, sort_order, is_active)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (main_key) DO UPDATE
          SET name_ar = EXCLUDED.name_ar, icon = EXCLUDED.icon,
@@ -3092,7 +3092,7 @@ export function registerAdminRoutes(app: Express): void {
       const qMs = d.studyModeQuestionMs === undefined ? null : d.studyModeQuestionMs;
       const sMs = d.studyModeStudyPhaseMs === undefined ? null : d.studyModeStudyPhaseMs;
       await pool.query(
-        `INSERT INTO question_subcategories (
+        `INSERT INTO public.question_subcategories (
            main_category_id, subcategory_key, name_ar, icon, sort_order, is_active, internal_description,
            study_mode_question_ms, study_mode_study_phase_ms
          )
@@ -3142,14 +3142,14 @@ export function registerAdminRoutes(app: Express): void {
         icon: string;
         sort_order: number;
         is_active: boolean;
-      }>(`SELECT main_key, name_ar, icon, sort_order, is_active FROM question_main_categories WHERE id = $1`, [id]);
+      }>(`SELECT main_key, name_ar, icon, sort_order, is_active FROM public.question_main_categories WHERE id = $1`, [id]);
       const row = cur.rows[0];
       if (!row) {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
       }
       await pool.query(
-        `UPDATE question_main_categories
+        `UPDATE public.question_main_categories
          SET main_key = $1, name_ar = $2, icon = $3, sort_order = $4, is_active = $5
          WHERE id = $6`,
         [
@@ -3197,7 +3197,7 @@ export function registerAdminRoutes(app: Express): void {
                 COALESCE(internal_description, '') AS internal_description,
                 study_mode_question_ms,
                 study_mode_study_phase_ms
-         FROM question_subcategories WHERE id = $1`,
+         FROM public.question_subcategories WHERE id = $1`,
         [id],
       );
       const row = cur.rows[0];
@@ -3208,7 +3208,7 @@ export function registerAdminRoutes(app: Express): void {
       const nextQMs = d.studyModeQuestionMs !== undefined ? d.studyModeQuestionMs : row.study_mode_question_ms;
       const nextSMs = d.studyModeStudyPhaseMs !== undefined ? d.studyModeStudyPhaseMs : row.study_mode_study_phase_ms;
       await pool.query(
-        `UPDATE question_subcategories
+        `UPDATE public.question_subcategories
          SET main_category_id = $1, subcategory_key = $2, name_ar = $3, icon = $4, sort_order = $5, is_active = $6,
              internal_description = $7,
              study_mode_question_ms = $8,
@@ -3248,7 +3248,7 @@ export function registerAdminRoutes(app: Express): void {
         res.json({ ok: true, dryRun: true, affectedCounts: affected });
         return;
       }
-      const del = await pool.query(`DELETE FROM question_main_categories WHERE id = $1`, [id]);
+      const del = await pool.query(`DELETE FROM public.question_main_categories WHERE id = $1`, [id]);
       if ((del.rowCount ?? 0) === 0) {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
@@ -3274,7 +3274,7 @@ export function registerAdminRoutes(app: Express): void {
         res.json({ ok: true, dryRun: true, affectedCounts: affected });
         return;
       }
-      const del = await pool.query(`DELETE FROM question_subcategories WHERE id = $1`, [id]);
+      const del = await pool.query(`DELETE FROM public.question_subcategories WHERE id = $1`, [id]);
       if ((del.rowCount ?? 0) === 0) {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
@@ -3317,19 +3317,19 @@ export function registerAdminRoutes(app: Express): void {
           return;
         }
         if (target === "main") {
-          await pool.query(`DELETE FROM question_main_categories WHERE id = ANY($1::int[])`, [ids]);
+          await pool.query(`DELETE FROM public.question_main_categories WHERE id = ANY($1::int[])`, [ids]);
           res.json({ ok: true, affectedCounts: { categories: ids.length } });
           return;
         }
-        await pool.query(`DELETE FROM question_subcategories WHERE id = ANY($1::int[])`, [ids]);
+        await pool.query(`DELETE FROM public.question_subcategories WHERE id = ANY($1::int[])`, [ids]);
         res.json({ ok: true, affectedCounts: { categories: ids.length } });
         return;
       }
       const next = action === "activate";
       if (target === "main") {
-        await pool.query(`UPDATE question_main_categories SET is_active = $1 WHERE id = ANY($2::int[])`, [next, ids]);
+        await pool.query(`UPDATE public.question_main_categories SET is_active = $1 WHERE id = ANY($2::int[])`, [next, ids]);
       } else {
-        await pool.query(`UPDATE question_subcategories SET is_active = $1 WHERE id = ANY($2::int[])`, [next, ids]);
+        await pool.query(`UPDATE public.question_subcategories SET is_active = $1 WHERE id = ANY($2::int[])`, [next, ids]);
       }
       res.json({ ok: true, affectedCounts: { categories: ids.length } });
     } catch {
@@ -3351,9 +3351,9 @@ export function registerAdminRoutes(app: Express): void {
       await client.query("BEGIN");
       for (const item of items) {
         if (target === "main") {
-          await client.query(`UPDATE question_main_categories SET sort_order = $1 WHERE id = $2`, [item.sortOrder, item.id]);
+          await client.query(`UPDATE public.question_main_categories SET sort_order = $1 WHERE id = $2`, [item.sortOrder, item.id]);
         } else {
-          await client.query(`UPDATE question_subcategories SET sort_order = $1 WHERE id = $2`, [item.sortOrder, item.id]);
+          await client.query(`UPDATE public.question_subcategories SET sort_order = $1 WHERE id = $2`, [item.sortOrder, item.id]);
         }
       }
       await client.query("COMMIT");
@@ -3428,9 +3428,9 @@ export function registerAdminRoutes(app: Express): void {
                COALESCE(mc.name_ar, '') AS main_name_ar,
                COALESCE(sc.name_ar, '') AS sub_name_ar,
                COALESCE(q.subcategory_key, '') AS subcategory_key
-        FROM questions q
-        LEFT JOIN question_subcategories sc ON sc.subcategory_key = q.subcategory_key
-        LEFT JOIN question_main_categories mc ON mc.id = sc.main_category_id
+        FROM public.questions q
+        LEFT JOIN public.question_subcategories sc ON sc.subcategory_key = q.subcategory_key
+        LEFT JOIN public.question_main_categories mc ON mc.id = sc.main_category_id
         ${where}
         ORDER BY q.id DESC
         LIMIT $${limIdx} OFFSET $${offIdx}
@@ -3446,9 +3446,9 @@ export function registerAdminRoutes(app: Express): void {
       }>(listSql, params);
 
       const countSql = `SELECT COUNT(*)::text AS c
-        FROM questions q
-        LEFT JOIN question_subcategories sc ON sc.subcategory_key = q.subcategory_key
-        LEFT JOIN question_main_categories mc ON mc.id = sc.main_category_id
+        FROM public.questions q
+        LEFT JOIN public.question_subcategories sc ON sc.subcategory_key = q.subcategory_key
+        LEFT JOIN public.question_main_categories mc ON mc.id = sc.main_category_id
         ${where}`;
       const countParams = [...params.slice(0, -2)];
       const c = await pool.query<{ c: string }>(countSql, countParams);
@@ -3494,7 +3494,7 @@ export function registerAdminRoutes(app: Express): void {
         subcategory_key: string;
       }>(
         `SELECT id, prompt, options, correct_index, difficulty, study_body, subcategory_key
-         FROM questions
+         FROM public.questions
          WHERE id = ANY($1::int[])`,
         [ids],
       );
@@ -3539,7 +3539,7 @@ export function registerAdminRoutes(app: Express): void {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`DELETE FROM questions WHERE id = ANY($1::int[])`, [
+      await client.query(`DELETE FROM public.questions WHERE id = ANY($1::int[])`, [
         parsed.data.ids,
       ]);
       await client.query("COMMIT");
@@ -3577,7 +3577,7 @@ export function registerAdminRoutes(app: Express): void {
         subcategory_key: string;
       }>(
         `SELECT id, prompt, options, correct_index, difficulty, study_body, subcategory_key
-         FROM questions WHERE id = $1`,
+         FROM public.questions WHERE id = $1`,
         [id],
       );
       const row = r.rows[0];
@@ -3634,7 +3634,7 @@ export function registerAdminRoutes(app: Express): void {
         subcategory_key: string;
         lesson_id: number | null;
       }>(
-        `SELECT prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id FROM questions WHERE id = $1`,
+        `SELECT prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id FROM public.questions WHERE id = $1`,
         [id],
       );
       const row = cur.rows[0];
@@ -3691,7 +3691,7 @@ export function registerAdminRoutes(app: Express): void {
       }
 
       await pool.query(
-        `UPDATE questions
+        `UPDATE public.questions
          SET prompt = $1, options = $2::jsonb, correct_index = $3,
              difficulty = $4, study_body = $5, subcategory_key = $6
          WHERE id = $7`,
@@ -3720,7 +3720,7 @@ export function registerAdminRoutes(app: Express): void {
     }
     try {
       const pool = getPool();
-      const r = await pool.query(`DELETE FROM questions WHERE id = $1`, [id]);
+      const r = await pool.query(`DELETE FROM public.questions WHERE id = $1`, [id]);
       if (r.rowCount === 0) {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
@@ -3757,7 +3757,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       const ins = await pool.query<{ id: number }>(
-        `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key)
+        `INSERT INTO public.questions (prompt, options, correct_index, difficulty, study_body, subcategory_key)
          VALUES ($1, $2::jsonb, $3, $4, $5, $6)
          RETURNING id`,
         [
@@ -4035,7 +4035,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       const pool = getPool();
       const le = await pool.query<{ c: string }>(
-        `SELECT 1::text AS c FROM lessons WHERE id = $1`,
+        `SELECT 1::text AS c FROM public.lessons WHERE id = $1`,
         [lessonId],
       );
       if (!le.rows[0]) {
@@ -4043,7 +4043,7 @@ export function registerAdminRoutes(app: Express): void {
         return;
       }
       const ins = await pool.query<{ id: number }>(
-        `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id)
+        `INSERT INTO public.questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id)
          VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)
          RETURNING id`,
         [
@@ -4099,7 +4099,7 @@ export function registerAdminRoutes(app: Express): void {
         lesson_id: number | null;
       }>(
         `SELECT prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id
-         FROM questions WHERE id = $1`,
+         FROM public.questions WHERE id = $1`,
         [questionId],
       );
       const row = cur.rows[0];
@@ -4157,7 +4157,7 @@ export function registerAdminRoutes(app: Express): void {
       }
 
       await pool.query(
-        `UPDATE questions
+        `UPDATE public.questions
          SET prompt = $1, options = $2::jsonb, correct_index = $3,
              difficulty = $4, study_body = $5, subcategory_key = $6
          WHERE id = $7 AND lesson_id = $8`,
@@ -4188,7 +4188,7 @@ export function registerAdminRoutes(app: Express): void {
     }
     try {
       const pool = getPool();
-      const del = await pool.query(`DELETE FROM questions WHERE id = $1 AND lesson_id = $2`, [questionId, lessonId]);
+      const del = await pool.query(`DELETE FROM public.questions WHERE id = $1 AND lesson_id = $2`, [questionId, lessonId]);
       if ((del.rowCount ?? 0) === 0) {
         res.status(404).json({ ok: false, error: "not_found" });
         return;
@@ -4280,7 +4280,7 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
     const pool = getPool();
-    const exists = await pool.query<{ c: string }>(`SELECT 1::text AS c FROM lessons WHERE id = $1`, [id]);
+    const exists = await pool.query<{ c: string }>(`SELECT 1::text AS c FROM public.lessons WHERE id = $1`, [id]);
     if (!exists.rows[0]) {
       res.status(404).json({ ok: false, error: "not_found" });
       return;
@@ -4322,7 +4322,7 @@ export function registerAdminRoutes(app: Express): void {
     try {
       if (questionIds.length > 0) {
         const qr = await pool.query<{ id: number }>(
-          `SELECT id FROM questions WHERE id = ANY($1::int[])`,
+          `SELECT id FROM public.questions WHERE id = ANY($1::int[])`,
           [questionIds],
         );
         if (qr.rows.length !== questionIds.length) {
@@ -4401,7 +4401,7 @@ export function registerAdminRoutes(app: Express): void {
       await client.query("BEGIN");
       for (const row of rows) {
         await client.query(
-          `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key)
+          `INSERT INTO public.questions (prompt, options, correct_index, difficulty, study_body, subcategory_key)
            VALUES ($1, $2::jsonb, $3, $4, $5, $6)`,
           [
             row.prompt,

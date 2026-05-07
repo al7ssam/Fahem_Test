@@ -544,7 +544,7 @@ export class Match {
         const pool = getPool();
         const rows = await pool.query<{ key: string; value: string }>(
           `SELECT key, value
-           FROM app_settings
+           FROM public.app_settings
            WHERE key IN (
              'game_max_study_rounds', 'game_study_round_size', 'game_study_phase_ms', 'game_question_ms',
              'keys_streak_per_key', 'keys_small_streak_reward', 'keys_mega_streak', 'keys_mega_reward', 'keys_max_per_player',

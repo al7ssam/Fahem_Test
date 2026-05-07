@@ -110,7 +110,7 @@ export async function listLessonCategories(pool: Pool): Promise<LessonCategoryAd
     is_active: boolean;
   }>(
     `SELECT id, parent_id, name_ar, icon, sort_order, is_active
-     FROM lesson_categories
+     FROM public.lesson_categories
      ORDER BY parent_id NULLS FIRST, sort_order ASC, id ASC`,
   );
   return r.rows.map((row) => ({
@@ -132,7 +132,7 @@ export async function insertLessonCategory(params: {
 }): Promise<number> {
   const pool = getPool();
   const r = await pool.query<{ id: number }>(
-    `INSERT INTO lesson_categories (parent_id, name_ar, icon, sort_order, is_active)
+    `INSERT INTO public.lesson_categories (parent_id, name_ar, icon, sort_order, is_active)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING id`,
     [params.parentId, params.nameAr.trim(), params.icon.trim() || "📖", params.sortOrder, params.isActive],
@@ -176,27 +176,27 @@ export async function updateLessonCategory(params: {
   }
   if (sets.length === 0) return true;
   vals.push(params.id);
-  const r = await pool.query(`UPDATE lesson_categories SET ${sets.join(", ")} WHERE id = $${i}`, vals);
+  const r = await pool.query(`UPDATE public.lesson_categories SET ${sets.join(", ")} WHERE id = $${i}`, vals);
   return (r.rowCount ?? 0) > 0;
 }
 
 export async function deleteLessonCategory(id: number): Promise<{ ok: boolean; reason?: string }> {
   const pool = getPool();
   const child = await pool.query<{ c: string }>(
-    `SELECT COUNT(*)::text AS c FROM lesson_categories WHERE parent_id = $1`,
+    `SELECT COUNT(*)::text AS c FROM public.lesson_categories WHERE parent_id = $1`,
     [id],
   );
   if (Number(child.rows[0]?.c ?? 0) > 0) {
     return { ok: false, reason: "has_child_categories" };
   }
   const lessons = await pool.query<{ c: string }>(
-    `SELECT COUNT(*)::text AS c FROM lessons WHERE lesson_category_id = $1`,
+    `SELECT COUNT(*)::text AS c FROM public.lessons WHERE lesson_category_id = $1`,
     [id],
   );
   if (Number(lessons.rows[0]?.c ?? 0) > 0) {
     return { ok: false, reason: "has_lessons" };
   }
-  const r = await pool.query(`DELETE FROM lesson_categories WHERE id = $1`, [id]);
+  const r = await pool.query(`DELETE FROM public.lesson_categories WHERE id = $1`, [id]);
   return { ok: (r.rowCount ?? 0) > 0 };
 }
 
@@ -229,9 +229,9 @@ export async function listLessonsAdmin(filters: {
   }>(
     `SELECT l.id, l.lesson_category_id, lc.name_ar AS category_name, l.title, l.slug, l.description,
             l.default_answer_ms, l.is_published, l.sort_order,
-            (SELECT COUNT(*)::text FROM lesson_items li WHERE li.lesson_id = l.id) AS item_count
-     FROM lessons l
-     LEFT JOIN lesson_categories lc ON lc.id = l.lesson_category_id
+            (SELECT COUNT(*)::text FROM public.lesson_items li WHERE li.lesson_id = l.id) AS item_count
+     FROM public.lessons l
+     LEFT JOIN public.lesson_categories lc ON lc.id = l.lesson_category_id
      ${w}
      ORDER BY l.sort_order ASC, l.id DESC`,
     params,
@@ -261,7 +261,7 @@ export async function insertLesson(params: {
 }): Promise<number> {
   const pool = getPool();
   const r = await pool.query<{ id: number }>(
-    `INSERT INTO lessons (
+    `INSERT INTO public.lessons (
        lesson_category_id, title, slug, description,
        default_answer_ms, is_published, sort_order
      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -297,9 +297,9 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
   }>(
     `SELECT l.id, l.lesson_category_id, lc.name_ar AS category_name, l.title, l.slug, l.description,
             l.default_answer_ms, l.is_published, l.sort_order,
-            (SELECT COUNT(*)::text FROM lesson_items li WHERE li.lesson_id = l.id) AS item_count
-     FROM lessons l
-     LEFT JOIN lesson_categories lc ON lc.id = l.lesson_category_id
+            (SELECT COUNT(*)::text FROM public.lesson_items li WHERE li.lesson_id = l.id) AS item_count
+     FROM public.lessons l
+     LEFT JOIN public.lesson_categories lc ON lc.id = l.lesson_category_id
      WHERE l.id = $1`,
     [lessonId],
   );
@@ -326,9 +326,9 @@ export async function getLessonAdmin(lessonId: number): Promise<LessonAdminDetai
             ls.study_phase_ms,
             li.sort_order, li.question_id, li.answer_ms, li.study_card_ms,
             q.prompt, q.options, q.correct_index, q.study_body, q.lesson_id, q.difficulty
-     FROM lesson_sections ls
-     JOIN lesson_items li ON li.lesson_section_id = ls.id
-     JOIN questions q ON q.id = li.question_id
+     FROM public.lesson_sections ls
+     JOIN public.lesson_items li ON li.lesson_section_id = ls.id
+     JOIN public.questions q ON q.id = li.question_id
      WHERE ls.lesson_id = $1
      ORDER BY ls.sort_order ASC, li.sort_order ASC`,
     [lessonId],
@@ -462,14 +462,14 @@ export async function updateLesson(
   if (sets.length === 0) return true;
   sets.push(`updated_at = NOW()`);
   vals.push(lessonId);
-  const r = await pool.query(`UPDATE lessons SET ${sets.join(", ")} WHERE id = $${i}`, vals);
+  const r = await pool.query(`UPDATE public.lessons SET ${sets.join(", ")} WHERE id = $${i}`, vals);
   return (r.rowCount ?? 0) > 0;
 }
 
 export async function countLessonItems(lessonId: number): Promise<number> {
   const pool = getPool();
   const r = await pool.query<{ c: string }>(
-    `SELECT COUNT(*)::text AS c FROM lesson_items WHERE lesson_id = $1`,
+    `SELECT COUNT(*)::text AS c FROM public.lesson_items WHERE lesson_id = $1`,
     [lessonId],
   );
   return Number(r.rows[0]?.c ?? 0);
@@ -477,7 +477,7 @@ export async function countLessonItems(lessonId: number): Promise<number> {
 
 export async function deleteLesson(lessonId: number): Promise<boolean> {
   const pool = getPool();
-  const r = await pool.query(`DELETE FROM lessons WHERE id = $1`, [lessonId]);
+  const r = await pool.query(`DELETE FROM public.lessons WHERE id = $1`, [lessonId]);
   return (r.rowCount ?? 0) > 0;
 }
 
@@ -630,12 +630,12 @@ export async function replaceLessonSectionsWithClient(
   lessonId: number,
   sections: LessonSectionReplaceInput[],
 ): Promise<void> {
-  await client.query(`DELETE FROM lesson_items WHERE lesson_id = $1`, [lessonId]);
-  await client.query(`DELETE FROM lesson_sections WHERE lesson_id = $1`, [lessonId]);
+  await client.query(`DELETE FROM public.lesson_items WHERE lesson_id = $1`, [lessonId]);
+  await client.query(`DELETE FROM public.lesson_sections WHERE lesson_id = $1`, [lessonId]);
   let secIdx = 0;
   for (const sec of sections) {
     const ins = await client.query<{ id: number }>(
-      `INSERT INTO lesson_sections (lesson_id, sort_order, title_ar, study_phase_ms)
+      `INSERT INTO public.lesson_sections (lesson_id, sort_order, title_ar, study_phase_ms)
        VALUES ($1, $2, $3, $4)
        RETURNING id`,
       [
@@ -650,7 +650,7 @@ export async function replaceLessonSectionsWithClient(
     let itemSort = 0;
     for (const row of sec.items) {
       await client.query(
-        `INSERT INTO lesson_items (lesson_id, lesson_section_id, question_id, sort_order, answer_ms, study_card_ms)
+        `INSERT INTO public.lesson_items (lesson_id, lesson_section_id, question_id, sort_order, answer_ms, study_card_ms)
          VALUES ($1, $2, $3, $4, $5, NULL)`,
         [lessonId, sectionId, row.questionId, itemSort++, row.answerMs ?? null],
       );
@@ -690,7 +690,7 @@ export async function importLessonFromJsonTransaction(
   try {
     await client.query("BEGIN");
     const lr = await client.query<{ id: number }>(
-      `INSERT INTO lessons (
+      `INSERT INTO public.lessons (
          lesson_category_id, title, slug, description,
          default_answer_ms, is_published, sort_order
        ) VALUES ($1, $2, $3, $4, $5, FALSE, $6)
@@ -712,7 +712,7 @@ export async function importLessonFromJsonTransaction(
       const rows: LessonItemReplaceRow[] = [];
       for (const it of sec.items) {
         const insQ = await client.query<{ id: number }>(
-          `INSERT INTO questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id)
+          `INSERT INTO public.questions (prompt, options, correct_index, difficulty, study_body, subcategory_key, lesson_id)
            VALUES ($1, $2::jsonb, $3, $4, $5, $6, $7)
            RETURNING id`,
           [
@@ -788,10 +788,10 @@ export async function listPublishedLessons(filters: {
     cat_icon: string | null;
   }>(
     `SELECT l.id, l.title, l.slug, l.description, l.sort_order,
-            (SELECT COUNT(*)::text FROM lesson_items li WHERE li.lesson_id = l.id) AS item_count,
+            (SELECT COUNT(*)::text FROM public.lesson_items li WHERE li.lesson_id = l.id) AS item_count,
             lc.id AS cat_id, lc.name_ar AS cat_name, lc.icon AS cat_icon
-     FROM lessons l
-     LEFT JOIN lesson_categories lc ON lc.id = l.lesson_category_id AND lc.is_active = TRUE
+     FROM public.lessons l
+     LEFT JOIN public.lesson_categories lc ON lc.id = l.lesson_category_id AND lc.is_active = TRUE
      WHERE ${where.join(" AND ")}
      ORDER BY l.sort_order ASC, l.id DESC`,
     params,
@@ -827,8 +827,8 @@ async function loadLessonPlaybackRows(
   }>(
     `SELECT l.id, l.title, l.slug, l.description, l.default_answer_ms,
             lc.id AS cat_id, lc.name_ar AS cat_name, lc.icon AS cat_icon
-     FROM lessons l
-     LEFT JOIN lesson_categories lc ON lc.id = l.lesson_category_id
+     FROM public.lessons l
+     LEFT JOIN public.lesson_categories lc ON lc.id = l.lesson_category_id
      WHERE ${whereSql}`,
     params,
   );
@@ -853,9 +853,9 @@ async function loadLessonPlaybackRows(
             ls.study_phase_ms,
             li.sort_order, li.question_id, li.answer_ms, li.study_card_ms,
             q.prompt, q.options, q.correct_index, q.study_body
-     FROM lesson_sections ls
-     JOIN lesson_items li ON li.lesson_section_id = ls.id
-     JOIN questions q ON q.id = li.question_id
+     FROM public.lesson_sections ls
+     JOIN public.lesson_items li ON li.lesson_section_id = ls.id
+     JOIN public.questions q ON q.id = li.question_id
      WHERE ls.lesson_id = $1
      ORDER BY ls.sort_order ASC, li.sort_order ASC`,
     [lesson.id],

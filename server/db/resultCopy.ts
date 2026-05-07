@@ -29,7 +29,7 @@ export async function getResultMessages(pool: Pool): Promise<ResultMessages> {
       tie_text: string;
     }>(
       `SELECT winner_title, loser_title, tie_title, winner_text, loser_text, tie_text
-       FROM game_result_copy
+       FROM public.game_result_copy
        WHERE id = 1`,
     );
     const row = r.rows[0];

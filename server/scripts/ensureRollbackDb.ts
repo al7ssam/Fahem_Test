@@ -52,7 +52,8 @@ async function main(): Promise<void> {
     ssl: useSsl ? { rejectUnauthorized: false } : undefined,
   });
   await client.connect();
-  const exists = await client.query("SELECT 1 FROM pg_database WHERE datname = $1", [NEW_DB]);
+  await client.query("SET search_path TO public");
+  const exists = await client.query("SELECT 1 FROM pg_catalog.pg_database WHERE datname = $1", [NEW_DB]);
   if (exists.rows.length) {
     console.log("DB_EXISTS", NEW_DB);
   } else {

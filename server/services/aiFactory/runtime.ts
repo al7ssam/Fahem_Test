@@ -67,7 +67,7 @@ export async function readFactorySettings(): Promise<FactorySettings> {
   const pool = getPool();
   const rows = await pool.query<{ key: string; value: string }>(
     `SELECT key, value
-     FROM app_settings
+     FROM public.app_settings
      WHERE key IN ($1, $2, $3, $4, $5)`,
     [
       SETTING_KEYS.enabled,
@@ -95,7 +95,7 @@ export async function saveFactorySettings(input: {
 }): Promise<FactorySettings> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO app_settings (key, value) VALUES
+    `INSERT INTO public.app_settings (key, value) VALUES
        ($1, $2),
        ($3, $4),
        ($5, $6),
@@ -118,7 +118,7 @@ export async function saveFactorySettings(input: {
 async function updateLastSchedulerRun(iso: string): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO app_settings (key, value)
+    `INSERT INTO public.app_settings (key, value)
      VALUES ($1, $2)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [SETTING_KEYS.lastSchedulerRun, iso],
@@ -141,7 +141,7 @@ async function enqueueJob(input: {
     payloadObj.promptVariant = resolvePromptVariantForNewJob();
   }
   const r = await pool.query<{ id: number }>(
-    `INSERT INTO ai_factory_jobs (
+    `INSERT INTO public.ai_factory_jobs (
        subcategory_key, difficulty_mode, target_count, batch_size, status, payload, next_run_at
      )
      VALUES ($1, $2, $3, $4, 'queued', $5::jsonb, NOW())
@@ -174,7 +174,7 @@ async function appendCancelLogs(
 ): Promise<void> {
   if (!jobIds.length) return;
   await client.query(
-    `INSERT INTO ai_factory_job_logs (job_id, layer_name, level, message, details)
+    `INSERT INTO public.ai_factory_job_logs (job_id, layer_name, level, message, details)
      SELECT id, NULL, 'warn', $2, $3::jsonb
      FROM UNNEST($1::bigint[]) AS id`,
     [jobIds, message, JSON.stringify({ cancelled: true })],
@@ -186,7 +186,7 @@ async function cancelQueuedJobs(
 ): Promise<number[]> {
   const r = await client.query<{ id: number }>(
     `WITH x AS (
-       UPDATE ai_factory_jobs
+       UPDATE public.ai_factory_jobs
        SET status = 'cancelled', current_layer = NULL, finished_at = NOW(), updated_at = NOW(),
            last_error = COALESCE(last_error, 'cancelled_by_admin')
        WHERE status = 'queued'
@@ -202,7 +202,7 @@ async function markRunningJobsCancelled(
 ): Promise<number[]> {
   const r = await client.query<{ id: number }>(
     `WITH x AS (
-       UPDATE ai_factory_jobs
+       UPDATE public.ai_factory_jobs
        SET status = 'cancelled', updated_at = NOW(), last_error = 'cancel_requested_by_admin'
        WHERE status = 'running'
        RETURNING id
@@ -215,7 +215,7 @@ async function markRunningJobsCancelled(
 async function cancelSingleJob(jobId: number, client: Queryable): Promise<FactoryCancelResult> {
   const qr = await client.query<{ id: number; previous_status: string }>(
     `WITH x AS (
-       UPDATE ai_factory_jobs
+       UPDATE public.ai_factory_jobs
        SET status = 'cancelled',
            current_layer = CASE WHEN status = 'queued' THEN NULL ELSE current_layer END,
            finished_at = CASE WHEN status = 'queued' THEN NOW() ELSE finished_at END,
@@ -246,7 +246,7 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
     await client.query("BEGIN");
     const picked = await client.query<ClaimedJob>(
       `SELECT id, subcategory_key, difficulty_mode, target_count, batch_size, status, payload, attempt_count, max_attempts
-       FROM ai_factory_jobs
+       FROM public.ai_factory_jobs
        WHERE status = 'queued'
          AND next_run_at <= NOW()
        ORDER BY id ASC
@@ -259,7 +259,7 @@ async function claimNextJob(): Promise<ClaimedJob | null> {
       return null;
     }
     await client.query(
-      `UPDATE ai_factory_jobs
+      `UPDATE public.ai_factory_jobs
        SET status = 'running', started_at = NOW(), updated_at = NOW()
        WHERE id = $1`,
       [row.id],
@@ -385,10 +385,10 @@ export class AIFactoryRuntime {
       failed24h: string;
     }>(
       `SELECT
-         (SELECT COUNT(*)::text FROM ai_factory_jobs WHERE status = 'queued') AS queued,
-         (SELECT COUNT(*)::text FROM ai_factory_jobs WHERE status = 'running') AS running,
-         (SELECT COUNT(*)::text FROM ai_factory_jobs WHERE status = 'succeeded' AND finished_at >= NOW() - INTERVAL '24 hour') AS succeeded24h,
-         (SELECT COUNT(*)::text FROM ai_factory_jobs WHERE status = 'failed' AND finished_at >= NOW() - INTERVAL '24 hour') AS failed24h`,
+         (SELECT COUNT(*)::text FROM public.ai_factory_jobs WHERE status = 'queued') AS queued,
+         (SELECT COUNT(*)::text FROM public.ai_factory_jobs WHERE status = 'running') AS running,
+         (SELECT COUNT(*)::text FROM public.ai_factory_jobs WHERE status = 'succeeded' AND finished_at >= NOW() - INTERVAL '24 hour') AS succeeded24h,
+         (SELECT COUNT(*)::text FROM public.ai_factory_jobs WHERE status = 'failed' AND finished_at >= NOW() - INTERVAL '24 hour') AS failed24h`,
     );
     return {
       started: this.started,
@@ -411,7 +411,7 @@ export class AIFactoryRuntime {
     const pool = getPool();
     const subs = await pool.query<{ subcategory_key: string }>(
       `SELECT subcategory_key
-       FROM question_subcategories
+       FROM public.question_subcategories
        WHERE is_active = TRUE
        ORDER BY sort_order ASC, id ASC`,
     );
@@ -419,7 +419,7 @@ export class AIFactoryRuntime {
       const key = s.subcategory_key;
       const state = await pool.query<{ generated_count: string; target_count: string }>(
         `SELECT generated_count::text, target_count::text
-         FROM ai_factory_pipeline_state
+         FROM public.ai_factory_pipeline_state
          WHERE subcategory_key = $1
          LIMIT 1`,
         [key],

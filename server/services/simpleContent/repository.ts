@@ -34,7 +34,7 @@ export async function listActivePresets(): Promise<SimpleContentPreset[]> {
   const pool = getPool();
   const r = await pool.query(
     `SELECT id, provider, model_id, label_ar, max_output_tokens, temperature, api_key_env, is_active, sort_order
-     FROM simple_content_model_presets
+     FROM public.simple_content_model_presets
      WHERE is_active = TRUE
      ORDER BY sort_order ASC, id ASC`,
   );
@@ -45,7 +45,7 @@ export async function getPresetById(id: number): Promise<SimpleContentPreset | n
   const pool = getPool();
   const r = await pool.query(
     `SELECT id, provider, model_id, label_ar, max_output_tokens, temperature, api_key_env, is_active, sort_order
-     FROM simple_content_model_presets WHERE id = $1 LIMIT 1`,
+     FROM public.simple_content_model_presets WHERE id = $1 LIMIT 1`,
     [id],
   );
   const row = r.rows[0] as Parameters<typeof mapPreset>[0] | undefined;
@@ -55,7 +55,7 @@ export async function getPresetById(id: number): Promise<SimpleContentPreset | n
 export async function getPromptBody(subcategoryKey: string): Promise<string> {
   const pool = getPool();
   const r = await pool.query<{ prompt_body: string }>(
-    `SELECT prompt_body FROM simple_content_prompts WHERE subcategory_key = $1 LIMIT 1`,
+    `SELECT prompt_body FROM public.simple_content_prompts WHERE subcategory_key = $1 LIMIT 1`,
     [subcategoryKey],
   );
   return String(r.rows[0]?.prompt_body ?? "");
@@ -64,7 +64,7 @@ export async function getPromptBody(subcategoryKey: string): Promise<string> {
 export async function upsertPromptBody(subcategoryKey: string, promptBody: string): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO simple_content_prompts (subcategory_key, prompt_body, updated_at)
+    `INSERT INTO public.simple_content_prompts (subcategory_key, prompt_body, updated_at)
      VALUES ($1, $2, NOW())
      ON CONFLICT (subcategory_key) DO UPDATE SET
        prompt_body = EXCLUDED.prompt_body,
@@ -84,7 +84,7 @@ export async function getAutomation(subcategoryKey: string): Promise<SimpleConte
     next_run_at: Date | null;
   }>(
     `SELECT subcategory_key, enabled, interval_minutes, model_preset_id, last_run_at, next_run_at
-     FROM simple_content_automation WHERE subcategory_key = $1 LIMIT 1`,
+     FROM public.simple_content_automation WHERE subcategory_key = $1 LIMIT 1`,
     [subcategoryKey],
   );
   const row = r.rows[0];
@@ -107,7 +107,7 @@ export async function upsertAutomation(input: {
 }): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO simple_content_automation (
+    `INSERT INTO public.simple_content_automation (
        subcategory_key, enabled, interval_minutes, model_preset_id, last_run_at, next_run_at, updated_at
      )
      VALUES ($1, $2, $3, $4, NULL, NULL, NOW())
@@ -120,14 +120,14 @@ export async function upsertAutomation(input: {
   );
   if (input.enabled) {
     await pool.query(
-      `UPDATE simple_content_automation
+      `UPDATE public.simple_content_automation
        SET next_run_at = COALESCE(next_run_at, NOW())
        WHERE subcategory_key = $1`,
       [input.subcategoryKey],
     );
   } else {
     await pool.query(
-      `UPDATE simple_content_automation SET next_run_at = NULL WHERE subcategory_key = $1`,
+      `UPDATE public.simple_content_automation SET next_run_at = NULL WHERE subcategory_key = $1`,
       [input.subcategoryKey],
     );
   }
@@ -140,7 +140,7 @@ export async function createRun(input: {
 }): Promise<number> {
   const pool = getPool();
   const r = await pool.query<{ id: string }>(
-    `INSERT INTO simple_content_runs (
+    `INSERT INTO public.simple_content_runs (
        subcategory_key, trigger_kind, status, provider, model_id, preset_id, inserted_count, created_at
      )
      VALUES ($1, $2, 'running', $3, $4, $5, 0, NOW())
@@ -181,7 +181,7 @@ export async function finalizeSimpleContentRun(
 ): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `UPDATE simple_content_runs SET
+    `UPDATE public.simple_content_runs SET
        status = $2,
        inserted_count = $3,
        error = $4,
@@ -224,7 +224,7 @@ export async function finalizeSimpleContentRun(
 
 export async function getAppSettingValue(key: string): Promise<string | null> {
   const pool = getPool();
-  const r = await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = $1 LIMIT 1`, [key]);
+  const r = await pool.query<{ value: string }>(`SELECT value FROM public.app_settings WHERE key = $1 LIMIT 1`, [key]);
   const v = r.rows[0]?.value;
   if (v == null || !String(v).trim()) return null;
   return String(v);
@@ -233,7 +233,7 @@ export async function getAppSettingValue(key: string): Promise<string | null> {
 export async function upsertAppSettingValue(key: string, value: string): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+    `INSERT INTO public.app_settings (key, value) VALUES ($1, $2)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [key, value],
   );
@@ -300,7 +300,7 @@ export async function getRunById(runId: number): Promise<SimpleContentRunDetail 
             estimated_cost_usd::text,
             pricing_input_per_1m::text, pricing_cached_input_per_1m::text, pricing_output_per_1m::text, pricing_source,
             created_at, finished_at
-     FROM simple_content_runs WHERE id = $1 LIMIT 1`,
+     FROM public.simple_content_runs WHERE id = $1 LIMIT 1`,
     [runId],
   );
   const row = r.rows[0];
@@ -353,7 +353,7 @@ export async function insertSimpleContentPricingAuditLog(input: {
 }): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO simple_content_pricing_audit_logs (actor, action, details_json, created_at)
+    `INSERT INTO public.simple_content_pricing_audit_logs (actor, action, details_json, created_at)
      VALUES ($1, $2, $3::jsonb, NOW())`,
     [input.actor, input.action, JSON.stringify(input.details ?? {})],
   );
@@ -407,7 +407,7 @@ export async function getRunsUsageSummaryForSubcategory(subcategoryKey: string):
        COALESCE(SUM(usage_input_tokens) FILTER (WHERE usage_input_tokens IS NOT NULL), 0)::text AS sum_in,
        COALESCE(SUM(usage_output_tokens) FILTER (WHERE usage_output_tokens IS NOT NULL), 0)::text AS sum_out,
        COALESCE(SUM(usage_total_tokens) FILTER (WHERE usage_total_tokens IS NOT NULL), 0)::text AS sum_tot
-     FROM simple_content_runs
+     FROM public.simple_content_runs
      WHERE subcategory_key = $1`,
     [subcategoryKey],
   );
@@ -489,7 +489,7 @@ export async function listRuns(
               CASE WHEN inserted_count > 0 THEN inserted_count END
             )::text AS display_question_count,
             estimated_cost_usd::text
-     FROM simple_content_runs
+     FROM public.simple_content_runs
      WHERE ${whereSql}
      ORDER BY created_at DESC, id DESC
      LIMIT $${limitIdx}`,
@@ -528,7 +528,7 @@ export async function listDueAutomations(): Promise<SimpleContentAutomation[]> {
     next_run_at: Date | null;
   }>(
     `SELECT subcategory_key, enabled, interval_minutes, model_preset_id, last_run_at, next_run_at
-     FROM simple_content_automation
+     FROM public.simple_content_automation
      WHERE enabled = TRUE
        AND (next_run_at IS NULL OR next_run_at <= NOW())
      ORDER BY subcategory_key ASC`,
@@ -546,7 +546,7 @@ export async function listDueAutomations(): Promise<SimpleContentAutomation[]> {
 export async function bumpAutomationNextRun(subcategoryKey: string, intervalMinutes: number): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `UPDATE simple_content_automation SET
+    `UPDATE public.simple_content_automation SET
        last_run_at = NOW(),
        next_run_at = NOW() + ($2::int * INTERVAL '1 minute'),
        updated_at = NOW()

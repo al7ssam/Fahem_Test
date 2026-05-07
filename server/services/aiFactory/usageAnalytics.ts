@@ -92,7 +92,7 @@ async function resolveGeminiPricing(modelId: string): Promise<GeminiPricing> {
   const pool = getPool();
   const keys = [APP_KEY_PRICING_MODELS_GOOGLE_V1, APP_KEY_PRICING_FALLBACK_POLICY_GOOGLE];
   const r = await pool.query<{ key: string; value: string }>(
-    `SELECT key, value FROM app_settings WHERE key = ANY($1::text[])`,
+    `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
     [keys],
   );
   const m = new Map(r.rows.map((x) => [x.key, x.value]));
@@ -202,7 +202,7 @@ export async function insertAiUsageLog(input: {
 }): Promise<void> {
   const pool = getPool();
   await pool.query(
-    `INSERT INTO ai_usage_logs
+    `INSERT INTO public.ai_usage_logs
       (job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, pricing_input_per_1m, pricing_cached_input_per_1m, pricing_output_per_1m, pricing_source, subject, status)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
     [
@@ -261,7 +261,7 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
       COALESCE(SUM(cost_sar), 0)::float8 AS total_cost_sar,
       COALESCE(SUM(input_tokens), 0)::bigint AS total_input_tokens,
       COALESCE(SUM(output_tokens), 0)::bigint AS total_output_tokens
-    FROM ai_usage_logs
+    FROM public.ai_usage_logs
     WHERE TRUE
   `;
   if (!filters.from && !filters.to) {
@@ -272,7 +272,7 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
       COALESCE(SUM(cost_sar), 0)::float8 AS total_cost_sar,
       COALESCE(SUM(input_tokens), 0)::bigint AS total_input_tokens,
       COALESCE(SUM(output_tokens), 0)::bigint AS total_output_tokens
-    FROM ai_usage_logs
+    FROM public.ai_usage_logs
     WHERE created_at >= NOW() - ($1::text || ' days')::interval
   `;
   }
@@ -287,7 +287,7 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
   const qArgs: unknown[] = [];
   let qSql = `
     SELECT COALESCE(SUM(COALESCE((j.result_summary->>'inserted')::int, 0)), 0)::bigint AS generated_questions
-    FROM ai_factory_jobs j
+    FROM public.ai_factory_jobs j
     WHERE j.status = 'succeeded'
   `;
   if (!filters.from && !filters.to) {
@@ -326,7 +326,7 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
   }
   if (subClauses.length) {
     qSql += ` AND EXISTS (
-      SELECT 1 FROM ai_usage_logs u
+      SELECT 1 FROM public.ai_usage_logs u
       WHERE u.job_id = j.id
         AND ${subClauses.join(" AND ")}
     )`;
@@ -353,7 +353,7 @@ export async function getUsageDailyCost(filters: UsageFilters): Promise<Array<{ 
       to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
       COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd,
       COALESCE(SUM(cost_sar), 0)::float8 AS cost_sar
-    FROM ai_usage_logs
+    FROM public.ai_usage_logs
     WHERE TRUE
   `;
   if (!filters.from && !filters.to) {
@@ -363,7 +363,7 @@ export async function getUsageDailyCost(filters: UsageFilters): Promise<Array<{ 
       to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
       COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd,
       COALESCE(SUM(cost_sar), 0)::float8 AS cost_sar
-    FROM ai_usage_logs
+    FROM public.ai_usage_logs
     WHERE created_at >= NOW() - ($1::text || ' days')::interval
   `;
   }
@@ -401,14 +401,14 @@ export async function getRecentUsage(
   const sqlArgs: unknown[] = [];
   let sql = `
     SELECT id, job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, subject, status, created_at
-    FROM ai_usage_logs
+    FROM public.ai_usage_logs
     WHERE TRUE
   `;
   if (!filters.from && !filters.to) {
     sqlArgs.push(30);
     sql = `
     SELECT id, job_id, model_id, layer_type, input_tokens, output_tokens, cost_usd, cost_sar, subject, status, created_at
-    FROM ai_usage_logs
+    FROM public.ai_usage_logs
     WHERE created_at >= NOW() - ($1::text || ' days')::interval
   `;
   }
@@ -447,10 +447,10 @@ export async function getUsageFilterOptions(): Promise<{ subjects: string[]; mod
   const pool = getPool();
   const [subjectsR, modelsR] = await Promise.all([
     pool.query<{ subject: string }>(
-      `SELECT DISTINCT subject FROM ai_usage_logs WHERE btrim(subject) <> '' ORDER BY subject ASC`,
+      `SELECT DISTINCT subject FROM public.ai_usage_logs WHERE btrim(subject) <> '' ORDER BY subject ASC`,
     ),
     pool.query<{ model_id: string }>(
-      `SELECT DISTINCT model_id FROM ai_usage_logs WHERE btrim(model_id) <> '' ORDER BY model_id ASC`,
+      `SELECT DISTINCT model_id FROM public.ai_usage_logs WHERE btrim(model_id) <> '' ORDER BY model_id ASC`,
     ),
   ]);
   return {

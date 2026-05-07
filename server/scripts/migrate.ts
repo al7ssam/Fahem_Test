@@ -13,7 +13,7 @@ import { config } from "../config";
 
 async function ensureMigrationsTable(pool: ReturnType<typeof getPool>): Promise<void> {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE IF NOT EXISTS public.schema_migrations (
       filename TEXT PRIMARY KEY,
       executed_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
@@ -25,7 +25,7 @@ async function isMigrationApplied(
   filename: string,
 ): Promise<boolean> {
   const r = await pool.query<{ one: number }>(
-    `SELECT 1 AS one FROM schema_migrations WHERE filename = $1 LIMIT 1`,
+    `SELECT 1 AS one FROM public.schema_migrations WHERE filename = $1 LIMIT 1`,
     [filename],
   );
   return r.rowCount !== null && r.rowCount > 0;
@@ -50,7 +50,7 @@ async function main() {
   if (baseline) {
     for (const file of files) {
       await pool.query(
-        `INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING`,
+        `INSERT INTO public.schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING`,
         [file],
       );
       console.log("Baseline recorded:", file);
@@ -73,7 +73,7 @@ async function main() {
     try {
       await client.query("BEGIN");
       await client.query(sql);
-      await client.query(`INSERT INTO schema_migrations (filename) VALUES ($1)`, [file]);
+      await client.query(`INSERT INTO public.schema_migrations (filename) VALUES ($1)`, [file]);
       await client.query("COMMIT");
       console.log("Migration applied:", migrationPath);
     } catch (e) {

@@ -57,7 +57,7 @@ async function main(): Promise<void> {
        COUNT(*) FILTER (WHERE COALESCE(result_summary->>'promptVariant', '') = 'optimized')::text AS optimized_variant_count,
        COUNT(*) FILTER (WHERE COALESCE(NULLIF(result_summary->>'promptVariant', ''), NULLIF(payload->>'promptVariant', ''), 'baseline') = 'baseline')::text AS baseline_variant_count,
        COALESCE(AVG(batch_size) FILTER (WHERE status = 'succeeded'), 0)::text AS avg_batch_size_success
-     FROM ai_factory_jobs
+     FROM public.ai_factory_jobs
      WHERE created_at >= NOW() - ($1::text || ' days')::interval
        ${subFilterJobs}`,
     subParams,
@@ -65,7 +65,7 @@ async function main(): Promise<void> {
 
   const usageWhere = subcategoryKey
     ? `u.created_at >= NOW() - ($1::text || ' days')::interval
-         AND EXISTS (SELECT 1 FROM ai_factory_jobs j WHERE j.id = u.job_id AND j.subcategory_key = $2)`
+         AND EXISTS (SELECT 1 FROM public.ai_factory_jobs j WHERE j.id = u.job_id AND j.subcategory_key = $2)`
     : `created_at >= NOW() - ($1::text || ' days')::interval`;
 
   const layerAgg = await pool.query<LayerAggregateRow>(
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
            COALESCE(SUM(u.output_tokens), 0)::text AS output_tokens,
            COALESCE(SUM(u.cost_usd), 0)::text AS total_cost_usd,
            COALESCE(SUM(u.cost_sar), 0)::text AS total_cost_sar
-         FROM ai_usage_logs u
+         FROM public.ai_usage_logs u
          WHERE ${usageWhere}
          GROUP BY u.layer_type
          ORDER BY u.layer_type`
@@ -88,7 +88,7 @@ async function main(): Promise<void> {
            COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
            COALESCE(SUM(cost_usd), 0)::text AS total_cost_usd,
            COALESCE(SUM(cost_sar), 0)::text AS total_cost_sar
-         FROM ai_usage_logs
+         FROM public.ai_usage_logs
          WHERE created_at >= NOW() - ($1::text || ' days')::interval
          GROUP BY layer_type
          ORDER BY layer_type`,
@@ -105,20 +105,20 @@ async function main(): Promise<void> {
            COALESCE(SUM(u.input_tokens), 0)::text AS input_tokens,
            COALESCE(SUM(u.output_tokens), 0)::text AS output_tokens,
            COALESCE(SUM(u.cost_usd), 0)::text AS cost_usd
-         FROM ai_usage_logs u
+         FROM public.ai_usage_logs u
          WHERE ${usageWhere}`
       : `SELECT
            COALESCE(SUM(input_tokens), 0)::text AS input_tokens,
            COALESCE(SUM(output_tokens), 0)::text AS output_tokens,
            COALESCE(SUM(cost_usd), 0)::text AS cost_usd
-         FROM ai_usage_logs
+         FROM public.ai_usage_logs
          WHERE created_at >= NOW() - ($1::text || ' days')::interval`,
     subParams,
   );
 
   const reasoning = await pool.query<ReasoningRow>(
     `SELECT layer_name::text, reasoning_level::text
-     FROM ai_factory_model_config
+     FROM public.ai_factory_model_config
      ORDER BY layer_name`,
   );
 
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
   if (withInspection) {
     const jobIdsR = await pool.query<{ id: string }>(
       `SELECT id::text
-       FROM ai_factory_jobs
+       FROM public.ai_factory_jobs
        WHERE status = 'succeeded'
          AND created_at >= NOW() - ($1::text || ' days')::interval
          ${subFilterJobs}
@@ -150,7 +150,7 @@ async function main(): Promise<void> {
     if (ids.length) {
       const insp = await pool.query<{ layer_name: string; raw_response_text: string }>(
         `SELECT layer_name::text, raw_response_text
-         FROM ai_factory_inspection_logs
+         FROM public.ai_factory_inspection_logs
          WHERE job_id = ANY($1::bigint[])`,
         [ids],
       );

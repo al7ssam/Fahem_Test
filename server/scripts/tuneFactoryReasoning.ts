@@ -17,7 +17,7 @@ async function main(): Promise<void> {
     reasoning_level: FactoryReasoningLevel;
   }>(
     `SELECT layer_name, reasoning_level
-     FROM ai_factory_model_config
+     FROM public.ai_factory_model_config
      ORDER BY layer_name`,
   );
 
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
   if (!dryRun) {
     await pool.query(
-      `UPDATE ai_factory_model_config
+      `UPDATE public.ai_factory_model_config
        SET reasoning_level = CASE layer_name
          WHEN 'architect' THEN $1
          WHEN 'creator' THEN $2
