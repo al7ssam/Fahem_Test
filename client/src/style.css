@@ -156,6 +156,99 @@ body {
   font-weight: 600;
 }
 
+.auth-entry-inline {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(8, 15, 32, 0.55);
+  padding: 0.55rem 0.7rem;
+}
+
+.auth-entry-status {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+
+.auth-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  background: rgba(2, 6, 23, 0.62);
+  padding: 1rem;
+}
+
+.auth-modal {
+  width: min(100%, 430px);
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.95));
+  box-shadow: 0 24px 56px rgba(2, 6, 23, 0.55);
+  padding: 1rem;
+  position: relative;
+}
+
+.auth-modal-close {
+  position: absolute;
+  left: 0.7rem;
+  top: 0.55rem;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #e2e8f0;
+  background: rgba(15, 23, 42, 0.7);
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.auth-modal-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.auth-modal-subtitle {
+  margin: 0.25rem 0 0.8rem;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+
+.auth-modal-error {
+  min-height: 1rem;
+  margin: 0 0 0.65rem;
+  font-size: 0.8rem;
+  color: #fca5a5;
+}
+
+.auth-modal-form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.auth-modal-label {
+  font-size: 0.78rem;
+  color: #cbd5e1;
+}
+
+.auth-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.auth-user-card {
+  border-radius: 0.8rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(15, 23, 42, 0.65);
+  padding: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
 .question-card {
   background: linear-gradient(160deg, rgba(15, 23, 42, 0.88), rgba(30, 41, 59, 0.75));
   border: 1px solid rgba(148, 163, 184, 0.22);
