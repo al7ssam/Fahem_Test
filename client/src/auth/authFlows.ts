@@ -14,10 +14,12 @@ import {
   type UserCredential,
 } from "firebase/auth";
 import { beginAuthOperation, commitAuthOperation, getAuthState, setAuthState } from "./authStore";
+import { buildMagicLinkContinueUrl, cleanupEmailLinkLandingUrl, readEmailLinkOobCode } from "./emailLinkUrl";
 import { getFirebaseAuth, getFirebaseConfig, getGoogleProvider } from "./firebaseClient";
 import { exchangeFirebaseToken, fetchCurrentUser, logout as backendLogout } from "./sessionClient";
 
 const EMAIL_LINK_KEY = "fahem_email_link_signin_email";
+const EMAIL_LINK_SESSION_KEY = "fahem_email_link_signin_email_sess";
 const GOOGLE_POPUP_REDIRECT_FALLBACK_CODES = new Set([
   "auth/popup-blocked",
   "auth/operation-not-supported-in-this-environment",
@@ -29,7 +31,13 @@ const GOOGLE_NON_ERROR_CODES = new Set([
 
 let googleFlowInFlight = false;
 let redirectBootstrapHandled = false;
+let magicLinkCompletionInFlight = false;
 let traceCounter = 0;
+
+export type MagicLinkBootstrapResult =
+  | { kind: "idle" }
+  | { kind: "completed" }
+  | { kind: "needs_modal"; reason: string; firebaseCode?: string };
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -59,40 +67,150 @@ function authTrace(traceId: string, stage: string, details: Record<string, unkno
 }
 
 function readFirebaseCode(error: unknown): string {
-  const code = String((error as { code?: unknown })?.code ?? "").trim();
-  return code;
+  return String((error as { code?: unknown })?.code ?? "").trim();
 }
 
 function asMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown_error";
 }
 
-async function syncBackendFromFirebaseCredential(credential: UserCredential, traceId: string): Promise<void> {
+function oobDoneStorageKey(oob: string): string {
+  return `fahem_email_link_oob_done_${oob}`;
+}
+
+async function syncBackendFromFirebaseCredential(
+  credential: UserCredential,
+  traceId: string,
+  instrumentation: "firebase" | "magic_link" = "firebase",
+): Promise<void> {
   authTrace(traceId, "firebase_credential_received", {
     hasUser: Boolean(credential.user),
     uid: credential.user?.uid ?? null,
     emailVerified: credential.user?.emailVerified ?? null,
+    flow: instrumentation,
   });
   if (!credential.user) {
-    throw new Error("google_missing_firebase_user");
+    throw new Error(instrumentation === "magic_link" ? "magic_link_missing_firebase_user" : "google_missing_firebase_user");
   }
-  authTrace(traceId, "firebase_get_id_token_start");
-  const idToken = await credential.user.getIdToken(true);
-  authTrace(traceId, "firebase_get_id_token_success", { tokenLength: idToken.length });
-  authTrace(traceId, "exchange_request_start");
-  await exchangeFirebaseToken({ firebaseIdToken: idToken, clientType: "web", traceId });
-  authTrace(traceId, "exchange_request_success");
+
+  const tokenStart = instrumentation === "magic_link" ? "magic_link_get_token_start" : "firebase_get_id_token_start";
+  const tokenSuccess = instrumentation === "magic_link" ? "magic_link_get_token_success" : "firebase_get_id_token_success";
+
+  authTrace(traceId, tokenStart);
+  let idToken: string;
+  try {
+    idToken = await credential.user.getIdToken(true);
+    authTrace(traceId, tokenSuccess, { tokenLength: idToken.length });
+  } catch (error) {
+    if (instrumentation === "magic_link") {
+      authTrace(traceId, "magic_link_get_token_fail", {
+        code: readFirebaseCode(error),
+        reason: asMessage(error),
+      });
+    }
+    throw error;
+  }
+
+  if (instrumentation === "firebase") {
+    authTrace(traceId, "exchange_request_start");
+  }
+  await exchangeFirebaseToken({
+    firebaseIdToken: idToken,
+    clientType: "web",
+    traceId,
+    traceStagesFlow: instrumentation === "magic_link" ? "magic_link" : "default",
+  });
+  if (instrumentation === "firebase") {
+    authTrace(traceId, "exchange_request_success");
+  }
+
   const user = await fetchCurrentUser();
   authTrace(traceId, "fetch_current_user_success", { userId: user.id, roles: user.roles.length });
   setAuthState({ status: "authenticated", user, lastError: null });
 }
 
-function savePendingEmailLink(email: string): void {
-  window.localStorage.setItem(EMAIL_LINK_KEY, email.trim().toLowerCase());
+export function savePendingEmailLink(email: string): void {
+  const canon = email.trim().toLowerCase();
+  window.localStorage.setItem(EMAIL_LINK_KEY, canon);
+  window.sessionStorage.setItem(EMAIL_LINK_SESSION_KEY, canon);
 }
 
 export function getPendingEmailLinkEmail(): string {
-  return String(window.localStorage.getItem(EMAIL_LINK_KEY) ?? "").trim();
+  const a = String(window.localStorage.getItem(EMAIL_LINK_KEY) ?? "").trim();
+  if (a) return a;
+  return String(window.sessionStorage.getItem(EMAIL_LINK_SESSION_KEY) ?? "").trim();
+}
+
+export function previewMagicLinkLandingQuery(): {
+  authActionIntent: boolean;
+  hasOob: boolean;
+  hasModeSignIn: boolean;
+} {
+  const p = new URLSearchParams(window.location.search);
+  return {
+    authActionIntent: p.get("authAction") === "emailLinkComplete",
+    hasOob: Boolean(p.get("oobCode")),
+    hasModeSignIn: p.get("mode") === "signIn",
+  };
+}
+
+/** Run after Google redirect bootstrap: auto-complete magic link when URL + stored email allow it. */
+export async function bootstrapMagicLinkOnLoad(traceIdPrefix = "magic-boot"): Promise<MagicLinkBootstrapResult> {
+  const traceId = nextTraceId(traceIdPrefix);
+  const auth = await getFirebaseAuth();
+  const href = window.location.href;
+  const preview = previewMagicLinkLandingQuery();
+  const isLink = isSignInWithEmailLink(auth, href);
+
+  if (isLink) {
+    authTrace(traceId, "magic_link_detected", {
+      authActionIntent: preview.authActionIntent,
+      hasOob: preview.hasOob,
+      hasModeSignIn: preview.hasModeSignIn,
+    });
+  }
+
+  if (!isLink && !preview.authActionIntent) {
+    return { kind: "idle" };
+  }
+
+  if (!isLink && preview.authActionIntent) {
+    authTrace(traceId, "magic_link_url_not_recognized", {
+      hint: "Check Authorized domains / continue URL / Firebase email link provider",
+      hasOob: preview.hasOob,
+    });
+    return { kind: "needs_modal", reason: "magic_link_invalid_url" };
+  }
+
+  const oob = readEmailLinkOobCode();
+  if (oob && window.sessionStorage.getItem(oobDoneStorageKey(oob)) === "1") {
+    authTrace(traceId, "magic_link_skipped_oob_already_completed", {});
+    cleanupEmailLinkLandingUrl();
+    return { kind: "completed" };
+  }
+
+  const emailStored = getPendingEmailLinkEmail();
+  if (!emailStored.trim()) {
+    authTrace(traceId, "magic_link_needs_modal_missing_email", {});
+    return { kind: "needs_modal", reason: "missing_email_for_email_link" };
+  }
+
+  if (magicLinkCompletionInFlight) {
+    authTrace(traceId, "magic_link_boot_skipped_in_flight");
+    return { kind: "needs_modal", reason: "magic_link_already_in_progress" };
+  }
+
+  try {
+    await completePasswordlessEmailLink(emailStored, traceId);
+    if (oob) window.sessionStorage.setItem(oobDoneStorageKey(oob), "1");
+    cleanupEmailLinkLandingUrl();
+    authTrace(traceId, "magic_link_boot_auto_complete_success");
+    return { kind: "completed" };
+  } catch (error) {
+    const code = readFirebaseCode(error);
+    authTrace(traceId, "magic_link_boot_auto_complete_fail", { code, reason: asMessage(error) });
+    return { kind: "needs_modal", reason: asMessage(error), firebaseCode: code || undefined };
+  }
 }
 
 export async function loginWithGoogle(): Promise<void> {
@@ -110,7 +228,7 @@ export async function loginWithGoogle(): Promise<void> {
     authTrace(traceId, "google_popup_start");
     const credential = await signInWithPopup(auth, getGoogleProvider());
     authTrace(traceId, "google_popup_success");
-    await syncBackendFromFirebaseCredential(credential, traceId);
+    await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
   } catch (error) {
     const code = readFirebaseCode(error);
     const reason = asMessage(error);
@@ -149,7 +267,7 @@ export async function completeGoogleRedirectLogin(): Promise<boolean> {
     }
     authTrace(traceId, "redirect_result_success");
     beginAuthOperation();
-    await syncBackendFromFirebaseCredential(credential, traceId);
+    await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
     return true;
   } catch (error) {
     const code = readFirebaseCode(error);
@@ -165,7 +283,7 @@ export async function signupWithEmailPassword(email: string, password: string): 
   beginAuthOperation();
   const auth = await getFirebaseAuth();
   const credential = await createUserWithEmailAndPassword(auth, email, password);
-  await syncBackendFromFirebaseCredential(credential, traceId);
+  await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
 }
 
 export async function loginWithEmailPassword(email: string, password: string): Promise<void> {
@@ -175,7 +293,7 @@ export async function loginWithEmailPassword(email: string, password: string): P
   const auth = await getFirebaseAuth();
   try {
     const credential = await signInWithEmailAndPassword(auth, email, password);
-    await syncBackendFromFirebaseCredential(credential, traceId);
+    await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
   } catch (error) {
     const reason = error instanceof Error ? error.message : "email_sign_in_failed";
     if (reason.includes("account-exists-with-different-credential")) {
@@ -188,30 +306,93 @@ export async function loginWithEmailPassword(email: string, password: string): P
 }
 
 export async function sendPasswordlessEmailLink(email: string): Promise<void> {
+  const traceId = nextTraceId("magic-send");
   const auth = await getFirebaseAuth();
   const cfg = getFirebaseConfig();
-  const continueUrl = new URL(window.location.href);
-  continueUrl.searchParams.set("authAction", "emailLinkComplete");
-  await sendSignInLinkToEmail(auth, email, {
-    url: continueUrl.toString(),
-    handleCodeInApp: true,
-    ...(cfg.linkDomain ? { linkDomain: cfg.linkDomain } : {}),
+  const continueUrl = buildMagicLinkContinueUrl();
+  authTrace(traceId, "magic_link_send_start", {
+    continueUrlOrigin: continueUrl.origin,
+    continueUrlPathname: continueUrl.pathname,
+    hasLinkDomain: Boolean(cfg.linkDomain),
   });
-  savePendingEmailLink(email);
+  try {
+    await sendSignInLinkToEmail(auth, email.trim(), {
+      url: continueUrl.toString(),
+      handleCodeInApp: true,
+      ...(cfg.linkDomain ? { linkDomain: cfg.linkDomain } : {}),
+    });
+    savePendingEmailLink(email);
+    authTrace(traceId, "magic_link_send_success", { emailDomain: email.includes("@") ? email.split("@")[1]?.toLowerCase() : "" });
+  } catch (error) {
+    authTrace(traceId, "magic_link_send_fail", { code: readFirebaseCode(error), reason: asMessage(error) });
+    throw error;
+  }
 }
 
-export async function completePasswordlessEmailLink(emailInput?: string): Promise<boolean> {
-  const traceId = nextTraceId("email-link");
-  authTrace(traceId, "email_link_complete_start");
+/** Complete Firebase email link flow and internal session exchange. Throws on invalid URL or Firebase/backend errors (no silent false). */
+export async function completePasswordlessEmailLink(emailInput?: string, reusedTraceId?: string): Promise<void> {
+  const traceId = reusedTraceId ?? nextTraceId("email-link");
+  if (magicLinkCompletionInFlight) {
+    authTrace(traceId, "magic_link_complete_skipped_in_flight");
+    throw new Error("magic_link_already_in_progress");
+  }
+  magicLinkCompletionInFlight = true;
+
+  authTrace(traceId, "magic_link_complete_start", {
+    hasEmailArg: Boolean(emailInput?.trim()),
+    hasStoredEmail: Boolean(getPendingEmailLinkEmail()),
+  });
+
+  const op = beginAuthOperation();
   const auth = await getFirebaseAuth();
-  if (!isSignInWithEmailLink(auth, window.location.href)) return false;
-  const email = (emailInput ?? getPendingEmailLinkEmail() ?? "").trim();
-  if (!email) throw new Error("missing_email_for_email_link");
-  beginAuthOperation();
-  const credential = await signInWithEmailLink(auth, email, window.location.href);
-  window.localStorage.removeItem(EMAIL_LINK_KEY);
-  await syncBackendFromFirebaseCredential(credential, traceId);
-  return true;
+
+  try {
+    if (!isSignInWithEmailLink(auth, window.location.href)) {
+      const preview = previewMagicLinkLandingQuery();
+      authTrace(traceId, "magic_link_complete_fail", {
+        reason: "not_email_link_url",
+        code: "magic_link_invalid_url",
+        ...preview,
+      });
+      throw new Error(
+        preview.authActionIntent && !preview.hasOob
+          ? "magic_link_expired_or_stripped_query"
+          : "magic_link_invalid_url",
+      );
+    }
+
+    authTrace(traceId, "magic_link_detected");
+
+    const email = (emailInput ?? getPendingEmailLinkEmail() ?? "").trim().toLowerCase();
+    if (!email) {
+      authTrace(traceId, "magic_link_complete_fail", { reason: "missing_email", code: "missing_email_for_email_link" });
+      throw new Error("missing_email_for_email_link");
+    }
+
+    const credential = await signInWithEmailLink(auth, email, window.location.href);
+    window.localStorage.removeItem(EMAIL_LINK_KEY);
+    window.sessionStorage.removeItem(EMAIL_LINK_SESSION_KEY);
+    await syncBackendFromFirebaseCredential(credential, traceId, "magic_link");
+    const oob = readEmailLinkOobCode();
+    if (oob) window.sessionStorage.setItem(oobDoneStorageKey(oob), "1");
+    authTrace(traceId, "magic_link_complete_success");
+    const u = getAuthState().user;
+    if (u) {
+      commitAuthOperation(op, { status: "authenticated", user: u, lastError: null });
+    }
+  } catch (error) {
+    const code = readFirebaseCode(error);
+    const reason = asMessage(error);
+    const alreadyLoggedFail =
+      reason === "magic_link_invalid_url" || reason === "magic_link_expired_or_stripped_query";
+    if (!alreadyLoggedFail) {
+      authTrace(traceId, "magic_link_complete_fail", { code, reason });
+    }
+    commitAuthOperation(op, { status: "error", user: null, lastError: code || reason || "magic_link_failed" });
+    throw error;
+  } finally {
+    magicLinkCompletionInFlight = false;
+  }
 }
 
 export async function linkPasswordToCurrentUser(email: string, password: string): Promise<void> {
@@ -236,3 +417,5 @@ export function getAuthReadableStatus(): string {
   if (s === "error") return "خطأ مصادقة";
   return "غير مسجل";
 }
+
+export { cleanupEmailLinkLandingUrl } from "./emailLinkUrl";

@@ -6,7 +6,7 @@ import { normalizePastedJsonForParse } from "./jsonNormalize";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
-import { completeGoogleRedirectLogin, getAuthReadableStatus } from "./auth/authFlows";
+import { bootstrapMagicLinkOnLoad, cleanupEmailLinkLandingUrl, completeGoogleRedirectLogin, getAuthReadableStatus } from "./auth/authFlows";
 import { getAuthState, subscribeAuthState } from "./auth/authStore";
 import { hydrateAuthSession } from "./auth/sessionSync";
 import { attachSocketAuthSync } from "./auth/socketSync";
@@ -4563,15 +4563,29 @@ window.addEventListener("storage", (event) => {
     void hydrateAuthSession();
   }
 });
-void completeGoogleRedirectLogin()
-  .catch((error) => {
+void (async () => {
+  try {
+    await completeGoogleRedirectLogin();
+  } catch (error) {
     console.error("[auth-trace] redirect_bootstrap_unhandled_error", {
       ts: new Date().toISOString(),
       reason: error instanceof Error ? error.message : "unknown_error",
     });
-    return false;
-  })
-  .then(() => hydrateAuthSession());
+  }
+  const magicBootstrap = await bootstrapMagicLinkOnLoad().catch(() => ({ kind: "idle" as const }));
+  await hydrateAuthSession();
+  if (magicBootstrap.kind === "needs_modal") {
+    openAuthModal({
+      forceEmailLinkCompletion: true,
+      magicLinkReasonCode: magicBootstrap.reason,
+      magicLinkFirebaseCode: magicBootstrap.firebaseCode,
+      onCompleted: () => {
+        cleanupEmailLinkLandingUrl();
+        render();
+      },
+    });
+  }
+})();
 attachSocketAuthSync(
   () => socket,
   () => {
@@ -4580,17 +4594,6 @@ attachSocketAuthSync(
 );
 const FAHEM_ADMIN_LESSON_PREVIEW_KEY = "fahem_admin_lesson_preview_v1";
 const bootParams = new URLSearchParams(window.location.search);
-if (bootParams.get("authAction") === "emailLinkComplete") {
-  openAuthModal({
-    forceEmailLinkCompletion: true,
-    onCompleted: () => {
-      const clean = new URL(window.location.href);
-      clean.searchParams.delete("authAction");
-      history.replaceState({}, "", clean.pathname + clean.search + clean.hash);
-      render();
-    },
-  });
-}
 if (bootParams.get("auth") === "1") {
   openAuthModal({
     onCompleted: () => {

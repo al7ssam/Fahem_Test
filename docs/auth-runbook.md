@@ -4,9 +4,11 @@
 
 - فعّل Providers: `Google`, `Email/Password`, `Email Link`.
 - أضف جميع `Authorized Domains` اللازمة (local + production).
-- Email Link:
-  - فعّل Firebase Hosting link domain.
-  - استخدم نفس domain داخل `VITE_FIREBASE_LINK_DOMAIN`.
+- Email Link (Passwordless):
+  - فعّل المزود `Email Link` في Authentication > Sign-in method.
+  - أضف نطاق الاستضافة الفعلي (مثل `YOUR-APP.onrender.com`) إلى **Authorized domains** في Authentication > Settings (هذا أساس رفض أو قبول عنوان المتابعة `continueUrl`).
+  - **متغير بيئة موصى به للإنتاج:** `VITE_FIREBASE_EMAIL_LINK_CONTINUE_URL=https://YOUR-APP.onrender.com/` (أو أي مسار ثابت لديك؛ يُضاف إلى الرابط آلياً `?authAction=emailLinkComplete`) حتى لا يعتمد عنوان المتابعة على صفحة عميقة غير مصرّحة.
+  - **`VITE_FIREBASE_LINK_DOMAIN`:** اختياري؛ لا تضعه إلا إن كنت قد عدّدت Hosted link domain / Dynamic Links في مشروع Firebase حسب دليلهم. تركه فارغًا يمنع خطأًا شائعًا من إعداد غير مستخدم فعلًا.
 
 ## 2) إعداد البيئة
 
@@ -52,7 +54,10 @@
 ## 5) Troubleshooting سريع
 
 - خطأ `csrf_mismatch`: تأكد من وجود `fahem_csrf_token` وإرسال `X-CSRF-Token`.
-- فشل Email Link completion: تأكد من domain الصحيح في `Authorized Domains` و`VITE_FIREBASE_LINK_DOMAIN`.
+- فشل Email Link بعد فتح الرسالة:
+  - راقب وحدة تحكم المتصفح لأحداث `[auth-trace]` من `magic_link_send_*` حتى `magic_link_exchange_success` ثم تأكيد طلب `/api/auth/me`.
+  - إن ظهرت `magic_link_invalid_url` أو لم يبدُ في العنوان معاملًا مثل `oobCode`: راجع Authorized domains مقابل **`VITE_FIREBASE_EMAIL_LINK_CONTINUE_URL`**؛ لا تفعّل `linkDomain` بلا Hosted domain صحيح.
+  - إن فُقد الإيميل المحفوظ (جهاز مختلف): أكمل الإدخال يدويًا ثم زر إكمال الرابط.
 - حساب موجود بمزود آخر: استخدم مسار تسجيل الدخول بالمزود الصحيح ثم linking.
 - خطأ `auth_exchange_failed` بعد نجاح Firebase في الواجهة:
   - تأكد أن `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` مضبوطة في Render.

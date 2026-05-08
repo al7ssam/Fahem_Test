@@ -1,8 +1,22 @@
-import { completePasswordlessEmailLink, getAuthReadableStatus, loginWithEmailPassword, loginWithGoogle, logoutFlow, sendPasswordlessEmailLink, signupWithEmailPassword } from "./authFlows";
+import { isSignInWithEmailLink } from "firebase/auth";
+import {
+  cleanupEmailLinkLandingUrl,
+  completePasswordlessEmailLink,
+  getAuthReadableStatus,
+  getPendingEmailLinkEmail,
+  loginWithEmailPassword,
+  loginWithGoogle,
+  logoutFlow,
+  sendPasswordlessEmailLink,
+  signupWithEmailPassword,
+} from "./authFlows";
+import { getFirebaseAuth } from "./firebaseClient";
 import { getAuthState } from "./authStore";
 
 type OpenAuthModalOptions = {
   forceEmailLinkCompletion?: boolean;
+  magicLinkReasonCode?: string;
+  magicLinkFirebaseCode?: string;
   onCompleted?: () => void;
 };
 
@@ -10,8 +24,49 @@ function closeModal(root: HTMLElement): void {
   root.remove();
 }
 
+function magicLinkRecoverHint(reasonCode?: string): string | null {
+  if (!reasonCode || reasonCode === "missing_email_for_email_link") {
+    return "أدخل نفس عنوان البريد الذي طلبت الرابط له. إذا فتح الرابط على جهاز آخر، لن يكون البريد محفوظًا — أكمل الإدخال يدويًا ثم استخدم زر إكمال الرابط.";
+  }
+  if (reasonCode === "magic_link_invalid_url" || reasonCode === "magic_link_expired_or_stripped_query") {
+    return "تأكد أن النطاق مضاف في Authorized domains وأن عنوان المتابعة (continue URL) يطابق مستضيفك؛ افتح الرابط مباشرة من الرسالة دون مانع أو قصّ لـ ? في المتصفح.";
+  }
+  if (reasonCode === "magic_link_already_in_progress") {
+    return "هناك إكمال قائم الآن؛ انتظر قليلًا ثم جرّب مرة واحدة.";
+  }
+  return null;
+}
+
+function makeInitialMagicError(reasonCode?: string, firebaseCode?: string): string {
+  if (firebaseCode) {
+    const fake = Object.assign(new Error(""), { code: firebaseCode });
+    return makeActionError(fake);
+  }
+  return reasonCode ? makeActionError(new Error(reasonCode)) : "";
+}
+
 function makeActionError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : "auth_unknown_error";
+  const firebaseCode = typeof (error as { code?: string })?.code === "string" ? String((error as { code: string }).code) : "";
+  const raw = firebaseCode || (error instanceof Error ? error.message : "auth_unknown_error");
+
+  const firebaseMessages: Record<string, string> = {
+    "auth/invalid-email": "صيغة البريد الإلكتروني غير صحيحة.",
+    "auth/invalid-action-code": "رابط الدخول غير صالح أو استُخدم مسبقًا. أعد طلب الرابط السحري.",
+    "auth/expired-action-code": "انتهت صلاحية الرابط السحري. أعد الطلب وجرب الرابط الجديد خلال وقت معقول.",
+    "auth/user-disabled": "تم تعطيل هذا الحساب.",
+  };
+  const appMessages: Record<string, string> = {
+    magic_link_invalid_url: "هذه الصفحة لا تحتوي رابط تسجيل دخول سحريًا صالحًا من Firebase أو فقد المعاملات (مثل oobCode).",
+    magic_link_expired_or_stripped_query: "وصلت إلى صفحة بلا معامل الرابط؛ أعد الطلب أو افتح الرابط من الرسالة مباشرة دون تجريد العنوان.",
+    magic_link_already_in_progress: "عملية الإكمال جارية؛ انتظر قليلًا.",
+    magic_link_missing_firebase_user: "فشل إنشاء جلسة Firebase بعد الرابط؛ أعد المحاولة.",
+    missing_email_for_email_link: "أدخل البريد لإكمال الرابط السحري.",
+    missing_password: "أدخل كلمة المرور.",
+  };
+
+  if (firebaseMessages[firebaseCode]) return firebaseMessages[firebaseCode];
+  if (appMessages[raw]) return appMessages[raw];
+
   if (raw.includes("missing_vite_firebase")) return "إعدادات Firebase غير مكتملة في بيئة الواجهة.";
   if (raw.includes("missing_vite")) return "إعدادات Firebase غير مكتملة في ملف البيئة.";
   if (raw.includes("auth/popup-blocked")) return "المتصفح حظر نافذة Google. اسمح بالنوافذ المنبثقة ثم حاول مرة أخرى.";
@@ -22,22 +77,20 @@ function makeActionError(error: unknown): string {
   if (raw.includes("google_missing_firebase_user")) return "تمت مصادقة Google لكن لم يتم الحصول على المستخدم. أعد المحاولة.";
   if (raw.includes("google_redirect_result_failed")) return "فشل استرجاع نتيجة تسجيل الدخول عبر redirect.";
   if (raw.includes("popup")) return "تعذر فتح نافذة Google. تحقق من مانع النوافذ وحاول مجددًا.";
-  if (raw.includes("invalid-email")) return "صيغة البريد الإلكتروني غير صحيحة.";
   if (raw.includes("wrong-password")) return "كلمة المرور غير صحيحة.";
   if (raw.includes("user-not-found")) return "الحساب غير موجود.";
   if (raw.includes("email-already-in-use")) return "هذا البريد مستخدم مسبقًا. جرّب تسجيل الدخول.";
   if (raw.includes("too-many-requests")) return "محاولات كثيرة. حاول بعد قليل.";
-  if (raw.includes("missing_email_for_email_link")) return "أدخل البريد لإكمال تسجيل الدخول بالرابط السحري.";
-  if (raw.includes("invalid-action-code") || raw.includes("expired-action-code")) {
-    return "رابط الدخول السحري غير صالح أو منتهي. أعد طلب رابط جديد.";
-  }
-  if (raw.includes("auth_exchange_failed")) return "تعذر إنشاء جلسة دخول داخلية. حاول مرة أخرى.";
-  return "تعذر إكمال عملية المصادقة. حاول مرة أخرى.";
+  if (raw.includes("auth_exchange_failed")) return "تعذر إنشاء جلسة داخلية بعد نجاح Firebase. تحقق من الخادم والشبكة.";
+  return firebaseCode ? `خطأ المصادقة (${firebaseCode}). أعد المحاولة أو اطلب رابطًا جديدًا.` : "تعذر إكمال عملية المصادقة. حاول مرة أخرى.";
 }
 
 export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   const existing = document.querySelector<HTMLElement>("#auth-modal-overlay");
   if (existing) existing.remove();
+
+  const hint = options.forceEmailLinkCompletion ? magicLinkRecoverHint(options.magicLinkReasonCode) : null;
+  const initialErr = options.forceEmailLinkCompletion ? makeInitialMagicError(options.magicLinkReasonCode, options.magicLinkFirebaseCode) : "";
 
   const state = getAuthState();
   const overlay = document.createElement("div");
@@ -48,6 +101,11 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       <button type="button" class="auth-modal-close" id="auth-modal-close" aria-label="إغلاق">×</button>
       <h2 id="auth-modal-title" class="auth-modal-title">الحساب</h2>
       <p class="auth-modal-subtitle">الحالة الحالية: ${getAuthReadableStatus()}</p>
+      ${
+        options.forceEmailLinkCompletion && hint
+          ? `<p class="auth-modal-hint text-sm text-slate-500 m-2">${hint}</p>`
+          : ""
+      }
       <p id="auth-modal-error" class="auth-modal-error" aria-live="polite"></p>
       ${
         state.status === "authenticated" && state.user
@@ -82,8 +140,9 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
   const errorEl = overlay.querySelector<HTMLParagraphElement>("#auth-modal-error");
   const setError = (message: string): void => {
-    if (errorEl) errorEl.textContent = message;
+    if (errorEl) errorEl.textContent = message ?? "";
   };
+  if (errorEl && initialErr) errorEl.textContent = initialErr;
 
   const withLoading = async (
     button: HTMLButtonElement | null,
@@ -143,6 +202,8 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
   const emailInput = overlay.querySelector<HTMLInputElement>("#auth-modal-email");
   const passwordInput = overlay.querySelector<HTMLInputElement>("#auth-modal-password");
+  emailInput!.value = getPendingEmailLinkEmail();
+
   const requireEmail = (): string => {
     const value = String(emailInput?.value ?? "").trim();
     if (!value) throw new Error("missing_email_for_email_link");
@@ -168,13 +229,15 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
   overlay.querySelector<HTMLButtonElement>("#auth-modal-email-link")?.addEventListener("click", () => {
     if (options.forceEmailLinkCompletion) {
-      void withLoading(overlay.querySelector("#auth-modal-email-link"), () => completePasswordlessEmailLink(requireEmail()).then(() => {}));
+      void withLoading(overlay.querySelector("#auth-modal-email-link"), async () => {
+        await completePasswordlessEmailLink(requireEmail());
+      });
       return;
     }
     void withLoading(
       overlay.querySelector("#auth-modal-email-link"),
       () => sendPasswordlessEmailLink(requireEmail()),
-      { closeOnSuccess: false, successMessage: "تم إرسال رابط الدخول إلى بريدك. افتح الرسالة لإكمال الدخول." },
+      { closeOnSuccess: false, successMessage: "تم إرسال الرابط. افتح البريد واضغط الرابط لتكمل؛ إذا وُجهت لتسجيل الدخول أكمل الإيميل وأعد المحاولة." },
     );
   });
 
@@ -184,4 +247,19 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
   document.body.appendChild(overlay);
   emailInput?.focus();
+
+  if (options.forceEmailLinkCompletion) {
+    queueMicrotask(() => {
+      void (async () => {
+        const auth = await getFirebaseAuth();
+        if (!isSignInWithEmailLink(auth, window.location.href)) return;
+        const email = getPendingEmailLinkEmail().trim();
+        if (!email || !overlay.isConnected || !emailInput?.value.trim()) return;
+        const btn = overlay.querySelector<HTMLButtonElement>("#auth-modal-email-link");
+        await withLoading(btn, async () => {
+          await completePasswordlessEmailLink(email.trim().toLowerCase());
+        });
+      })();
+    });
+  }
 }

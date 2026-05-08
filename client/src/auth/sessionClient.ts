@@ -5,12 +5,15 @@ export async function exchangeFirebaseToken(input: {
   firebaseIdToken: string;
   clientType?: "web" | "mobile";
   traceId?: string;
+  traceStagesFlow?: "default" | "magic_link";
 }): Promise<{ user: { id: string; roles: string[] } }> {
+  const magic = input.traceStagesFlow === "magic_link";
+  const ts = new Date().toISOString();
   if (input.traceId) {
     console.info("[auth-trace]", {
-      ts: new Date().toISOString(),
+      ts,
       traceId: input.traceId,
-      stage: "exchange_fetch_dispatch",
+      stage: magic ? "magic_link_exchange_start" : "exchange_fetch_dispatch",
     });
   }
   const r = await fetch("/api/auth/exchange", {
@@ -32,7 +35,7 @@ export async function exchangeFirebaseToken(input: {
       console.info("[auth-trace]", {
         ts: new Date().toISOString(),
         traceId: input.traceId,
-        stage: "exchange_fetch_failed",
+        stage: magic ? "magic_link_exchange_fail" : "exchange_fetch_failed",
         status: r.status,
         reason: body.reason ?? body.error ?? "unknown",
       });
@@ -54,7 +57,7 @@ export async function exchangeFirebaseToken(input: {
     console.info("[auth-trace]", {
       ts: new Date().toISOString(),
       traceId: input.traceId,
-      stage: "exchange_fetch_success",
+      stage: magic ? "magic_link_exchange_success" : "exchange_fetch_success",
       hasTokens: Boolean(body.tokens?.accessToken && body.tokens?.refreshToken),
       hasUser: true,
     });
