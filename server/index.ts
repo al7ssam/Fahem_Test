@@ -19,6 +19,7 @@ import {
 import { aiFactoryRuntime } from "./services/aiFactory/runtime";
 import { startSimpleContentScheduler, stopSimpleContentScheduler } from "./services/simpleContent/scheduler";
 import { setReleaseVersionListener } from "./releaseVersionBus";
+import { authenticateSocket } from "./auth/socketAuth";
 
 if (!config.databaseUrl) {
   console.error("DATABASE_URL is required");
@@ -64,6 +65,9 @@ async function startServer(): Promise<void> {
       origin: config.clientOrigin ?? true,
       credentials: true,
     },
+  });
+  io.use((socket, next) => {
+    void authenticateSocket(socket, next);
   });
 
   const game = new GameManager(io);

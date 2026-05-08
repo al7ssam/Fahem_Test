@@ -107,6 +107,7 @@ import {
   normalizeLessonImportPayload,
 } from "../lessonImportPayload";
 import { emitReleaseVersionUpdated } from "../releaseVersionBus";
+import { requireRole } from "../auth/middleware";
 
 const questionBodySchema = z.object({
   prompt: z.string().trim().min(1).max(2000),
@@ -473,26 +474,12 @@ const lessonItemsPutSchema = z.union([
   }),
 ]);
 
-function timingSafeEqualString(a: string, b: string): boolean {
-  try {
-    const bufA = Buffer.from(a, "utf8");
-    const bufB = Buffer.from(b, "utf8");
-    if (bufA.length !== bufB.length) return false;
-    return crypto.timingSafeEqual(bufA, bufB);
-  } catch {
-    return false;
-  }
-}
-
 function verifyAdmin(req: Request, res: Response): boolean {
-  if (!config.adminSecret) {
-    res
-      .status(503)
-      .json({ ok: false, error: "admin_secret_not_configured" });
+  if (!req.auth) {
+    res.status(401).json({ ok: false, error: "unauthorized" });
     return false;
   }
-  const provided = String(req.header("x-admin-secret") ?? "").trim();
-  if (!timingSafeEqualString(provided, config.adminSecret)) {
+  if (!req.auth.roles.includes("admin")) {
     res.status(403).json({ ok: false, error: "forbidden" });
     return false;
   }
@@ -1219,6 +1206,9 @@ export function registerAdminRoutes(app: Express): void {
       res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
+
+  app.use("/admin", requireRole("admin"));
+  app.use("/api/admin", requireRole("admin"));
 
   app.get("/api/admin/release-version-metrics", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
@@ -2258,7 +2248,7 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
     try {
-      const actor = String(req.header("x-admin-secret") ?? "admin").slice(0, 16);
+      const actor = `user:${String(req.auth?.userId ?? "admin").slice(0, 32)}`;
       await saveOpenAiPricingSettingsForAdmin({
         actor,
         fallbackPolicy: parsed.data.openai.fallbackPolicy,
@@ -2309,7 +2299,7 @@ export function registerAdminRoutes(app: Express): void {
       return;
     }
     try {
-      const actor = String(req.header("x-admin-secret") ?? "admin").slice(0, 16);
+      const actor = `user:${String(req.auth?.userId ?? "admin").slice(0, 32)}`;
       await saveOpenAiPricingSettingsForAdmin({
         actor,
         fallbackPolicy: parsed.data.fallbackPolicy,

@@ -1,10 +1,16 @@
 import "./style.css";
-import { io, type Socket } from "socket.io-client";
+import type { Socket } from "socket.io-client";
 import { toDataURL as qrToDataURL } from "qrcode";
 import { buildCustomLessonAiPromptText, type LessonAiPromptParams } from "./lessonPromptBuilder";
 import { normalizePastedJsonForParse } from "./jsonNormalize";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
+import { createAuthedSocket } from "./auth/socketFactory";
+import { completeGoogleRedirectLogin, completePasswordlessEmailLink, getAuthReadableStatus, loginWithEmailPassword, loginWithGoogle, logoutFlow, sendPasswordlessEmailLink, signupWithEmailPassword } from "./auth/authFlows";
+import { getAuthState, subscribeAuthState } from "./auth/authStore";
+import { hydrateAuthSession } from "./auth/sessionSync";
+import { attachSocketAuthSync } from "./auth/socketSync";
+import { getAuthTokens } from "./auth/authClient";
 
 type GameMode = "direct" | "study_then_quiz" | "lesson";
 type DifficultyMode = "mix" | "easy" | "medium" | "hard";
@@ -72,6 +78,8 @@ let selectedDifficultyMode: DifficultyMode = "mix";
 let selectedMainCategoryId: number | null = null;
 let selectedSubcategoryKey: string | null = null;
 let selectedSubcategoryLabel: string | null = null;
+let authEmailDraft = "";
+let authPasswordDraft = "";
 let playerNameDraft = "";
 let searchFlowToken = 0;
 let soloLearningPending = false;
@@ -814,6 +822,24 @@ function render(): void {
             <div class="app-card p-6 space-y-5">
               <label class="block text-right text-sm text-slate-400">اسمك في اللعبة</label>
               <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="app-input w-full px-4 py-3 text-right text-lg" />
+              <div class="app-card p-3 space-y-2 text-right">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-sm text-slate-300">الحساب</span>
+                  <span class="text-xs text-slate-400">${escapeHtml(getAuthReadableStatus())}</span>
+                </div>
+                <input id="auth-email-input" type="email" value="${escapeHtml(authEmailDraft)}" placeholder="البريد الإلكتروني" class="app-input w-full px-3 py-2 text-sm text-right" />
+                <input id="auth-password-input" type="password" value="${escapeHtml(authPasswordDraft)}" placeholder="كلمة المرور" class="app-input w-full px-3 py-2 text-sm text-right" />
+                <div class="grid grid-cols-2 gap-2">
+                  <button id="auth-google-btn" type="button" class="ui-btn ui-btn--ghost py-2">Google</button>
+                  <button id="auth-email-login-btn" type="button" class="ui-btn ui-btn--ghost py-2">دخول</button>
+                  <button id="auth-email-signup-btn" type="button" class="ui-btn ui-btn--ghost py-2">إنشاء حساب</button>
+                  <button id="auth-email-link-btn" type="button" class="ui-btn ui-btn--ghost py-2">رابط سحري</button>
+                </div>
+                <button id="auth-logout-btn" type="button" class="ui-btn ui-btn--ghost w-full py-2 ${
+                  getAuthState().status === "authenticated" ? "" : "hidden"
+                }">تسجيل خروج</button>
+                <p id="auth-error" class="text-xs text-red-300 m-0">${escapeHtml(getAuthState().lastError ?? "")}</p>
+              </div>
               <p class="text-sm text-slate-400 text-right m-0">${
                 isPrivateEntryFlow
                   ? `الانضمام للغرفة الخاصة (${pendingJoinRoomCode})`
@@ -922,6 +948,40 @@ function render(): void {
     const privateCodeInput = app.querySelector<HTMLInputElement>("#private-room-code-input");
     const backBtn = app.querySelector<HTMLButtonElement>("#back-mode-btn");
     const err = app.querySelector<HTMLParagraphElement>("#join-err")!;
+    const authEmailInput = app.querySelector<HTMLInputElement>("#auth-email-input");
+    const authPasswordInput = app.querySelector<HTMLInputElement>("#auth-password-input");
+    const authGoogleBtn = app.querySelector<HTMLButtonElement>("#auth-google-btn");
+    const authEmailLoginBtn = app.querySelector<HTMLButtonElement>("#auth-email-login-btn");
+    const authEmailSignupBtn = app.querySelector<HTMLButtonElement>("#auth-email-signup-btn");
+    const authEmailLinkBtn = app.querySelector<HTMLButtonElement>("#auth-email-link-btn");
+    const authLogoutBtn = app.querySelector<HTMLButtonElement>("#auth-logout-btn");
+    authEmailInput?.addEventListener("input", () => {
+      authEmailDraft = authEmailInput.value.trim();
+    });
+    authPasswordInput?.addEventListener("input", () => {
+      authPasswordDraft = authPasswordInput.value;
+    });
+    authGoogleBtn?.addEventListener("click", () => {
+      void loginWithGoogle().then(() => render()).catch(() => render());
+    });
+    authEmailLoginBtn?.addEventListener("click", () => {
+      if (!authEmailDraft || !authPasswordDraft) return;
+      void loginWithEmailPassword(authEmailDraft, authPasswordDraft).then(() => render()).catch(() => render());
+    });
+    authEmailSignupBtn?.addEventListener("click", () => {
+      if (!authEmailDraft || !authPasswordDraft) return;
+      void signupWithEmailPassword(authEmailDraft, authPasswordDraft).then(() => render()).catch(() => render());
+    });
+    authEmailLinkBtn?.addEventListener("click", () => {
+      if (!authEmailDraft) return;
+      void sendPasswordlessEmailLink(authEmailDraft).then(() => {
+        const authErr = app.querySelector<HTMLParagraphElement>("#auth-error");
+        if (authErr) authErr.textContent = "تم إرسال رابط الدخول إلى بريدك.";
+      }).catch(() => render());
+    });
+    authLogoutBtn?.addEventListener("click", () => {
+      void logoutFlow().then(() => render()).catch(() => render());
+    });
     if (privateCodeInput) {
       privateCodeInput.value = pendingJoinRoomCode;
       privateCodeInput.addEventListener("input", () => {
@@ -3419,10 +3479,7 @@ function connectSocket(
     lastPrivateRoomCode = null;
   }
 
-  const s = io({
-    path: "/socket.io",
-    transports: ["websocket", "polling"],
-  });
+  const s = createAuthedSocket();
   socket = s;
   let joinAckTimer: number | null = null;
   let joinCompleted = false;
@@ -4528,8 +4585,44 @@ if (pendingJoinRoomCode) {
   nameFlowStep = "mode";
   privateEntryAutoJoinTried = false;
 }
+subscribeAuthState(() => {
+  if (phase === "name") render();
+});
+window.addEventListener("fahem:auth-tokens-refreshed", () => {
+  if (!socket) return;
+  const accessToken = getAuthTokens()?.accessToken ?? "";
+  socket.auth = { accessToken };
+  if (socket.connected) {
+    socket.disconnect();
+  }
+  socket.connect();
+});
+window.addEventListener("storage", (event) => {
+  if (!event.key) return;
+  if (event.key === "fahem_auth_access_token" || event.key === "fahem_auth_refresh_token") {
+    void hydrateAuthSession();
+  }
+});
+void completeGoogleRedirectLogin()
+  .catch(() => false)
+  .then(() => hydrateAuthSession());
+attachSocketAuthSync(
+  () => socket,
+  () => {
+    socket = null;
+  },
+);
 const FAHEM_ADMIN_LESSON_PREVIEW_KEY = "fahem_admin_lesson_preview_v1";
 const bootParams = new URLSearchParams(window.location.search);
+if (bootParams.get("authAction") === "emailLinkComplete") {
+  const email = window.prompt("أدخل بريدك لإكمال تسجيل الدخول بالرابط السحري") ?? "";
+  void completePasswordlessEmailLink(email.trim()).finally(() => {
+    const clean = new URL(window.location.href);
+    clean.searchParams.delete("authAction");
+    history.replaceState({}, "", clean.pathname + clean.search + clean.hash);
+    render();
+  });
+}
 const lessonIdFromUrl = Number(bootParams.get("lesson") ?? "");
 const lessonPreviewBoot = bootParams.get("lessonPreview");
 if (lessonPreviewBoot === "1") {

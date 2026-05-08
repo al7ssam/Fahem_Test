@@ -2,9 +2,12 @@ import express from "express";
 import path from "path";
 import cors from "cors";
 import helmet from "helmet";
+import cookieParser from "cookie-parser";
 import { config } from "./config";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerCustomLessonRoutes } from "./routes/customLessons";
+import { registerAuthRoutes } from "./routes/auth";
+import { optionalAuth } from "./auth/middleware";
 
 export function createApp() {
   const app = express();
@@ -27,6 +30,9 @@ export function createApp() {
   });
 
   app.use(express.json({ limit: "1mb" }));
+  app.use(cookieParser());
+  app.use(optionalAuth);
+  registerAuthRoutes(app);
   registerCustomLessonRoutes(app);
   registerAdminRoutes(app);
 

@@ -4,3 +4,4 @@ client/dist/
 .env
 *.log
 .DS_Store
+secrets/

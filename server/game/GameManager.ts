@@ -1,4 +1,4 @@
-﻿import type { Server, Socket } from "socket.io";
+import type { Server, Socket } from "socket.io";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { getPool } from "../db/pool";
@@ -200,6 +200,8 @@ export class GameManager {
   constructor(private readonly io: Server) {}
 
   private resolvePlayerSessionId(raw: unknown, socketId: string): string {
+    const authUserId = String((raw as { __authUserId?: unknown })?.__authUserId ?? "").trim();
+    if (authUserId) return `uid:${authUserId}`;
     const value = String((raw as { playerSessionId?: unknown })?.playerSessionId ?? "").trim();
     if (value) return value.slice(0, 120);
     return `sid:${socketId}`;
@@ -336,7 +338,10 @@ export class GameManager {
           return;
         }
         const { name, mode } = parsed.data;
-        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
+        const playerSessionId = this.resolvePlayerSessionId(
+          { ...(raw as Record<string, unknown>), __authUserId: socket.data?.auth?.userId },
+          socket.id,
+        );
         const difficultyMode = parsed.data.difficultyMode ?? "mix";
         const subcategoryKey =
           mode === "study_then_quiz"
@@ -376,7 +381,10 @@ export class GameManager {
           return;
         }
         const d = parsed.data;
-        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
+        const playerSessionId = this.resolvePlayerSessionId(
+          { ...(raw as Record<string, unknown>), __authUserId: socket.data?.auth?.userId },
+          socket.id,
+        );
         const roomCode = this.allocateUniqueRoomCode();
         const mode = d.mode;
         const subcategoryKey =
@@ -490,7 +498,10 @@ export class GameManager {
     socket.on("join_private_room", async (raw, cb) => {
       try {
         const name = String((raw as { name?: unknown }).name ?? "").trim();
-        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
+        const playerSessionId = this.resolvePlayerSessionId(
+          { ...(raw as Record<string, unknown>), __authUserId: socket.data?.auth?.userId },
+          socket.id,
+        );
         const roomCode = String((raw as { roomCode?: unknown }).roomCode ?? "").trim().toUpperCase();
         if (!name || !roomCode) {
           cb?.({ ok: false, error: "invalid_body" });
@@ -608,7 +619,10 @@ export class GameManager {
           return;
         }
         const { name, mode } = parsed.data;
-        const playerSessionId = this.resolvePlayerSessionId(raw, socket.id);
+        const playerSessionId = this.resolvePlayerSessionId(
+          { ...(raw as Record<string, unknown>), __authUserId: socket.data?.auth?.userId },
+          socket.id,
+        );
         const difficultyMode = parsed.data.difficultyMode ?? "mix";
         const subcategoryKey =
           mode === "study_then_quiz"
