@@ -20,7 +20,6 @@ import { signInGoogleThenLinkPendingPassword, signInPasswordThenLinkPendingGoogl
 
 type AuthUiStep =
   | "method_select"
-  | "google"
   | "email_auth"
   | "magic"
   | "forgot"
@@ -296,6 +295,10 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   }
 
   function renderDynamic(): void {
+    emailInputRef = null;
+    passwordInputRef = null;
+    newPasswordRef = null;
+    newPasswordConfirmRef = null;
     dynamicRoot.replaceChildren();
     dynamicRoot.classList.remove("auth-modal-panel--enter");
     void dynamicRoot.offsetWidth;
@@ -336,14 +339,11 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       intro.textContent = "اختر طريقة التسجيل أو الدخول:";
       wrap.appendChild(intro);
 
-      const btnGoogle = document.createElement("button");
-      btnGoogle.type = "button";
-      btnGoogle.className = "ui-btn ui-btn--ghost py-2 w-full";
-      btnGoogle.textContent = "Google";
-      btnGoogle.addEventListener("click", () => {
-        step = "google";
-        renderDynamic();
+      const gMain = googleBrandedButton("auth-modal-google-main");
+      gMain.addEventListener("click", () => {
+        void withLoading(gMain, () => loginWithGoogle());
       });
+      wrap.appendChild(gMain);
 
       const btnEmail = document.createElement("button");
       btnEmail.type = "button";
@@ -363,7 +363,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
         renderDynamic();
       });
 
-      wrap.appendChild(btnGoogle);
       wrap.appendChild(btnEmail);
       wrap.appendChild(btnMagic);
 
@@ -377,19 +376,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       });
       wrap.appendChild(forgot);
 
-      dynamicRoot.appendChild(wrap);
-      return;
-    }
-
-    if (step === "google") {
-      const wrap = document.createElement("div");
-      wrap.className = "auth-modal-step-section";
-      backButton(wrap);
-      const g = googleBrandedButton("auth-modal-google-branded");
-      g.addEventListener("click", () => {
-        void withLoading(g, () => loginWithGoogle());
-      });
-      wrap.appendChild(g);
       dynamicRoot.appendChild(wrap);
       return;
     }
@@ -647,16 +633,11 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
         });
         wrap.appendChild(btn);
       } else if (pendingLink.scenario === "login_suggest_google_only") {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "ui-btn ui-btn--cta w-full py-2";
-        btn.textContent = "المتابعة عبر Google";
-        btn.addEventListener("click", () => {
-          pendingLink = null;
-          step = "google";
-          renderDynamic();
+        const gOnly = googleBrandedButton("auth-modal-google-link-hint");
+        gOnly.addEventListener("click", () => {
+          void withLoading(gOnly, () => loginWithGoogle());
         });
-        wrap.appendChild(btn);
+        wrap.appendChild(gOnly);
       } else {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -781,7 +762,9 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     closeBtn.focus();
   } else {
     renderDynamic();
-    emailInputRef?.focus();
+    const focusAfterOpen: HTMLElement | null =
+      emailInputRef ?? newPasswordRef ?? overlay.querySelector<HTMLElement>("#auth-modal-google-main");
+    focusAfterOpen?.focus();
   }
 
   if (options.forceEmailLinkCompletion) {
