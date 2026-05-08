@@ -49,3 +49,40 @@ export function buildMagicLinkContinueUrl(): URL {
 export function readEmailLinkOobCode(): string | null {
   return new URLSearchParams(window.location.search).get("oobCode");
 }
+
+/** Continue URL for Firebase password reset emails (handleCodeInApp). */
+export function buildPasswordResetContinueUrl(): URL {
+  const raw = String(import.meta.env.VITE_FIREBASE_EMAIL_RESET_CONTINUE_URL ?? "").trim();
+  if (raw) {
+    try {
+      const abs = raw.includes("://") ? raw : new URL(raw, window.location.origin).toString();
+      const u = new URL(abs);
+      u.searchParams.set("authAction", "passwordReset");
+      return u;
+    } catch {
+      console.warn("[auth-trace]", { stage: "password_reset_continue_url_invalid_env", raw });
+    }
+  }
+  const fallback = String(import.meta.env.VITE_FIREBASE_EMAIL_LINK_CONTINUE_URL ?? "").trim();
+  if (fallback) {
+    try {
+      const abs = fallback.includes("://") ? fallback : new URL(fallback, window.location.origin).toString();
+      const u = new URL(abs);
+      u.searchParams.set("authAction", "passwordReset");
+      return u;
+    } catch {
+      /* fall through */
+    }
+  }
+  const landing = new URL("/", window.location.origin);
+  landing.searchParams.set("authAction", "passwordReset");
+  return landing;
+}
+
+export function readPasswordResetModeFromUrl(): { mode: string | null; oobCode: string | null } {
+  const p = new URLSearchParams(window.location.search);
+  return {
+    mode: p.get("mode"),
+    oobCode: p.get("oobCode"),
+  };
+}

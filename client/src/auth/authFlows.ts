@@ -1,9 +1,13 @@
 import {
   EmailAuthProvider,
+  GoogleAuthProvider,
+  type AuthError,
   fetchSignInMethodsForEmail,
   isSignInWithEmailLink,
   getRedirectResult,
   linkWithCredential,
+  sendPasswordResetEmail,
+  confirmPasswordReset,
   sendSignInLinkToEmail,
   signInWithEmailAndPassword,
   signInWithEmailLink,
@@ -11,13 +15,25 @@ import {
   signInWithRedirect,
   createUserWithEmailAndPassword,
   signOut,
+  type User,
   type UserCredential,
 } from "firebase/auth";
 import { beginAuthOperation, commitAuthOperation, getAuthState, setAuthState } from "./authStore";
-import { buildMagicLinkContinueUrl, cleanupEmailLinkLandingUrl, readEmailLinkOobCode } from "./emailLinkUrl";
+import {
+  buildMagicLinkContinueUrl,
+  buildPasswordResetContinueUrl,
+  cleanupEmailLinkLandingUrl,
+  readEmailLinkOobCode,
+} from "./emailLinkUrl";
 import { resolveEmailLinkActionCodeLinkDomain } from "./resolveEmailLinkHostingDomain";
 import { getFirebaseAuth, getFirebaseConfig, getGoogleProvider } from "./firebaseClient";
 import { exchangeFirebaseToken, fetchCurrentUser, logout as backendLogout } from "./sessionClient";
+import {
+  FahemProviderLinkError,
+  isFahemProviderLinkError,
+  passwordResetRevealNotFound,
+  readFirebaseErrorCode,
+} from "./authErrors";
 
 const EMAIL_LINK_KEY = "fahem_email_link_signin_email";
 const EMAIL_LINK_SESSION_KEY = "fahem_email_link_signin_email_sess";
@@ -44,12 +60,12 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function nextTraceId(prefix: string): string {
+export function nextTraceId(prefix: string): string {
   traceCounter += 1;
   return `${prefix}-${Date.now()}-${traceCounter}`;
 }
 
-function authTrace(traceId: string, stage: string, details: Record<string, unknown> = {}): void {
+export function authTrace(traceId: string, stage: string, details: Record<string, unknown> = {}): void {
   const payload = {
     ts: nowIso(),
     traceId,
@@ -67,10 +83,6 @@ function authTrace(traceId: string, stage: string, details: Record<string, unkno
   console.info("[auth-trace]", payload);
 }
 
-function readFirebaseCode(error: unknown): string {
-  return String((error as { code?: unknown })?.code ?? "").trim();
-}
-
 function asMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown_error";
 }
@@ -79,20 +91,17 @@ function oobDoneStorageKey(oob: string): string {
   return `fahem_email_link_oob_done_${oob}`;
 }
 
-async function syncBackendFromFirebaseCredential(
-  credential: UserCredential,
+async function syncBackendFromFirebaseUser(
+  firebaseUser: User,
   traceId: string,
   instrumentation: "firebase" | "magic_link" = "firebase",
 ): Promise<void> {
   authTrace(traceId, "firebase_credential_received", {
-    hasUser: Boolean(credential.user),
-    uid: credential.user?.uid ?? null,
-    emailVerified: credential.user?.emailVerified ?? null,
+    hasUser: true,
+    uid: firebaseUser.uid,
+    emailVerified: firebaseUser.emailVerified,
     flow: instrumentation,
   });
-  if (!credential.user) {
-    throw new Error(instrumentation === "magic_link" ? "magic_link_missing_firebase_user" : "google_missing_firebase_user");
-  }
 
   const tokenStart = instrumentation === "magic_link" ? "magic_link_get_token_start" : "firebase_get_id_token_start";
   const tokenSuccess = instrumentation === "magic_link" ? "magic_link_get_token_success" : "firebase_get_id_token_success";
@@ -100,12 +109,12 @@ async function syncBackendFromFirebaseCredential(
   authTrace(traceId, tokenStart);
   let idToken: string;
   try {
-    idToken = await credential.user.getIdToken(true);
+    idToken = await firebaseUser.getIdToken(true);
     authTrace(traceId, tokenSuccess, { tokenLength: idToken.length });
   } catch (error) {
     if (instrumentation === "magic_link") {
       authTrace(traceId, "magic_link_get_token_fail", {
-        code: readFirebaseCode(error),
+        code: readFirebaseErrorCode(error),
         reason: asMessage(error),
       });
     }
@@ -128,6 +137,52 @@ async function syncBackendFromFirebaseCredential(
   const user = await fetchCurrentUser();
   authTrace(traceId, "fetch_current_user_success", { userId: user.id, roles: user.roles.length });
   setAuthState({ status: "authenticated", user, lastError: null });
+}
+
+async function syncBackendFromFirebaseCredential(
+  credential: UserCredential,
+  traceId: string,
+  instrumentation: "firebase" | "magic_link" = "firebase",
+): Promise<void> {
+  if (!credential.user) {
+    throw new Error(instrumentation === "magic_link" ? "magic_link_missing_firebase_user" : "google_missing_firebase_user");
+  }
+  await syncBackendFromFirebaseUser(credential.user, traceId, instrumentation);
+}
+
+/** بعد `linkWithCredential` أو أي تحديث لـ currentUser؛ يعيد الطلب وتزامن الخادم الداخلي. */
+export async function syncBackendAfterCurrentUser(
+  traceId: string,
+  instrumentation: "firebase" | "magic_link" = "firebase",
+): Promise<void> {
+  const auth = await getFirebaseAuth();
+  if (!auth.currentUser) throw new Error("missing_current_user");
+  await syncBackendFromFirebaseUser(auth.currentUser, traceId, instrumentation);
+}
+
+function signupConflictScenarioForMethods(
+  traceId: string,
+  methodsRaw: string[],
+  emailNorm: string,
+  password?: string,
+): never {
+  const methods = [...methodsRaw];
+  authTrace(traceId, "provider_conflict_detected", {
+    hasPasswordMethod: methods.includes("password"),
+    hasGoogleMethod: methods.includes("google.com"),
+    hasEmailLinkMethod: methods.includes("emailLink"),
+    emailSuffix: emailNorm.includes("@") ? emailNorm.split("@")[1]?.toLowerCase() ?? "" : "",
+  });
+  if (methods.includes("password")) {
+    throw new FahemProviderLinkError("signup_use_login", emailNorm, methods, password);
+  }
+  if (methods.includes("google.com")) {
+    throw new FahemProviderLinkError("signup_requires_google_link", emailNorm, methods, password);
+  }
+  if (methods.includes("emailLink")) {
+    throw new FahemProviderLinkError("signup_use_magic_link", emailNorm, methods, password);
+  }
+  throw new FahemProviderLinkError("signup_use_login", emailNorm, methods, password);
 }
 
 export function savePendingEmailLink(email: string): void {
@@ -208,7 +263,7 @@ export async function bootstrapMagicLinkOnLoad(traceIdPrefix = "magic-boot"): Pr
     authTrace(traceId, "magic_link_boot_auto_complete_success");
     return { kind: "completed" };
   } catch (error) {
-    const code = readFirebaseCode(error);
+    const code = readFirebaseErrorCode(error);
     authTrace(traceId, "magic_link_boot_auto_complete_fail", { code, reason: asMessage(error) });
     return { kind: "needs_modal", reason: asMessage(error), firebaseCode: code || undefined };
   }
@@ -231,9 +286,35 @@ export async function loginWithGoogle(): Promise<void> {
     authTrace(traceId, "google_popup_success");
     await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
   } catch (error) {
-    const code = readFirebaseCode(error);
+    const code = readFirebaseErrorCode(error);
     const reason = asMessage(error);
     authTrace(traceId, "google_popup_failed", { code, reason });
+    if (code === "auth/account-exists-with-different-credential") {
+      const pendingGoogle = GoogleAuthProvider.credentialFromError(error as AuthError);
+      const emailRaw = (error as AuthError).customData?.email;
+      const conflictEmail = typeof emailRaw === "string" ? emailRaw.trim().toLowerCase() : "";
+      authTrace(traceId, "provider_conflict_detected", {
+        source: "google_popup",
+        hasPendingGoogleCred: Boolean(pendingGoogle),
+        hasConflictEmail: Boolean(conflictEmail),
+      });
+      if (conflictEmail && pendingGoogle) {
+        const methods = await fetchSignInMethodsForEmail(auth, conflictEmail);
+        authTrace(traceId, "provider_conflict_methods", {
+          hasPasswordMethod: methods.includes("password"),
+          hasGoogleMethod: methods.includes("google.com"),
+          hasEmailLinkMethod: methods.includes("emailLink"),
+        });
+        if (methods.includes("password")) {
+          commitAuthOperation(op, { status: "unauthenticated", user: null, lastError: "google_requires_password_link" });
+          throw new FahemProviderLinkError("google_requires_password_link", conflictEmail, methods, undefined, pendingGoogle);
+        }
+        if (methods.includes("emailLink") && !methods.includes("password")) {
+          commitAuthOperation(op, { status: "unauthenticated", user: null, lastError: "signup_use_magic_link" });
+          throw new FahemProviderLinkError("signup_use_magic_link", conflictEmail, methods, undefined, pendingGoogle);
+        }
+      }
+    }
     if (GOOGLE_POPUP_REDIRECT_FALLBACK_CODES.has(code)) {
       authTrace(traceId, "google_redirect_fallback_start", { code });
       await signInWithRedirect(auth, getGoogleProvider());
@@ -271,7 +352,7 @@ export async function completeGoogleRedirectLogin(): Promise<boolean> {
     await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
     return true;
   } catch (error) {
-    const code = readFirebaseCode(error);
+    const code = readFirebaseErrorCode(error);
     const reason = asMessage(error);
     authTrace(traceId, "redirect_result_failed", { code, reason });
     throw new Error(code || reason || "google_redirect_result_failed");
@@ -281,10 +362,35 @@ export async function completeGoogleRedirectLogin(): Promise<boolean> {
 export async function signupWithEmailPassword(email: string, password: string): Promise<void> {
   const traceId = nextTraceId("email-signup");
   authTrace(traceId, "email_signup_start");
-  beginAuthOperation();
+  const op = beginAuthOperation();
   const auth = await getFirebaseAuth();
-  const credential = await createUserWithEmailAndPassword(auth, email, password);
-  await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
+  const emailNorm = email.trim().toLowerCase();
+  try {
+    const credential = await createUserWithEmailAndPassword(auth, emailNorm, password);
+    authTrace(traceId, "email_signup_success");
+    await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
+  } catch (error) {
+    if (isFahemProviderLinkError(error)) {
+      commitAuthOperation(op, { status: "unauthenticated", user: null, lastError: error.scenario });
+      throw error;
+    }
+    const code = readFirebaseErrorCode(error);
+    if (code === "auth/email-already-in-use") {
+      authTrace(traceId, "email_signup_conflict_fetch_methods", {});
+      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch(() => []);
+      try {
+        signupConflictScenarioForMethods(traceId, methods, emailNorm, password);
+      } catch (e2) {
+        if (isFahemProviderLinkError(e2)) {
+          commitAuthOperation(op, { status: "unauthenticated", user: null, lastError: e2.scenario });
+        }
+        throw e2;
+      }
+    }
+    authTrace(traceId, "email_signup_fail", { code, reason: asMessage(error) });
+    commitAuthOperation(op, { status: "error", user: null, lastError: code || asMessage(error) });
+    throw error;
+  }
 }
 
 export async function loginWithEmailPassword(email: string, password: string): Promise<void> {
@@ -292,16 +398,82 @@ export async function loginWithEmailPassword(email: string, password: string): P
   authTrace(traceId, "email_login_start");
   const op = beginAuthOperation();
   const auth = await getFirebaseAuth();
+  const emailNorm = email.trim().toLowerCase();
   try {
-    const credential = await signInWithEmailAndPassword(auth, email, password);
+    const credential = await signInWithEmailAndPassword(auth, emailNorm, password);
+    authTrace(traceId, "email_login_success");
     await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "email_sign_in_failed";
-    if (reason.includes("account-exists-with-different-credential")) {
-      const methods = await fetchSignInMethodsForEmail(auth, email);
-      throw new Error(`account_exists_with_different_provider:${methods.join(",")}`);
+    const code = readFirebaseErrorCode(error);
+    if (code === "auth/account-exists-with-different-credential") {
+      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch(() => []);
+      authTrace(traceId, "provider_conflict_detected", { source: "email_login", code });
+      commitAuthOperation(op, { status: "unauthenticated", user: null, lastError: code });
+      if (methods.includes("google.com") && !methods.includes("password")) {
+        throw new FahemProviderLinkError("login_suggest_google_only", emailNorm, methods);
+      }
     }
-    commitAuthOperation(op, { status: "error", user: null, lastError: reason });
+    if (code === "auth/invalid-credential") {
+      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch(() => []);
+      authTrace(traceId, "email_login_invalid_credential_methods", {
+        hasPasswordMethod: methods.includes("password"),
+        hasGoogleMethod: methods.includes("google.com"),
+        hasEmailLinkMethod: methods.includes("emailLink"),
+      });
+      if (!methods.includes("password") && methods.includes("google.com")) {
+        commitAuthOperation(op, { status: "unauthenticated", user: null, lastError: code });
+        throw new FahemProviderLinkError("login_suggest_google_only", emailNorm, methods);
+      }
+      if (methods.includes("emailLink") && !methods.includes("password")) {
+        commitAuthOperation(op, { status: "unauthenticated", user: null, lastError: code });
+        throw new FahemProviderLinkError("signup_use_magic_link", emailNorm, methods);
+      }
+    }
+    authTrace(traceId, "email_login_fail", { code, reason: asMessage(error) });
+    commitAuthOperation(op, { status: "error", user: null, lastError: code || asMessage(error) });
+    throw error;
+  }
+}
+
+export async function sendPasswordResetEmailFlow(email: string): Promise<void> {
+  const traceId = nextTraceId("pwd-reset-send");
+  const auth = await getFirebaseAuth();
+  const cfg = getFirebaseConfig();
+  const continueUrl = buildPasswordResetContinueUrl();
+  const resolved = resolveEmailLinkActionCodeLinkDomain(cfg.linkDomain);
+  const linkDomainToSend = resolved.hostname;
+  authTrace(traceId, "password_reset_send_start", {
+    continueUrlOrigin: continueUrl.origin,
+    continueUrlPathname: continueUrl.pathname,
+    linkDomainEffective: linkDomainToSend ?? null,
+  });
+  try {
+    await sendPasswordResetEmail(auth, email.trim(), {
+      url: continueUrl.toString(),
+      handleCodeInApp: true,
+      ...(linkDomainToSend ? { linkDomain: linkDomainToSend } : {}),
+    });
+    authTrace(traceId, "password_reset_send_success", {});
+  } catch (error) {
+    const code = readFirebaseErrorCode(error);
+    authTrace(traceId, "password_reset_send_fail", { code, reason: asMessage(error) });
+    if (code === "auth/user-not-found" && !passwordResetRevealNotFound()) {
+      authTrace(traceId, "password_reset_send_masked_success", {});
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function confirmPasswordResetFlow(oobCode: string, newPassword: string): Promise<void> {
+  const traceId = nextTraceId("pwd-reset-confirm");
+  const auth = await getFirebaseAuth();
+  authTrace(traceId, "password_reset_confirm_start", {});
+  try {
+    await confirmPasswordReset(auth, oobCode, newPassword);
+    authTrace(traceId, "password_reset_confirm_success", {});
+  } catch (error) {
+    authTrace(traceId, "password_reset_confirm_fail", { code: readFirebaseErrorCode(error), reason: asMessage(error) });
     throw error;
   }
 }
@@ -330,7 +502,7 @@ export async function sendPasswordlessEmailLink(email: string): Promise<void> {
     savePendingEmailLink(email);
     authTrace(traceId, "magic_link_send_success", { emailDomain: email.includes("@") ? email.split("@")[1]?.toLowerCase() : "" });
   } catch (error) {
-    authTrace(traceId, "magic_link_send_fail", { code: readFirebaseCode(error), reason: asMessage(error) });
+    authTrace(traceId, "magic_link_send_fail", { code: readFirebaseErrorCode(error), reason: asMessage(error) });
     throw error;
   }
 }
@@ -387,7 +559,7 @@ export async function completePasswordlessEmailLink(emailInput?: string, reusedT
       commitAuthOperation(op, { status: "authenticated", user: u, lastError: null });
     }
   } catch (error) {
-    const code = readFirebaseCode(error);
+    const code = readFirebaseErrorCode(error);
     const reason = asMessage(error);
     const alreadyLoggedFail =
       reason === "magic_link_invalid_url" || reason === "magic_link_expired_or_stripped_query";

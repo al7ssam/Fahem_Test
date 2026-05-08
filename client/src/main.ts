@@ -7,6 +7,7 @@ import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraf
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
 import { bootstrapMagicLinkOnLoad, cleanupEmailLinkLandingUrl, completeGoogleRedirectLogin, getAuthReadableStatus } from "./auth/authFlows";
+import { readPasswordResetModeFromUrl } from "./auth/emailLinkUrl";
 import { getAuthState, subscribeAuthState } from "./auth/authStore";
 import { hydrateAuthSession } from "./auth/sessionSync";
 import { attachSocketAuthSync } from "./auth/socketSync";
@@ -4572,18 +4573,34 @@ void (async () => {
       reason: error instanceof Error ? error.message : "unknown_error",
     });
   }
-  const magicBootstrap = await bootstrapMagicLinkOnLoad().catch(() => ({ kind: "idle" as const }));
-  await hydrateAuthSession();
-  if (magicBootstrap.kind === "needs_modal") {
+  const bootQ = new URLSearchParams(window.location.search);
+  const pwdLanding = readPasswordResetModeFromUrl();
+  const isPasswordResetLanding =
+    bootQ.get("authAction") === "passwordReset" && pwdLanding.mode === "resetPassword" && Boolean(pwdLanding.oobCode);
+
+  if (isPasswordResetLanding && pwdLanding.oobCode) {
+    await hydrateAuthSession();
     openAuthModal({
-      forceEmailLinkCompletion: true,
-      magicLinkReasonCode: magicBootstrap.reason,
-      magicLinkFirebaseCode: magicBootstrap.firebaseCode,
+      passwordResetOobCode: pwdLanding.oobCode,
       onCompleted: () => {
         cleanupEmailLinkLandingUrl();
         render();
       },
     });
+  } else {
+    const magicBootstrap = await bootstrapMagicLinkOnLoad().catch(() => ({ kind: "idle" as const }));
+    await hydrateAuthSession();
+    if (magicBootstrap.kind === "needs_modal") {
+      openAuthModal({
+        forceEmailLinkCompletion: true,
+        magicLinkReasonCode: magicBootstrap.reason,
+        magicLinkFirebaseCode: magicBootstrap.firebaseCode,
+        onCompleted: () => {
+          cleanupEmailLinkLandingUrl();
+          render();
+        },
+      });
+    }
   }
 })();
 attachSocketAuthSync(

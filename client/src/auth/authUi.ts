@@ -2,26 +2,89 @@ import { isSignInWithEmailLink } from "firebase/auth";
 import {
   cleanupEmailLinkLandingUrl,
   completePasswordlessEmailLink,
+  confirmPasswordResetFlow,
   getAuthReadableStatus,
   getPendingEmailLinkEmail,
   loginWithEmailPassword,
   loginWithGoogle,
   logoutFlow,
+  nextTraceId,
   sendPasswordlessEmailLink,
+  sendPasswordResetEmailFlow,
   signupWithEmailPassword,
 } from "./authFlows";
+import { FahemProviderLinkError, isFahemProviderLinkError, userFacingAuthMessage } from "./authErrors";
 import { getFirebaseAuth } from "./firebaseClient";
 import { getAuthState } from "./authStore";
+import { signInGoogleThenLinkPendingPassword, signInPasswordThenLinkPendingGoogle } from "./linkingFlows";
 
-type OpenAuthModalOptions = {
+type AuthUiStep =
+  | "method_select"
+  | "google"
+  | "email_auth"
+  | "magic"
+  | "forgot"
+  | "link"
+  | "reset_password";
+
+export type OpenAuthModalOptions = {
   forceEmailLinkCompletion?: boolean;
   magicLinkReasonCode?: string;
   magicLinkFirebaseCode?: string;
+  /** عند العودة من بريد إعادة تعيين كلمة المرور (oobCode من Firebase). */
+  passwordResetOobCode?: string;
   onCompleted?: () => void;
 };
 
-function closeModal(root: HTMLElement): void {
-  root.remove();
+/** Escape: إغلاق كامل للمربع (وليس خطوة للخلف) — تجنّب اعتماد مفتاح واحد لتسلسل خطوتين لتبسيط الوصولية. */
+
+function googleSignInSvg(): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "auth-google-svg");
+  svg.setAttribute("viewBox", "0 0 48 48");
+  svg.setAttribute("width", "20");
+  svg.setAttribute("height", "20");
+  svg.setAttribute("aria-hidden", "true");
+  const paths: Array<{ fill: string; d: string }> = [
+    {
+      fill: "#EA4335",
+      d: "M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z",
+    },
+    {
+      fill: "#4285F4",
+      d: "M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6C43.94 39.51 46.98 32.71 46.98 24.55z",
+    },
+    {
+      fill: "#FBBC05",
+      d: "M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z",
+    },
+    {
+      fill: "#34A853",
+      d: "M24 46c6.27 0 11.53-2.06 15.41-5.91l-7.73-6c-2.15 1.45-4.93 2.37-7.69 2.37-6.26 0-11.56-4.04-13.43-9.71l-7.97 6.19C6.51 42.62 14.62 48 24 48z",
+    },
+  ];
+  for (const { fill, d } of paths) {
+    const p = document.createElementNS(ns, "path");
+    p.setAttribute("fill", fill);
+    p.setAttribute("d", d);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+
+function googleBrandedButton(id: string): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = id;
+  btn.className = "auth-google-btn";
+  btn.setAttribute("aria-label", "Sign in with Google");
+  btn.appendChild(googleSignInSvg());
+  const label = document.createElement("span");
+  label.className = "auth-google-label";
+  label.textContent = "Sign in with Google";
+  btn.appendChild(label);
+  return btn;
 }
 
 function magicLinkRecoverHint(reasonCode?: string): string | null {
@@ -39,54 +102,10 @@ function magicLinkRecoverHint(reasonCode?: string): string | null {
 
 function makeInitialMagicError(reasonCode?: string, firebaseCode?: string): string {
   if (firebaseCode) {
-    const fake = Object.assign(new Error(""), { code: firebaseCode });
-    return makeActionError(fake);
+    const e = Object.assign(new Error(""), { code: firebaseCode });
+    return userFacingAuthMessage(e);
   }
-  return reasonCode ? makeActionError(new Error(reasonCode)) : "";
-}
-
-function makeActionError(error: unknown): string {
-  const firebaseCode = typeof (error as { code?: string })?.code === "string" ? String((error as { code: string }).code) : "";
-  const raw = firebaseCode || (error instanceof Error ? error.message : "auth_unknown_error");
-
-  const firebaseMessages: Record<string, string> = {
-    "auth/invalid-email": "صيغة البريد الإلكتروني غير صحيحة.",
-    "auth/invalid-action-code": "رابط الدخول غير صالح أو استُخدم مسبقًا. أعد طلب الرابط السحري.",
-    "auth/expired-action-code": "انتهت صلاحية الرابط السحري. أعد الطلب وجرب الرابط الجديد خلال وقت معقول.",
-    "auth/user-disabled": "تم تعطيل هذا الحساب.",
-    "auth/invalid-hosting-link-domain":
-      "إعداد «نطاق رابط الاستضافة» غير صحيح: لا تُدخل نطاق Render (مثل fahem.onrender.com) في VITE_FIREBASE_LINK_DOMAIN. أفرغ المتغير أو استخدم نطاق Firebase (مثل xxx.web.app بعد إعداده في لوحة Firebase).",
-    "auth/quota-exceeded":
-      "Firebase وصل لحد إرسال رسائل البريد السحري اليومي لهذا المشروع. جرّب لاحقًا، أو فعّل الفوترة/الخطة، أو قلّل التجارب.",
-  };
-  const appMessages: Record<string, string> = {
-    magic_link_invalid_url: "هذه الصفحة لا تحتوي رابط تسجيل دخول سحريًا صالحًا من Firebase أو فقد المعاملات (مثل oobCode).",
-    magic_link_expired_or_stripped_query: "وصلت إلى صفحة بلا معامل الرابط؛ أعد الطلب أو افتح الرابط من الرسالة مباشرة دون تجريد العنوان.",
-    magic_link_already_in_progress: "عملية الإكمال جارية؛ انتظر قليلًا.",
-    magic_link_missing_firebase_user: "فشل إنشاء جلسة Firebase بعد الرابط؛ أعد المحاولة.",
-    missing_email_for_email_link: "أدخل البريد لإكمال الرابط السحري.",
-    missing_password: "أدخل كلمة المرور.",
-  };
-
-  if (firebaseMessages[firebaseCode]) return firebaseMessages[firebaseCode];
-  if (appMessages[raw]) return appMessages[raw];
-
-  if (raw.includes("missing_vite_firebase")) return "إعدادات Firebase غير مكتملة في بيئة الواجهة.";
-  if (raw.includes("missing_vite")) return "إعدادات Firebase غير مكتملة في ملف البيئة.";
-  if (raw.includes("auth/popup-blocked")) return "المتصفح حظر نافذة Google. اسمح بالنوافذ المنبثقة ثم حاول مرة أخرى.";
-  if (raw.includes("auth/popup-closed-by-user")) return "تم إغلاق نافذة Google قبل إكمال العملية.";
-  if (raw.includes("auth/cancelled-popup-request")) return "تم إلغاء طلب تسجيل الدخول. أعد المحاولة.";
-  if (raw.includes("auth/operation-not-supported-in-this-environment")) return "بيئة المتصفح لا تدعم Popup. سيتم استخدام redirect.";
-  if (raw.includes("google_flow_in_progress")) return "محاولة تسجيل دخول جارية بالفعل. انتظر قليلًا.";
-  if (raw.includes("google_missing_firebase_user")) return "تمت مصادقة Google لكن لم يتم الحصول على المستخدم. أعد المحاولة.";
-  if (raw.includes("google_redirect_result_failed")) return "فشل استرجاع نتيجة تسجيل الدخول عبر redirect.";
-  if (raw.includes("popup")) return "تعذر فتح نافذة Google. تحقق من مانع النوافذ وحاول مجددًا.";
-  if (raw.includes("wrong-password")) return "كلمة المرور غير صحيحة.";
-  if (raw.includes("user-not-found")) return "الحساب غير موجود.";
-  if (raw.includes("email-already-in-use")) return "هذا البريد مستخدم مسبقًا. جرّب تسجيل الدخول.";
-  if (raw.includes("too-many-requests")) return "محاولات كثيرة. حاول بعد قليل.";
-  if (raw.includes("auth_exchange_failed")) return "تعذر إنشاء جلسة داخلية بعد نجاح Firebase. تحقق من الخادم والشبكة.";
-  return firebaseCode ? `خطأ المصادقة (${firebaseCode}). أعد المحاولة أو اطلب رابطًا جديدًا.` : "تعذر إكمال عملية المصادقة. حاول مرة أخرى.";
+  return reasonCode ? userFacingAuthMessage(new Error(reasonCode)) : "";
 }
 
 export function openAuthModal(options: OpenAuthModalOptions = {}): void {
@@ -96,57 +115,91 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   const hint = options.forceEmailLinkCompletion ? magicLinkRecoverHint(options.magicLinkReasonCode) : null;
   const initialErr = options.forceEmailLinkCompletion ? makeInitialMagicError(options.magicLinkReasonCode, options.magicLinkFirebaseCode) : "";
 
+  const passwordResetOob = String(options.passwordResetOobCode ?? "").trim();
+
+  let step: AuthUiStep = passwordResetOob
+    ? "reset_password"
+    : options.forceEmailLinkCompletion
+      ? "magic"
+      : "method_select";
+  let pendingLink: InstanceType<typeof FahemProviderLinkError> | null = null;
+  let emailSignupMode = false;
+
   const state = getAuthState();
+
   const overlay = document.createElement("div");
   overlay.id = "auth-modal-overlay";
   overlay.className = "auth-modal-overlay";
-  overlay.innerHTML = `
-    <div class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
-      <button type="button" class="auth-modal-close" id="auth-modal-close" aria-label="إغلاق">×</button>
-      <h2 id="auth-modal-title" class="auth-modal-title">الحساب</h2>
-      <p class="auth-modal-subtitle">الحالة الحالية: ${getAuthReadableStatus()}</p>
-      ${
-        options.forceEmailLinkCompletion && hint
-          ? `<p class="auth-modal-hint text-sm text-slate-500 m-2">${hint}</p>`
-          : ""
-      }
-      <p id="auth-modal-error" class="auth-modal-error" aria-live="polite"></p>
-      ${
-        state.status === "authenticated" && state.user
-          ? `
-      <div class="auth-user-card">
-        <p class="m-0 text-sm">مسجل كـ: <strong>${state.user.displayName ?? state.user.email ?? "مستخدم"}</strong></p>
-        <p class="m-0 text-xs text-slate-400">${state.user.email ?? "بدون بريد"}</p>
-      </div>
-      <button type="button" class="ui-btn ui-btn--ghost w-full py-2" id="auth-modal-logout">تسجيل خروج</button>
-      `
-          : `
-      <div class="auth-modal-grid">
-        <button type="button" class="ui-btn ui-btn--ghost py-2" id="auth-modal-google">المتابعة عبر Google</button>
-      </div>
-      <div class="auth-modal-form">
-        <label class="auth-modal-label" for="auth-modal-email">البريد الإلكتروني</label>
-        <input id="auth-modal-email" type="email" class="app-input w-full px-3 py-2" autocomplete="email" />
-        <label class="auth-modal-label" for="auth-modal-password">كلمة المرور</label>
-        <input id="auth-modal-password" type="password" class="app-input w-full px-3 py-2" autocomplete="current-password" />
-        <div class="auth-modal-actions">
-          <button type="button" class="ui-btn ui-btn--cta py-2" id="auth-modal-login">تسجيل الدخول</button>
-          <button type="button" class="ui-btn ui-btn--ghost py-2" id="auth-modal-signup">إنشاء حساب</button>
-        </div>
-        <button type="button" class="ui-btn ui-btn--ghost w-full py-2" id="auth-modal-email-link">${
-          options.forceEmailLinkCompletion ? "إكمال الرابط السحري" : "إرسال رابط سحري"
-        }</button>
-      </div>
-      `
-      }
-    </div>
-  `;
 
-  const errorEl = overlay.querySelector<HTMLParagraphElement>("#auth-modal-error");
-  const setError = (message: string): void => {
-    if (errorEl) errorEl.textContent = message ?? "";
+  const dialog = document.createElement("div");
+  dialog.className = "auth-modal";
+  dialog.setAttribute("role", "dialog");
+  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-labelledby", "auth-modal-title");
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "auth-modal-close";
+  closeBtn.id = "auth-modal-close";
+  closeBtn.setAttribute("aria-label", "إغلاق");
+  closeBtn.textContent = "×";
+
+  const titleEl = document.createElement("h2");
+  titleEl.id = "auth-modal-title";
+  titleEl.className = "auth-modal-title";
+  titleEl.textContent = "الحساب";
+
+  const subtitleEl = document.createElement("p");
+  subtitleEl.className = "auth-modal-subtitle";
+  subtitleEl.textContent = `الحالة الحالية: ${getAuthReadableStatus()}`;
+
+  const hintEl = document.createElement("p");
+  hintEl.className = "auth-modal-hint text-sm text-slate-500 m-2";
+  if (options.forceEmailLinkCompletion && hint) hintEl.textContent = hint;
+
+  const errorEl = document.createElement("p");
+  errorEl.id = "auth-modal-error";
+  errorEl.className = "auth-modal-error";
+  errorEl.setAttribute("aria-live", "polite");
+  if (initialErr) errorEl.textContent = initialErr;
+
+  const dynamicRoot = document.createElement("div");
+  dynamicRoot.id = "auth-modal-dynamic";
+  dynamicRoot.className = "auth-modal-panel";
+
+  overlay.appendChild(dialog);
+  dialog.appendChild(closeBtn);
+  dialog.appendChild(titleEl);
+  dialog.appendChild(subtitleEl);
+  if (options.forceEmailLinkCompletion && hint) dialog.appendChild(hintEl);
+  dialog.appendChild(errorEl);
+  dialog.appendChild(dynamicRoot);
+
+  const setErrorMsg = (message: string): void => {
+    errorEl.textContent = message ?? "";
   };
-  if (errorEl && initialErr) errorEl.textContent = initialErr;
+
+  const closeModal = (): void => {
+    window.removeEventListener("keydown", onEscapeDown);
+    overlay.remove();
+  };
+
+  function onEscapeDown(ev: KeyboardEvent): void {
+    // إغلاق كامل؛ للرجوع بين الخطوات يستخدم زر «رجوع».
+    if (ev.key === "Escape" && document.body.contains(overlay)) closeModal();
+  }
+  window.addEventListener("keydown", onEscapeDown);
+
+  /** يعامل أخطاء الربط بانتقال تلقائي لخطوة link ولا يعتبرها فشلًا نهائيًا إن لم تُكمَل بعد. */
+  const handleMaybeLinkError = (error: unknown): string => {
+    if (isFahemProviderLinkError(error)) {
+      pendingLink = error;
+      step = "link";
+      renderDynamic();
+      return userFacingAuthMessage(error);
+    }
+    return userFacingAuthMessage(error);
+  };
 
   const withLoading = async (
     button: HTMLButtonElement | null,
@@ -157,16 +210,16 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     const prev = button.textContent ?? "";
     button.disabled = true;
     button.textContent = "جاري التنفيذ...";
-    setError("");
+    setErrorMsg("");
     try {
       await action();
-      if (actionOptions.successMessage) setError(actionOptions.successMessage);
+      if (actionOptions.successMessage) setErrorMsg(actionOptions.successMessage);
       if (actionOptions.closeOnSuccess !== false) {
         options.onCompleted?.();
-        closeModal(overlay);
+        closeModal();
       }
     } catch (error) {
-      setError(makeActionError(error));
+      setErrorMsg(handleMaybeLinkError(error));
     } finally {
       if (document.body.contains(overlay)) {
         button.disabled = false;
@@ -175,10 +228,533 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     }
   };
 
-  overlay.querySelector<HTMLButtonElement>("#auth-modal-close")?.addEventListener("click", () => closeModal(overlay));
+  /** نفس withLoading لكن لا يعيد توجيه Fahem إلى شاشة الربط (للزر داخل خطوة link). */
+  const withLoadingStrict = async (
+    button: HTMLButtonElement | null,
+    action: () => Promise<void>,
+    actionOptions: { closeOnSuccess?: boolean; successMessage?: string } = {},
+  ): Promise<void> => {
+    if (!button) return;
+    const prev = button.textContent ?? "";
+    button.disabled = true;
+    button.textContent = "جاري التنفيذ...";
+    setErrorMsg("");
+    try {
+      await action();
+      if (actionOptions.successMessage) setErrorMsg(actionOptions.successMessage);
+      if (actionOptions.closeOnSuccess !== false) {
+        options.onCompleted?.();
+        closeModal();
+      }
+    } catch (error) {
+      setErrorMsg(userFacingAuthMessage(error));
+    } finally {
+      if (document.body.contains(overlay)) {
+        button.disabled = false;
+        button.textContent = prev;
+      }
+    }
+  };
+
+  let emailInputRef: HTMLInputElement | null = null;
+  let passwordInputRef: HTMLInputElement | null = null;
+  let newPasswordRef: HTMLInputElement | null = null;
+  let newPasswordConfirmRef: HTMLInputElement | null = null;
+
+  const requireEmail = (): string => {
+    const value = String(emailInputRef?.value ?? "").trim();
+    if (!value) throw new Error("missing_email_for_email_link");
+    return value;
+  };
+
+  const requirePassword = (): string => {
+    const value = String(passwordInputRef?.value ?? "").trim();
+    if (!value) throw new Error("missing_password");
+    return value;
+  };
+
+  function backButton(container: HTMLElement): void {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "ui-btn ui-btn--ghost w-full py-2 auth-modal-back";
+    b.textContent = "← رجوع";
+    b.addEventListener("click", () => {
+      setErrorMsg("");
+      if (pendingLink && step === "link") pendingLink = null;
+      if (options.forceEmailLinkCompletion && step === "magic") {
+        closeModal();
+        return;
+      }
+      if (passwordResetOob && step === "reset_password") {
+        closeModal();
+        return;
+      }
+      step = "method_select";
+      renderDynamic();
+    });
+    container.appendChild(b);
+  }
+
+  function renderDynamic(): void {
+    dynamicRoot.replaceChildren();
+    dynamicRoot.classList.remove("auth-modal-panel--enter");
+    void dynamicRoot.offsetWidth;
+    dynamicRoot.classList.add("auth-modal-panel--enter");
+
+    if (state.status === "authenticated" && state.user) {
+      const card = document.createElement("div");
+      card.className = "auth-user-card";
+      const p1 = document.createElement("p");
+      p1.className = "m-0 text-sm";
+      p1.append("مسجل كـ: ");
+      const strong = document.createElement("strong");
+      strong.textContent = state.user.displayName ?? state.user.email ?? "مستخدم";
+      p1.appendChild(strong);
+      const p2 = document.createElement("p");
+      p2.className = "m-0 text-xs text-slate-400";
+      p2.textContent = state.user.email ?? "بدون بريد";
+      card.appendChild(p1);
+      card.appendChild(p2);
+      const logoutBtn = document.createElement("button");
+      logoutBtn.type = "button";
+      logoutBtn.className = "ui-btn ui-btn--ghost w-full py-2";
+      logoutBtn.id = "auth-modal-logout";
+      logoutBtn.textContent = "تسجيل خروج";
+      logoutBtn.addEventListener("click", () => {
+        void withLoading(logoutBtn, () => logoutFlow());
+      });
+      dynamicRoot.appendChild(card);
+      dynamicRoot.appendChild(logoutBtn);
+      return;
+    }
+
+    if (step === "method_select") {
+      const wrap = document.createElement("div");
+      wrap.className = "auth-modal-step-grid";
+      const intro = document.createElement("p");
+      intro.className = "auth-modal-step-intro";
+      intro.textContent = "اختر طريقة التسجيل أو الدخول:";
+      wrap.appendChild(intro);
+
+      const btnGoogle = document.createElement("button");
+      btnGoogle.type = "button";
+      btnGoogle.className = "ui-btn ui-btn--ghost py-2 w-full";
+      btnGoogle.textContent = "Google";
+      btnGoogle.addEventListener("click", () => {
+        step = "google";
+        renderDynamic();
+      });
+
+      const btnEmail = document.createElement("button");
+      btnEmail.type = "button";
+      btnEmail.className = "ui-btn ui-btn--ghost py-2 w-full";
+      btnEmail.textContent = "البريد وكلمة المرور";
+      btnEmail.addEventListener("click", () => {
+        step = "email_auth";
+        renderDynamic();
+      });
+
+      const btnMagic = document.createElement("button");
+      btnMagic.type = "button";
+      btnMagic.className = "ui-btn ui-btn--ghost py-2 w-full";
+      btnMagic.textContent = "رابط سحري للبريد";
+      btnMagic.addEventListener("click", () => {
+        step = "magic";
+        renderDynamic();
+      });
+
+      wrap.appendChild(btnGoogle);
+      wrap.appendChild(btnEmail);
+      wrap.appendChild(btnMagic);
+
+      const forgot = document.createElement("button");
+      forgot.type = "button";
+      forgot.className = "auth-modal-text-link";
+      forgot.textContent = "نسيت كلمة المرور؟";
+      forgot.addEventListener("click", () => {
+        step = "forgot";
+        renderDynamic();
+      });
+      wrap.appendChild(forgot);
+
+      dynamicRoot.appendChild(wrap);
+      return;
+    }
+
+    if (step === "google") {
+      const wrap = document.createElement("div");
+      wrap.className = "auth-modal-step-section";
+      backButton(wrap);
+      const g = googleBrandedButton("auth-modal-google-branded");
+      g.addEventListener("click", () => {
+        void withLoading(g, () => loginWithGoogle());
+      });
+      wrap.appendChild(g);
+      dynamicRoot.appendChild(wrap);
+      return;
+    }
+
+    if (step === "email_auth") {
+      const wrap = document.createElement("div");
+      wrap.className = "auth-modal-form auth-modal-step-section";
+      backButton(wrap);
+
+      const modeRow = document.createElement("div");
+      modeRow.className = "auth-modal-mode-row";
+      const modeLabel = document.createElement("span");
+      modeLabel.className = "auth-modal-mode-label";
+      modeLabel.textContent = emailSignupMode ? "إنشاء حساب جديد" : "تسجيل الدخول";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "auth-modal-text-link auth-modal-inline-link";
+      toggle.textContent = emailSignupMode ? "لديك حساب؟ تسجيل الدخول" : "لسه جديد؟ إنشاء حساب";
+      toggle.addEventListener("click", () => {
+        emailSignupMode = !emailSignupMode;
+        modeLabel.textContent = emailSignupMode ? "إنشاء حساب جديد" : "تسجيل الدخول";
+        toggle.textContent = emailSignupMode ? "لديك حساب؟ تسجيل الدخول" : "لسه جديد؟ إنشاء حساب";
+        setErrorMsg("");
+      });
+      modeRow.appendChild(modeLabel);
+      modeRow.appendChild(toggle);
+      wrap.appendChild(modeRow);
+
+      const lblE = document.createElement("label");
+      lblE.className = "auth-modal-label";
+      lblE.htmlFor = "auth-modal-email";
+      lblE.textContent = "البريد الإلكتروني";
+      const inpE = document.createElement("input");
+      inpE.id = "auth-modal-email";
+      inpE.type = "email";
+      inpE.className = "app-input w-full px-3 py-2";
+      inpE.autocomplete = "email";
+      inpE.value = getPendingEmailLinkEmail();
+      emailInputRef = inpE;
+
+      const lblP = document.createElement("label");
+      lblP.className = "auth-modal-label";
+      lblP.htmlFor = "auth-modal-password";
+      lblP.textContent = "كلمة المرور";
+      const inpP = document.createElement("input");
+      inpP.id = "auth-modal-password";
+      inpP.type = "password";
+      inpP.className = "app-input w-full px-3 py-2";
+      inpP.autocomplete = emailSignupMode ? "new-password" : "current-password";
+      passwordInputRef = inpP;
+
+      wrap.appendChild(lblE);
+      wrap.appendChild(inpE);
+      wrap.appendChild(lblP);
+      wrap.appendChild(inpP);
+
+      const actions = document.createElement("div");
+      actions.className = "auth-modal-actions auth-modal-actions--stack";
+      const submit = document.createElement("button");
+      submit.type = "button";
+      submit.className = "ui-btn ui-btn--cta py-2";
+      submit.id = emailSignupMode ? "auth-modal-signup" : "auth-modal-login";
+      submit.textContent = emailSignupMode ? "إنشاء الحساب" : "تسجيل الدخول";
+      submit.addEventListener("click", () => {
+        void withLoading(submit, async () => {
+          if (emailSignupMode) {
+            await signupWithEmailPassword(requireEmail(), requirePassword());
+          } else {
+            await loginWithEmailPassword(requireEmail(), requirePassword());
+          }
+        });
+      });
+      actions.appendChild(submit);
+      wrap.appendChild(actions);
+
+      dynamicRoot.appendChild(wrap);
+      return;
+    }
+
+    if (step === "magic") {
+      const wrap = document.createElement("div");
+      wrap.className = "auth-modal-form auth-modal-step-section";
+      if (!options.forceEmailLinkCompletion) backButton(wrap);
+
+      const lbl = document.createElement("label");
+      lbl.className = "auth-modal-label";
+      lbl.htmlFor = "auth-modal-magic-email";
+      lbl.textContent = "البريد للرابط السحري";
+      const inp = document.createElement("input");
+      inp.id = "auth-modal-magic-email";
+      inp.type = "email";
+      inp.className = "app-input w-full px-3 py-2";
+      inp.autocomplete = "email";
+      inp.value = getPendingEmailLinkEmail();
+      emailInputRef = inp;
+
+      wrap.appendChild(lbl);
+      wrap.appendChild(inp);
+
+      const go = document.createElement("button");
+      go.type = "button";
+      go.className = "ui-btn ui-btn--cta w-full py-2";
+      go.id = "auth-modal-email-link";
+      go.textContent = options.forceEmailLinkCompletion ? "إكمال الرابط السحري" : "إرسال رابط سحري";
+      go.addEventListener("click", () => {
+        if (options.forceEmailLinkCompletion) {
+          void withLoading(go, async () => {
+            await completePasswordlessEmailLink(requireEmail());
+          });
+          return;
+        }
+        void withLoading(
+          go,
+          () => sendPasswordlessEmailLink(requireEmail()),
+          {
+            closeOnSuccess: false,
+            successMessage:
+              "تم إرسال الرابط. افتح البريد واضغط الرابط؛ إذا وُجهت لتسجيل الدخول أكمل الإيميل هنا وأعد المحاولة عند الحاجة.",
+          },
+        );
+      });
+      wrap.appendChild(go);
+      dynamicRoot.appendChild(wrap);
+      return;
+    }
+
+    if (step === "forgot") {
+      const wrap = document.createElement("div");
+      wrap.className = "auth-modal-form auth-modal-step-section";
+      backButton(wrap);
+
+      const hint = document.createElement("p");
+      hint.className = "auth-modal-step-intro";
+      hint.textContent = "أدخل البريد لاستلام رابط إعادة التعيين.";
+
+      const lbl = document.createElement("label");
+      lbl.className = "auth-modal-label";
+      lbl.htmlFor = "auth-modal-forgot-email";
+      lbl.textContent = "البريد الإلكتروني";
+      const inp = document.createElement("input");
+      inp.id = "auth-modal-forgot-email";
+      inp.type = "email";
+      inp.className = "app-input w-full px-3 py-2";
+      inp.autocomplete = "email";
+      emailInputRef = inp;
+
+      const sendBtn = document.createElement("button");
+      sendBtn.type = "button";
+      sendBtn.className = "ui-btn ui-btn--cta w-full py-2";
+      sendBtn.textContent = "إرسال رابط الاسترداد";
+      sendBtn.addEventListener("click", () => {
+        void withLoadingStrict(sendBtn, () => sendPasswordResetEmailFlow(requireEmail()), {
+          closeOnSuccess: false,
+          successMessage:
+            "إن وُجد حساب لهذا البريد سيصلُك رابط إعادة التعيين. راجع أيضًا مجلد الرسائل غير المرغوبة.",
+        });
+      });
+
+      wrap.appendChild(hint);
+      wrap.appendChild(lbl);
+      wrap.appendChild(inp);
+      wrap.appendChild(sendBtn);
+      dynamicRoot.appendChild(wrap);
+      return;
+    }
+
+    if (step === "link") {
+      if (!pendingLink) {
+        step = "method_select";
+        renderDynamic();
+        return;
+      }
+      const wrap = document.createElement("div");
+      wrap.className = "auth-modal-form auth-modal-step-section";
+      backButton(wrap);
+
+      const msg = document.createElement("p");
+      msg.className = "auth-modal-link-msg";
+      msg.textContent = userFacingAuthMessage(pendingLink);
+
+      wrap.appendChild(msg);
+
+      if (pendingLink.scenario === "signup_requires_google_link" && pendingLink.passwordForLinking) {
+        const note = document.createElement("p");
+        note.className = "auth-modal-step-intro text-xs text-slate-400";
+        note.textContent = `البريد: ${pendingLink.email}`;
+        wrap.appendChild(note);
+        const doGoogle = googleBrandedButton("auth-modal-link-google-brand");
+        doGoogle.addEventListener("click", () => {
+          void withLoadingStrict(doGoogle, () =>
+            signInGoogleThenLinkPendingPassword(pendingLink!.email, pendingLink!.passwordForLinking!, nextTraceId("ui-link-goog-pw")),
+          );
+        });
+        wrap.appendChild(doGoogle);
+      } else if (pendingLink.scenario === "google_requires_password_link" && pendingLink.pendingGoogleOAuthCredential) {
+        const lblE = document.createElement("label");
+        lblE.className = "auth-modal-label";
+        lblE.textContent = "البريد";
+        const disp = document.createElement("div");
+        disp.className = "auth-modal-readonly-email";
+        disp.textContent = pendingLink.email;
+
+        const lblP = document.createElement("label");
+        lblP.className = "auth-modal-label";
+        lblP.htmlFor = "auth-modal-link-password";
+        lblP.textContent = "كلمة المرور";
+        const inpP = document.createElement("input");
+        inpP.type = "password";
+        inpP.id = "auth-modal-link-password";
+        inpP.className = "app-input w-full px-3 py-2";
+        inpP.autocomplete = "current-password";
+        passwordInputRef = inpP;
+
+        wrap.appendChild(lblE);
+        wrap.appendChild(disp);
+        wrap.appendChild(lblP);
+        wrap.appendChild(inpP);
+
+        const linkBtn = document.createElement("button");
+        linkBtn.type = "button";
+        linkBtn.className = "ui-btn ui-btn--cta w-full py-2";
+        linkBtn.textContent = "ربط Google بحسابي";
+        linkBtn.addEventListener("click", () => {
+          void withLoadingStrict(linkBtn, () =>
+            signInPasswordThenLinkPendingGoogle(
+              pendingLink!.email,
+              requirePassword(),
+              pendingLink!.pendingGoogleOAuthCredential!,
+              nextTraceId("ui-link-pw-goog"),
+            ),
+          );
+        });
+        wrap.appendChild(linkBtn);
+      } else if (pendingLink.scenario === "signup_use_magic_link") {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn ui-btn--cta w-full py-2";
+        btn.textContent = "الانتقال لرابط سحري";
+        btn.addEventListener("click", () => {
+          pendingLink = null;
+          step = "magic";
+          renderDynamic();
+        });
+        wrap.appendChild(btn);
+      } else if (pendingLink.scenario === "signup_use_login") {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn ui-btn--cta w-full py-2";
+        btn.textContent = "تسجيل الدخول بالبريد";
+        btn.addEventListener("click", () => {
+          emailSignupMode = false;
+          pendingLink = null;
+          step = "email_auth";
+          renderDynamic();
+        });
+        wrap.appendChild(btn);
+      } else if (pendingLink.scenario === "login_suggest_google_only") {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn ui-btn--cta w-full py-2";
+        btn.textContent = "المتابعة عبر Google";
+        btn.addEventListener("click", () => {
+          pendingLink = null;
+          step = "google";
+          renderDynamic();
+        });
+        wrap.appendChild(btn);
+      } else {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ui-btn ui-btn--cta w-full py-2";
+        btn.textContent = "إغلاق وإعادة المحاولة";
+        btn.addEventListener("click", () => closeModal());
+        wrap.appendChild(btn);
+      }
+
+      dynamicRoot.appendChild(wrap);
+      return;
+    }
+
+    if (step === "reset_password" && passwordResetOob) {
+      const wrap = document.createElement("div");
+      wrap.className = "auth-modal-form auth-modal-step-section";
+
+      const closeReset = (): void => {
+        cleanupEmailLinkLandingUrl();
+        closeModal();
+      };
+
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "ui-btn ui-btn--ghost w-full py-2 auth-modal-back";
+      b.textContent = "إلغاء";
+      b.addEventListener("click", () => closeReset());
+      wrap.appendChild(b);
+
+      const intro = document.createElement("p");
+      intro.className = "auth-modal-step-intro";
+      intro.textContent = "حدّد كلمة المرور الجديدة لحسابك.";
+      wrap.appendChild(intro);
+
+      const l1 = document.createElement("label");
+      l1.className = "auth-modal-label";
+      l1.htmlFor = "auth-modal-new-password";
+      l1.textContent = "كلمة المرور الجديدة";
+      const p1 = document.createElement("input");
+      p1.type = "password";
+      p1.id = "auth-modal-new-password";
+      p1.className = "app-input w-full px-3 py-2";
+      p1.autocomplete = "new-password";
+      newPasswordRef = p1;
+
+      const l2 = document.createElement("label");
+      l2.className = "auth-modal-label";
+      l2.htmlFor = "auth-modal-new-password-2";
+      l2.textContent = "تأكيد كلمة المرور";
+      const p2 = document.createElement("input");
+      p2.type = "password";
+      p2.id = "auth-modal-new-password-2";
+      p2.className = "app-input w-full px-3 py-2";
+      p2.autocomplete = "new-password";
+      newPasswordConfirmRef = p2;
+
+      wrap.appendChild(l1);
+      wrap.appendChild(p1);
+      wrap.appendChild(l2);
+      wrap.appendChild(p2);
+
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "ui-btn ui-btn--cta w-full py-2";
+      save.textContent = "حفظ كلمة المرور";
+      save.addEventListener("click", () => {
+        const a = String(newPasswordRef?.value ?? "").trim();
+        const b = String(newPasswordConfirmRef?.value ?? "").trim();
+        if (!a) {
+          setErrorMsg(userFacingAuthMessage(new Error("missing_password")));
+          return;
+        }
+        if (!b) {
+          setErrorMsg(userFacingAuthMessage(new Error("missing_password_confirm")));
+          return;
+        }
+        if (a !== b) {
+          setErrorMsg(userFacingAuthMessage(new Error("password_mismatch")));
+          return;
+        }
+        void withLoadingStrict(save, async () => {
+          await confirmPasswordResetFlow(passwordResetOob, a);
+          cleanupEmailLinkLandingUrl();
+          options.onCompleted?.();
+          closeModal();
+        });
+      });
+
+      wrap.appendChild(save);
+      dynamicRoot.appendChild(wrap);
+    }
+  }
+
+  closeBtn.addEventListener("click", () => closeModal());
   overlay.addEventListener("click", (ev) => {
-    if (ev.target === overlay) closeModal(overlay);
+    if (ev.target === overlay) closeModal();
   });
+
   overlay.addEventListener("keydown", (ev) => {
     if (ev.key !== "Tab") return;
     const focusable = Array.from(
@@ -196,61 +772,17 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       last.focus();
     }
   });
-  window.addEventListener(
-    "keydown",
-    (ev) => {
-      if (ev.key === "Escape" && document.body.contains(overlay)) closeModal(overlay);
-    },
-    { once: true },
-  );
-
-  const emailInput = overlay.querySelector<HTMLInputElement>("#auth-modal-email");
-  const passwordInput = overlay.querySelector<HTMLInputElement>("#auth-modal-password");
-  emailInput!.value = getPendingEmailLinkEmail();
-
-  const requireEmail = (): string => {
-    const value = String(emailInput?.value ?? "").trim();
-    if (!value) throw new Error("missing_email_for_email_link");
-    return value;
-  };
-  const requirePassword = (): string => {
-    const value = String(passwordInput?.value ?? "").trim();
-    if (!value) throw new Error("missing_password");
-    return value;
-  };
-
-  overlay.querySelector<HTMLButtonElement>("#auth-modal-google")?.addEventListener("click", () => {
-    void withLoading(overlay.querySelector("#auth-modal-google"), () => loginWithGoogle());
-  });
-
-  overlay.querySelector<HTMLButtonElement>("#auth-modal-login")?.addEventListener("click", () => {
-    void withLoading(overlay.querySelector("#auth-modal-login"), () => loginWithEmailPassword(requireEmail(), requirePassword()));
-  });
-
-  overlay.querySelector<HTMLButtonElement>("#auth-modal-signup")?.addEventListener("click", () => {
-    void withLoading(overlay.querySelector("#auth-modal-signup"), () => signupWithEmailPassword(requireEmail(), requirePassword()));
-  });
-
-  overlay.querySelector<HTMLButtonElement>("#auth-modal-email-link")?.addEventListener("click", () => {
-    if (options.forceEmailLinkCompletion) {
-      void withLoading(overlay.querySelector("#auth-modal-email-link"), async () => {
-        await completePasswordlessEmailLink(requireEmail());
-      });
-      return;
-    }
-    void withLoading(
-      overlay.querySelector("#auth-modal-email-link"),
-      () => sendPasswordlessEmailLink(requireEmail()),
-      { closeOnSuccess: false, successMessage: "تم إرسال الرابط. افتح البريد واضغط الرابط لتكمل؛ إذا وُجهت لتسجيل الدخول أكمل الإيميل وأعد المحاولة." },
-    );
-  });
-
-  overlay.querySelector<HTMLButtonElement>("#auth-modal-logout")?.addEventListener("click", () => {
-    void withLoading(overlay.querySelector("#auth-modal-logout"), () => logoutFlow());
-  });
 
   document.body.appendChild(overlay);
-  emailInput?.focus();
+
+  // للمستخدم المسجّل: العنوان والحالة من snapshot وقت الفتح — نعيد بناء لوحة الحساب فقط
+  if (state.status === "authenticated" && state.user) {
+    renderDynamic();
+    closeBtn.focus();
+  } else {
+    renderDynamic();
+    emailInputRef?.focus();
+  }
 
   if (options.forceEmailLinkCompletion) {
     queueMicrotask(() => {
@@ -258,7 +790,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
         const auth = await getFirebaseAuth();
         if (!isSignInWithEmailLink(auth, window.location.href)) return;
         const email = getPendingEmailLinkEmail().trim();
-        if (!email || !overlay.isConnected || !emailInput?.value.trim()) return;
+        if (!email || !overlay.isConnected) return;
         const btn = overlay.querySelector<HTMLButtonElement>("#auth-modal-email-link");
         await withLoading(btn, async () => {
           await completePasswordlessEmailLink(email.trim().toLowerCase());
