@@ -23,6 +23,8 @@ import {
 } from "./token";
 import type { AuthenticatedUser } from "./types";
 import { identityLinkingService } from "./IdentityLinkingService";
+import { shouldRequireCsrf } from "./policy";
+import { AuthError } from "./errors";
 
 type ExchangeInput = {
   provider: string;
@@ -54,7 +56,7 @@ export class AuthService {
 
   private resolveProvider(name: string): AuthProvider {
     const provider = this.providers.get(name);
-    if (!provider) throw new Error("unsupported_provider");
+    if (!provider) throw new AuthError("unsupported_provider");
     return provider;
   }
 
@@ -113,13 +115,13 @@ export class AuthService {
   async refreshSession(refreshToken: string): Promise<ExchangeResult> {
     const payload = verifyRefreshToken(refreshToken);
     const session = await getActiveSession(payload.sid);
-    if (session.revokedAt) throw new Error("session_revoked");
-    if (new Date(session.expiresAt).getTime() <= Date.now()) throw new Error("session_expired");
-    if (session.userId !== payload.sub) throw new Error("session_subject_mismatch");
+    if (session.revokedAt) throw new AuthError("session_revoked");
+    if (new Date(session.expiresAt).getTime() <= Date.now()) throw new AuthError("session_expired");
+    if (session.userId !== payload.sub) throw new AuthError("session_subject_mismatch");
     const userStatus = await getUserStatus(session.userId);
     if (userStatus !== "active") {
       await revokeSession(payload.sid, "user_inactive");
-      throw new Error("user_inactive");
+      throw new AuthError("user_inactive");
     }
     const presentedHash = hashToken(refreshToken);
     if (session.refreshTokenHash !== presentedHash) {
@@ -129,7 +131,7 @@ export class AuthService {
         sessionId: payload.sid,
         eventType: "auth.refresh.reuse_detected",
       });
-      throw new Error("refresh_token_reuse_detected");
+      throw new AuthError("refresh_token_reuse_detected");
     }
 
     const roles = await listUserRoleKeys(session.userId);
@@ -152,7 +154,7 @@ export class AuthService {
         sessionId: payload.sid,
         eventType: "auth.refresh.rotation_conflict",
       });
-      throw new Error("refresh_rotation_conflict");
+      throw new AuthError("refresh_rotation_conflict");
     }
     await logAuthEvent({
       userId: session.userId,
@@ -175,11 +177,11 @@ export class AuthService {
   async verifyAccessToken(accessToken: string): Promise<AuthenticatedUser> {
     const payload = verifyAccessToken(accessToken);
     const session = await getActiveSession(payload.sid);
-    if (session.revokedAt) throw new Error("session_revoked");
-    if (new Date(session.expiresAt).getTime() <= Date.now()) throw new Error("session_expired");
-    if (session.userId !== payload.sub) throw new Error("session_subject_mismatch");
+    if (session.revokedAt) throw new AuthError("session_revoked");
+    if (new Date(session.expiresAt).getTime() <= Date.now()) throw new AuthError("session_expired");
+    if (session.userId !== payload.sub) throw new AuthError("session_subject_mismatch");
     const userStatus = await getUserStatus(session.userId);
-    if (userStatus !== "active") throw new Error("user_inactive");
+    if (userStatus !== "active") throw new AuthError("user_inactive");
     return {
       userId: payload.sub,
       sessionId: payload.sid,
@@ -197,12 +199,34 @@ export class AuthService {
     });
   }
 
+  async validateRefreshRequest(input: {
+    refreshToken: string;
+    csrfHeader: string;
+    csrfCookie: string;
+  }): Promise<void> {
+    const payload = verifyRefreshToken(input.refreshToken);
+    const session = await getActiveSession(payload.sid);
+    if (shouldRequireCsrf(session.clientType)) {
+      if (!input.csrfHeader || !input.csrfCookie || input.csrfHeader !== input.csrfCookie) {
+        throw new AuthError("csrf_mismatch");
+      }
+      if (!session.csrfTokenHash) throw new AuthError("csrf_mismatch");
+      if (hashToken(input.csrfHeader) !== session.csrfTokenHash) {
+        throw new AuthError("csrf_mismatch");
+      }
+    }
+  }
+
+  async revokeBySessionId(sessionId: string): Promise<void> {
+    await revokeSession(sessionId, "manual_logout");
+  }
+
   async validateRefreshCsrf(refreshToken: string, csrfToken: string): Promise<void> {
     const payload = verifyRefreshToken(refreshToken);
     const session = await getActiveSession(payload.sid);
     if (!session.csrfTokenHash) return;
     if (hashToken(csrfToken) !== session.csrfTokenHash) {
-      throw new Error("csrf_mismatch");
+      throw new AuthError("csrf_mismatch");
     }
   }
 }

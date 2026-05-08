@@ -15,7 +15,10 @@ export async function exchangeFirebaseToken(input: {
   }
   const r = await fetch("/api/auth/exchange", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(input.traceId ? { "X-Auth-Trace-Id": input.traceId } : {}),
+    },
     credentials: "include",
     body: JSON.stringify({
       provider: "firebase",

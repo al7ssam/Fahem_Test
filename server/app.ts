@@ -3,6 +3,7 @@ import path from "path";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
+import crypto from "crypto";
 import { config } from "./config";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerCustomLessonRoutes } from "./routes/customLessons";
@@ -29,6 +30,13 @@ export function createApp() {
       credentials: true,
     }),
   );
+
+  app.use((req, res, next) => {
+    const requestId = String(req.header("x-request-id") ?? "").trim() || crypto.randomUUID();
+    req.headers["x-request-id"] = requestId;
+    res.setHeader("x-request-id", requestId);
+    next();
+  });
 
   app.get("/health", (_req, res) => {
     res.status(200).json({ ok: true, service: "fahem" });

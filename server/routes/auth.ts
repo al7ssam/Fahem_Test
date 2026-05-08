@@ -28,6 +28,10 @@ function readCsrfHeader(req: Request): string {
   return String(req.header("x-csrf-token") ?? "").trim();
 }
 
+function readTraceId(req: Request): string {
+  return String(req.header("x-auth-trace-id") ?? req.header("x-request-id") ?? "").trim();
+}
+
 export function registerAuthRoutes(app: Express): void {
   app.post("/api/auth/exchange", async (req: Request, res: Response) => {
     const parsed = exchangeBodySchema.safeParse(req.body ?? {});
@@ -82,7 +86,11 @@ export function registerAuthRoutes(app: Express): void {
         provider: parsed.data.provider,
         ipAddress: req.ip ?? null,
         userAgent: req.headers["user-agent"] ?? null,
-        metadata: { reason: error instanceof Error ? error.message : "unknown_error" },
+        metadata: {
+          reason_code: error instanceof Error ? error.message : "unknown_error",
+          client_type: parsed.data.clientType,
+          trace_id: readTraceId(req) || null,
+        },
       }).catch(() => {});
       res.status(401).json({
         ok: false,
@@ -106,18 +114,11 @@ export function registerAuthRoutes(app: Express): void {
       }
       const csrfHeader = readCsrfHeader(req);
       const csrfCookie = String(req.cookies?.fahem_csrf_token ?? "").trim();
-      if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
-        await logAuthEvent({
-          userId: req.auth?.userId ?? null,
-          sessionId: req.auth?.sessionId ?? null,
-          eventType: "auth.refresh.csrf_mismatch",
-          ipAddress: req.ip ?? null,
-          userAgent: req.headers["user-agent"] ?? null,
-        }).catch(() => {});
-        res.status(403).json({ ok: false, error: "csrf_mismatch" });
-        return;
-      }
-      await authService.validateRefreshCsrf(refreshToken, csrfHeader);
+      await authService.validateRefreshRequest({
+        refreshToken,
+        csrfHeader,
+        csrfCookie,
+      });
       const result = await authService.refreshSession(refreshToken);
       res.cookie("fahem_access_token", result.accessToken, {
         ...cookieOptions(process.env.NODE_ENV === "production"),
@@ -140,12 +141,17 @@ export function registerAuthRoutes(app: Express): void {
         eventType: "auth.refresh.failed",
         ipAddress: req.ip ?? null,
         userAgent: req.headers["user-agent"] ?? null,
-        metadata: { reason: error instanceof Error ? error.message : "unknown_error" },
+        metadata: {
+          reason_code: error instanceof Error ? error.message : "unknown_error",
+          trace_id: readTraceId(req) || null,
+        },
       }).catch(() => {});
-      res.status(401).json({
+      const reason = error instanceof Error ? error.message : "unknown_error";
+      const status = reason === "csrf_mismatch" ? 403 : 401;
+      res.status(status).json({
         ok: false,
-        error: "refresh_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
+        error: reason === "csrf_mismatch" ? "csrf_mismatch" : "refresh_failed",
+        reason,
       });
     }
   });
@@ -155,41 +161,37 @@ export function registerAuthRoutes(app: Express): void {
       const refreshToken = String(req.cookies?.fahem_refresh_token ?? req.body?.refreshToken ?? "").trim();
       const csrfHeader = readCsrfHeader(req);
       const csrfCookie = String(req.cookies?.fahem_csrf_token ?? "").trim();
-      if (!csrfHeader || !csrfCookie || csrfHeader !== csrfCookie) {
-        await logAuthEvent({
-          userId: req.auth?.userId ?? null,
-          sessionId: req.auth?.sessionId ?? null,
-          eventType: "auth.logout.csrf_mismatch",
-          ipAddress: req.ip ?? null,
-          userAgent: req.headers["user-agent"] ?? null,
-        }).catch(() => {});
-        res.status(403).json({ ok: false, error: "csrf_mismatch" });
-        return;
-      }
       if (refreshToken) {
-        await authService.validateRefreshCsrf(refreshToken, csrfHeader);
+        await authService.validateRefreshRequest({
+          refreshToken,
+          csrfHeader,
+          csrfCookie,
+        });
         await authService.revokeByRefreshToken(refreshToken);
       } else if (req.auth?.sessionId) {
-        const pool = getPool();
-        await pool.query(
-          `UPDATE public.user_sessions
-           SET revoked_at = NOW(), revoked_reason = 'manual_logout'
-           WHERE id = $1::uuid AND revoked_at IS NULL`,
-          [req.auth.sessionId],
-        );
+        await authService.revokeBySessionId(req.auth.sessionId);
       }
       res.clearCookie("fahem_access_token", { path: "/" });
       res.clearCookie("fahem_refresh_token", { path: "/" });
       res.clearCookie("fahem_csrf_token", { path: "/" });
       res.status(200).json({ ok: true });
-    } catch {
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown_error";
       await logAuthEvent({
         userId: req.auth?.userId ?? null,
         sessionId: req.auth?.sessionId ?? null,
         eventType: "auth.logout.failed",
         ipAddress: req.ip ?? null,
         userAgent: req.headers["user-agent"] ?? null,
+        metadata: {
+          reason_code: reason,
+          trace_id: readTraceId(req) || null,
+        },
       }).catch(() => {});
+      if (reason === "csrf_mismatch") {
+        res.status(403).json({ ok: false, error: "csrf_mismatch" });
+        return;
+      }
       res.status(500).json({ ok: false, error: "logout_failed" });
     }
   });

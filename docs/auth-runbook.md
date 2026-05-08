@@ -46,6 +46,7 @@
 - `npm run auth:check-conventions`
 - `npm run auth:check-client-boundaries`
 - `npm run db:check-schema`
+- `npm run auth:lifecycle-smoke` (web/mobile session lifecycle + optional exchange)
 - تدفق يدوي: Google + Email/Password + Email Link + Logout + Session restore.
 
 ## 5) Troubleshooting سريع
@@ -66,3 +67,14 @@
 - تكرار `auth.refresh.rotation_conflict`: راجع وجود race أو إعادة استخدام token من أكثر من جهاز.
 - ارتفاع `auth.refresh.csrf_mismatch` أو `auth.logout.csrf_mismatch`: راجع إعدادات الكوكيز، البروكسي، والدومين.
 - محاولات وصول `401/403` متكررة على `/admin` و`/api/admin/*`: راجع إعداد RBAC والأدوار.
+
+## 7) Retention + Alerts + Dashboards
+
+- **Retention baseline:** جدول `public.auth_observability_settings` يحدد `events_retention_days` (افتراضي 90 يوم).
+- **Daily dashboard source:** العرض `public.auth_event_daily_metrics` لتجميع الأحداث اليومية حسب `event_type`.
+- **Alerts المقترحة:**
+  - `auth.refresh.reuse_detected` > 0 خلال 10 دقائق.
+  - `auth.refresh.rotation_conflict` spike (انحراف > 3x baseline).
+  - ارتفاع `auth.access.forbidden` أو `auth.access.unauthorized` غير معتاد.
+  - `socket_auth_failures` (عند إضافته) أعلى من العتبة المتوقعة.
+- **Retention job (تشغيلي):** نفّذ مهمة دورية يومية لحذف `auth_events` الأقدم من `events_retention_days`.

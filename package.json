@@ -18,6 +18,7 @@
     "auth:check-conventions": "tsx server/scripts/checkAuthConventions.ts",
     "auth:check-client-boundaries": "tsx server/scripts/checkFrontendAuthBoundaries.ts",
     "auth:web-smoke": "tsx server/scripts/authWebSmoke.ts",
+    "auth:lifecycle-smoke": "tsx server/scripts/authLifecycleSmoke.ts",
     "auth:token-type-smoke": "tsx server/scripts/authTokenTypeSmoke.ts",
     "list-gemini-models": "tsx server/scripts/list-gemini-models.ts",
     "ai-factory:baseline": "tsx server/scripts/aiFactoryBaselineMetrics.ts",

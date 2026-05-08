@@ -207,6 +207,7 @@ export async function createSession(input: {
 
 export async function getActiveSession(sessionId: string): Promise<{
   userId: string;
+  clientType: "web" | "mobile";
   revokedAt: string | null;
   expiresAt: string;
   csrfTokenHash: string | null;
@@ -215,12 +216,13 @@ export async function getActiveSession(sessionId: string): Promise<{
   const pool = getPool();
   const r = await pool.query<{
     user_id: string;
+    client_type: "web" | "mobile";
     revoked_at: string | null;
     expires_at: string;
     csrf_token_hash: string | null;
     refresh_token_hash: string;
   }>(
-    `SELECT user_id::text, revoked_at::text, expires_at::text, csrf_token_hash, refresh_token_hash
+    `SELECT user_id::text, client_type, revoked_at::text, expires_at::text, csrf_token_hash, refresh_token_hash
      FROM public.user_sessions
      WHERE id = $1::uuid`,
     [sessionId],
@@ -228,6 +230,7 @@ export async function getActiveSession(sessionId: string): Promise<{
   if (!r.rows[0]) throw new Error("session_not_found");
   return {
     userId: r.rows[0].user_id,
+    clientType: r.rows[0].client_type,
     revokedAt: r.rows[0].revoked_at,
     expiresAt: r.rows[0].expires_at,
     csrfTokenHash: r.rows[0].csrf_token_hash,

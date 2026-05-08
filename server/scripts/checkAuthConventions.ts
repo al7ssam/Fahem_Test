@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { Pool } from "pg";
 
 const ROOT = process.cwd();
 const SERVER_DIR = path.join(ROOT, "server");
@@ -58,16 +59,59 @@ function main(): void {
   const files: string[] = [];
   walk(SERVER_DIR, files);
   const issues = files.flatMap(scanFile);
-  if (issues.length === 0) {
-    console.log("[auth:check-conventions] OK");
-    return;
+  if (issues.length > 0) {
+    console.error(`[auth:check-conventions] FAILED (${issues.length})`);
+    for (const issue of issues.slice(0, 200)) {
+      console.error(`- ${issue.file}:${issue.line} ${issue.message}`);
+      console.error(`  ${issue.snippet}`);
+    }
+    process.exit(1);
   }
-  console.error(`[auth:check-conventions] FAILED (${issues.length})`);
-  for (const issue of issues.slice(0, 200)) {
-    console.error(`- ${issue.file}:${issue.line} ${issue.message}`);
-    console.error(`  ${issue.snippet}`);
-  }
-  process.exit(1);
+  console.log("[auth:check-conventions] static checks OK");
 }
 
-main();
+async function checkAuthSchemaContracts(): Promise<void> {
+  const databaseUrl = String(process.env.DATABASE_URL ?? "").trim();
+  if (!databaseUrl) {
+    console.log("[auth:check-conventions] schema checks skipped (DATABASE_URL is empty)");
+    return;
+  }
+  const pool = new Pool({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } });
+  try {
+    const result = await pool.query<{ table_name: string; column_name: string }>(
+      `SELECT table_name, column_name
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND (
+           (table_name = 'user_sessions' AND column_name IN ('id', 'client_type', 'refresh_token_hash', 'csrf_token_hash', 'updated_at'))
+           OR
+           (table_name = 'auth_events' AND column_name IN ('event_type', 'session_id', 'ip_address', 'user_agent', 'metadata_json'))
+         )`,
+    );
+    const keys = new Set(result.rows.map((row) => `${row.table_name}.${row.column_name}`));
+    const required = [
+      "user_sessions.id",
+      "user_sessions.client_type",
+      "user_sessions.refresh_token_hash",
+      "user_sessions.csrf_token_hash",
+      "user_sessions.updated_at",
+      "auth_events.event_type",
+      "auth_events.session_id",
+      "auth_events.ip_address",
+      "auth_events.user_agent",
+      "auth_events.metadata_json",
+    ];
+    const missing = required.filter((key) => !keys.has(key));
+    if (missing.length > 0) {
+      throw new Error(`Missing auth schema contract columns: ${missing.join(", ")}`);
+    }
+    console.log("[auth:check-conventions] schema checks OK");
+  } finally {
+    await pool.end();
+  }
+}
+
+void (async () => {
+  main();
+  await checkAuthSchemaContracts();
+})();
