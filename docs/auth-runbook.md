@@ -56,6 +56,9 @@
 - خطأ `auth_exchange_failed` بعد نجاح Firebase في الواجهة:
   - تأكد أن `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` مضبوطة في Render.
   - راجع logs للتأكد من عدم وجود أخطاء `default credentials` أو `private key parse`.
+- إذا ظهر `auth/popup-closed-by-user` رغم اختيار الحساب بنجاح:
+  - تحقق من header `Cross-Origin-Opener-Policy` في استجابة الصفحة الرئيسية.
+  - يجب أن تكون القيمة `same-origin-allow-popups` (وليست `same-origin`) لتدفق Google popup.
 
 ## 6) Incident Response (Auth)
 

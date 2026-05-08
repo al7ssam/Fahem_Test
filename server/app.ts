@@ -15,6 +15,11 @@ export function createApp() {
   app.use(
     helmet({
       contentSecurityPolicy: false,
+      // Required for OAuth popup postMessage handshakes (Firebase/Google).
+      // `same-origin` can break popup flows by isolating the opener context.
+      crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+      // Keep disabled unless we intentionally adopt cross-origin isolation.
+      crossOriginEmbedderPolicy: false,
     }),
   );
 
