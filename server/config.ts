@@ -12,6 +12,8 @@ const clientOrigin =
 const adminSecret = process.env.ADMIN_SECRET?.trim() || "";
 const authJwtSecret = process.env.AUTH_JWT_SECRET?.trim() || "";
 const firebaseProjectId = process.env.FIREBASE_PROJECT_ID?.trim() || "";
+const firebaseClientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim() || "";
+const firebasePrivateKey = String(process.env.FIREBASE_PRIVATE_KEY ?? "").replace(/\\n/g, "\n").trim();
 const firebaseServiceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim() || "";
 const authAdminEmails = String(process.env.AUTH_ADMIN_EMAILS ?? "")
   .split(",")
@@ -46,6 +48,8 @@ export const config = {
   adminSecret,
   authJwtSecret,
   firebaseProjectId,
+  firebaseClientEmail,
+  firebasePrivateKey,
   firebaseServiceAccountPath,
   authAdminEmails,
   studyPhaseMs,

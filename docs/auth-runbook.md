@@ -13,8 +13,24 @@
 - عميل الويب (`VITE_FIREBASE_*`) في `.env`.
 - الباك-إند:
   - `FIREBASE_PROJECT_ID`
-  - `FIREBASE_SERVICE_ACCOUNT_PATH`
+  - `FIREBASE_CLIENT_EMAIL`
+  - `FIREBASE_PRIVATE_KEY`
   - `AUTH_JWT_SECRET`
+  - ملاحظة: `FIREBASE_SERVICE_ACCOUNT_PATH` fallback محلي للتطوير فقط.
+
+## 2.1) إعداد Render (Cloud-native)
+
+- أضف هذه المتغيرات في Render:
+  - `FIREBASE_PROJECT_ID`
+  - `FIREBASE_CLIENT_EMAIL`
+  - `FIREBASE_PRIVATE_KEY`
+- استخراج القيم من Firebase Admin JSON:
+  - `FIREBASE_PROJECT_ID`  <= `project_id`
+  - `FIREBASE_CLIENT_EMAIL` <= `client_email`
+  - `FIREBASE_PRIVATE_KEY` <= `private_key`
+- private key multiline:
+  - الأفضل لصقه كما هو بأسطر حقيقية.
+  - إذا واجهة الإدخال لا تدعم multiline، استخدم `\\n`، والكود يحوّله إلى newline تلقائيًا.
 
 ## 3) تسلسل التشغيل المتوقع
 
@@ -37,6 +53,9 @@
 - خطأ `csrf_mismatch`: تأكد من وجود `fahem_csrf_token` وإرسال `X-CSRF-Token`.
 - فشل Email Link completion: تأكد من domain الصحيح في `Authorized Domains` و`VITE_FIREBASE_LINK_DOMAIN`.
 - حساب موجود بمزود آخر: استخدم مسار تسجيل الدخول بالمزود الصحيح ثم linking.
+- خطأ `auth_exchange_failed` بعد نجاح Firebase في الواجهة:
+  - تأكد أن `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` مضبوطة في Render.
+  - راجع logs للتأكد من عدم وجود أخطاء `default credentials` أو `private key parse`.
 
 ## 6) Incident Response (Auth)
 

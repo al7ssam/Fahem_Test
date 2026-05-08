@@ -4,7 +4,15 @@ import { apiFetch } from "./apiClient";
 export async function exchangeFirebaseToken(input: {
   firebaseIdToken: string;
   clientType?: "web" | "mobile";
+  traceId?: string;
 }): Promise<{ user: { id: string; roles: string[] } }> {
+  if (input.traceId) {
+    console.info("[auth-trace]", {
+      ts: new Date().toISOString(),
+      traceId: input.traceId,
+      stage: "exchange_fetch_dispatch",
+    });
+  }
   const r = await fetch("/api/auth/exchange", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -17,6 +25,15 @@ export async function exchangeFirebaseToken(input: {
   });
   if (!r.ok) {
     const body = (await r.json().catch(() => ({}))) as { reason?: string; error?: string };
+    if (input.traceId) {
+      console.info("[auth-trace]", {
+        ts: new Date().toISOString(),
+        traceId: input.traceId,
+        stage: "exchange_fetch_failed",
+        status: r.status,
+        reason: body.reason ?? body.error ?? "unknown",
+      });
+    }
     throw new Error(body.reason || body.error || "auth_exchange_failed");
   }
   const body = (await r.json()) as {
@@ -30,6 +47,15 @@ export async function exchangeFirebaseToken(input: {
     });
   }
   if (!body.user) throw new Error("auth_user_missing");
+  if (input.traceId) {
+    console.info("[auth-trace]", {
+      ts: new Date().toISOString(),
+      traceId: input.traceId,
+      stage: "exchange_fetch_success",
+      hasTokens: Boolean(body.tokens?.accessToken && body.tokens?.refreshToken),
+      hasUser: true,
+    });
+  }
   return { user: body.user };
 }
 

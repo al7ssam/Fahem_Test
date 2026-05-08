@@ -11,8 +11,34 @@ function readServiceAccountFromFile(filePath: string): ServiceAccount {
 }
 
 function resolveFirebaseInitOptions(): { credential?: ReturnType<typeof cert>; projectId?: string } {
+  const hasEnvServiceAccount =
+    Boolean(config.firebaseProjectId) &&
+    Boolean(config.firebaseClientEmail) &&
+    Boolean(config.firebasePrivateKey);
+  if (hasEnvServiceAccount) {
+    const serviceAccount: ServiceAccount = {
+      projectId: config.firebaseProjectId,
+      clientEmail: config.firebaseClientEmail,
+      privateKey: config.firebasePrivateKey,
+    };
+    return {
+      credential: cert(serviceAccount),
+      projectId: config.firebaseProjectId,
+    };
+  }
+
+  if (config.isProduction) {
+    const missing: string[] = [];
+    if (!config.firebaseProjectId) missing.push("FIREBASE_PROJECT_ID");
+    if (!config.firebaseClientEmail) missing.push("FIREBASE_CLIENT_EMAIL");
+    if (!config.firebasePrivateKey) missing.push("FIREBASE_PRIVATE_KEY");
+    if (missing.length > 0) {
+      throw new Error(`Firebase Admin env credentials are required in production. Missing: ${missing.join(", ")}`);
+    }
+  }
+
   const serviceAccountPath = config.firebaseServiceAccountPath?.trim();
-  if (serviceAccountPath) {
+  if (serviceAccountPath && !config.isProduction) {
     const serviceAccount = readServiceAccountFromFile(serviceAccountPath);
     return {
       credential: cert(serviceAccount),

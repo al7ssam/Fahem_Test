@@ -4564,7 +4564,13 @@ window.addEventListener("storage", (event) => {
   }
 });
 void completeGoogleRedirectLogin()
-  .catch(() => false)
+  .catch((error) => {
+    console.error("[auth-trace] redirect_bootstrap_unhandled_error", {
+      ts: new Date().toISOString(),
+      reason: error instanceof Error ? error.message : "unknown_error",
+    });
+    return false;
+  })
   .then(() => hydrateAuthSession());
 attachSocketAuthSync(
   () => socket,

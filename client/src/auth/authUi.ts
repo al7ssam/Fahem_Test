@@ -14,6 +14,13 @@ function makeActionError(error: unknown): string {
   const raw = error instanceof Error ? error.message : "auth_unknown_error";
   if (raw.includes("missing_vite_firebase")) return "إعدادات Firebase غير مكتملة في بيئة الواجهة.";
   if (raw.includes("missing_vite")) return "إعدادات Firebase غير مكتملة في ملف البيئة.";
+  if (raw.includes("auth/popup-blocked")) return "المتصفح حظر نافذة Google. اسمح بالنوافذ المنبثقة ثم حاول مرة أخرى.";
+  if (raw.includes("auth/popup-closed-by-user")) return "تم إغلاق نافذة Google قبل إكمال العملية.";
+  if (raw.includes("auth/cancelled-popup-request")) return "تم إلغاء طلب تسجيل الدخول. أعد المحاولة.";
+  if (raw.includes("auth/operation-not-supported-in-this-environment")) return "بيئة المتصفح لا تدعم Popup. سيتم استخدام redirect.";
+  if (raw.includes("google_flow_in_progress")) return "محاولة تسجيل دخول جارية بالفعل. انتظر قليلًا.";
+  if (raw.includes("google_missing_firebase_user")) return "تمت مصادقة Google لكن لم يتم الحصول على المستخدم. أعد المحاولة.";
+  if (raw.includes("google_redirect_result_failed")) return "فشل استرجاع نتيجة تسجيل الدخول عبر redirect.";
   if (raw.includes("popup")) return "تعذر فتح نافذة Google. تحقق من مانع النوافذ وحاول مجددًا.";
   if (raw.includes("invalid-email")) return "صيغة البريد الإلكتروني غير صحيحة.";
   if (raw.includes("wrong-password")) return "كلمة المرور غير صحيحة.";
