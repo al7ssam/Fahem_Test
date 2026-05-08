@@ -15,6 +15,7 @@ import {
 } from "firebase/auth";
 import { beginAuthOperation, commitAuthOperation, getAuthState, setAuthState } from "./authStore";
 import { buildMagicLinkContinueUrl, cleanupEmailLinkLandingUrl, readEmailLinkOobCode } from "./emailLinkUrl";
+import { resolveEmailLinkActionCodeLinkDomain } from "./resolveEmailLinkHostingDomain";
 import { getFirebaseAuth, getFirebaseConfig, getGoogleProvider } from "./firebaseClient";
 import { exchangeFirebaseToken, fetchCurrentUser, logout as backendLogout } from "./sessionClient";
 
@@ -310,16 +311,21 @@ export async function sendPasswordlessEmailLink(email: string): Promise<void> {
   const auth = await getFirebaseAuth();
   const cfg = getFirebaseConfig();
   const continueUrl = buildMagicLinkContinueUrl();
+  const resolved = resolveEmailLinkActionCodeLinkDomain(cfg.linkDomain);
+  const linkDomainToSend = resolved.hostname;
   authTrace(traceId, "magic_link_send_start", {
     continueUrlOrigin: continueUrl.origin,
     continueUrlPathname: continueUrl.pathname,
-    hasLinkDomain: Boolean(cfg.linkDomain),
+    linkDomainEnvSet: Boolean(cfg.linkDomain),
+    linkDomainPassedToFirebase: Boolean(linkDomainToSend),
+    linkDomainDroppedReason: resolved.droppedReason ?? null,
+    linkDomainEffective: linkDomainToSend ?? null,
   });
   try {
     await sendSignInLinkToEmail(auth, email.trim(), {
       url: continueUrl.toString(),
       handleCodeInApp: true,
-      ...(cfg.linkDomain ? { linkDomain: cfg.linkDomain } : {}),
+      ...(linkDomainToSend ? { linkDomain: linkDomainToSend } : {}),
     });
     savePendingEmailLink(email);
     authTrace(traceId, "magic_link_send_success", { emailDomain: email.includes("@") ? email.split("@")[1]?.toLowerCase() : "" });

@@ -54,6 +54,10 @@ function makeActionError(error: unknown): string {
     "auth/invalid-action-code": "رابط الدخول غير صالح أو استُخدم مسبقًا. أعد طلب الرابط السحري.",
     "auth/expired-action-code": "انتهت صلاحية الرابط السحري. أعد الطلب وجرب الرابط الجديد خلال وقت معقول.",
     "auth/user-disabled": "تم تعطيل هذا الحساب.",
+    "auth/invalid-hosting-link-domain":
+      "إعداد «نطاق رابط الاستضافة» غير صحيح: لا تُدخل نطاق Render (مثل fahem.onrender.com) في VITE_FIREBASE_LINK_DOMAIN. أفرغ المتغير أو استخدم نطاق Firebase (مثل xxx.web.app بعد إعداده في لوحة Firebase).",
+    "auth/quota-exceeded":
+      "Firebase وصل لحد إرسال رسائل البريد السحري اليومي لهذا المشروع. جرّب لاحقًا، أو فعّل الفوترة/الخطة، أو قلّل التجارب.",
   };
   const appMessages: Record<string, string> = {
     magic_link_invalid_url: "هذه الصفحة لا تحتوي رابط تسجيل دخول سحريًا صالحًا من Firebase أو فقد المعاملات (مثل oobCode).",

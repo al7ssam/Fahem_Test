@@ -8,7 +8,8 @@
   - فعّل المزود `Email Link` في Authentication > Sign-in method.
   - أضف نطاق الاستضافة الفعلي (مثل `YOUR-APP.onrender.com`) إلى **Authorized domains** في Authentication > Settings (هذا أساس رفض أو قبول عنوان المتابعة `continueUrl`).
   - **متغير بيئة موصى به للإنتاج:** `VITE_FIREBASE_EMAIL_LINK_CONTINUE_URL=https://YOUR-APP.onrender.com/` (أو أي مسار ثابت لديك؛ يُضاف إلى الرابط آلياً `?authAction=emailLinkComplete`) حتى لا يعتمد عنوان المتابعة على صفحة عميقة غير مصرّحة.
-  - **`VITE_FIREBASE_LINK_DOMAIN`:** اختياري؛ لا تضعه إلا إن كنت قد عدّدت Hosted link domain / Dynamic Links في مشروع Firebase حسب دليلهم. تركه فارغًا يمنع خطأًا شائعًا من إعداد غير مستخدم فعلًا.
+  - **`VITE_FIREBASE_LINK_DOMAIN`:** إن وُضعت قيمة غير معتمدة كـ **Hosting link domain** في Firebase يظهر خطأ `auth/invalid-hosting-link-domain` (مثل وضع `fahem.onrender.com` وهو خطأ شائع). الافتراضي الآن: **لا يُرسل هذا الحقل لـ Firebase** ما لم يكن النطاق بالشكل `*.web.app` أو `*.firebaseapp.com` أو يحتوي `.page.link` ما لم تُفعّل تجاوزًا صريحًا.
+- **`VITE_FIREBASE_ALLOW_EMAIL_LINK_DOMAIN=1`:** فقط بعد أن تضيف في Firebase نطاقًا مخصصًا مصرّحًا كـ Auth email link domain وتضع اسم المضيف ذاته في `VITE_FIREBASE_LINK_DOMAIN`.
 
 ## 2) إعداد البيئة
 
