@@ -105,6 +105,28 @@ body {
   box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
 }
 
+/** زر منتقي الدولة: نفس مظهر .app-input دون فرض `color` على SVG الأعلام داخل الزر. */
+.country-picker-toggle {
+  border-radius: 0.9rem;
+  background: rgba(8, 15, 32, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.country-picker-toggle:focus {
+  outline: none;
+}
+
+.country-picker-toggle:focus-visible {
+  border-color: rgba(251, 191, 36, 0.75);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
+}
+
+.country-flag-slot {
+  isolation: isolate;
+}
+
 .ui-btn {
   border: 1px solid transparent;
   border-radius: 0.9rem;
@@ -180,6 +202,7 @@ body {
   max-height: 100%;
   display: block;
   object-fit: contain;
+  forced-color-adjust: none;
 }
 
 .auth-modal-overlay {

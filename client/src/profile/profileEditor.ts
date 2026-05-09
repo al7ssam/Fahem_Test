@@ -229,10 +229,10 @@ export async function mountProfileEditor(
   function mountPicker(): void {
     pickerRoot.innerHTML = `
       <div class="country-picker-wrap">
-        <button type="button" id="country-picker-toggle" class="app-input w-full px-2 py-1.5 text-right text-sm flex flex-row-reverse items-center gap-2 justify-between"
+        <button type="button" id="country-picker-toggle" class="country-picker-toggle w-full px-2 py-1.5 text-right text-sm flex flex-row-reverse items-center gap-2 justify-between"
           aria-haspopup="listbox" aria-expanded="${pickerOpen ? "true" : "false"}">
           <span id="country-flag-btn" class="country-flag-slot shrink-0 w-8 h-[1.35rem] inline-flex items-center justify-center" aria-hidden="true"></span>
-          <span id="country-picker-label" class="flex-1 truncate">${escapeHtml(names[countryCode] ?? countryCode)}</span>
+          <span id="country-picker-label" class="flex-1 truncate text-slate-100">${escapeHtml(names[countryCode] ?? countryCode)}</span>
           <span class="text-slate-400 text-xs">${pickerOpen ? "▲" : "▼"}</span>
         </button>
         <div id="country-picker-panel" class="${pickerOpen ? "" : "hidden"} absolute z-[100] mt-1 w-full rounded-lg border border-white/10 bg-slate-900 shadow-xl p-1.5 left-0 right-0 max-h-[min(55vh,320px)] overflow-visible">
