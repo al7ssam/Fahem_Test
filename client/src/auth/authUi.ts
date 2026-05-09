@@ -199,12 +199,12 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   const withLoading = async (
     button: HTMLButtonElement | null,
     action: () => Promise<void>,
-    actionOptions: { closeOnSuccess?: boolean; successMessage?: string } = {},
+    actionOptions: { closeOnSuccess?: boolean; successMessage?: string; loadingLabel?: string } = {},
   ): Promise<void> => {
     if (!button) return;
     const prev = button.textContent ?? "";
     button.disabled = true;
-    button.textContent = "جاري التنفيذ...";
+    button.textContent = actionOptions.loadingLabel ?? "جاري التنفيذ...";
     setErrorMsg("");
     try {
       await action();
@@ -512,16 +512,20 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
       submit.addEventListener("click", () => {
         if (emailSignupMode) {
-          void withLoading(submit, async () => {
-            await signupWithEmailPassword(requireEmail(), requirePassword());
-          });
+          void withLoading(
+            submit,
+            async () => {
+              await signupWithEmailPassword(requireEmail(), requirePassword());
+            },
+            { loadingLabel: "جاري إنشاء الحساب..." },
+          );
           return;
         }
         void (async () => {
           submit.disabled = true;
           tabLogin.disabled = true;
           tabSignup.disabled = true;
-          submit.textContent = "جاري التنفيذ...";
+          submit.textContent = "جاري تسجيل الدخول...";
           setErrorMsg("");
           loginRecoveryRow.style.display = "none";
           try {
