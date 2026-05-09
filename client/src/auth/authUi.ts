@@ -9,7 +9,12 @@ import {
   sendPasswordResetEmailFlow,
   signupWithEmailPassword,
 } from "./authFlows";
-import { FahemProviderLinkError, isFahemProviderLinkError, userFacingAuthMessage } from "./authErrors";
+import {
+  FahemProviderLinkError,
+  isFahemProviderLinkError,
+  readFirebaseErrorCode,
+  userFacingAuthMessage,
+} from "./authErrors";
 import { getAuthState } from "./authStore";
 import { signInGoogleThenLinkPendingPassword, signInPasswordThenLinkPendingGoogle } from "./linkingFlows";
 
@@ -63,11 +68,43 @@ function googleBrandedButton(id: string): HTMLButtonElement {
   btn.type = "button";
   btn.id = id;
   btn.className = "auth-google-btn";
-  btn.setAttribute("aria-label", "Sign in with Google");
+  btn.setAttribute("aria-label", "المتابعة بحساب Google");
   btn.appendChild(googleSignInSvg());
   const label = document.createElement("span");
   label.className = "auth-google-label";
-  label.textContent = "Sign in with Google";
+  label.textContent = "المتابعة بحساب Google";
+  btn.appendChild(label);
+  return btn;
+}
+
+function mailOutlineSvg(): SVGSVGElement {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("class", "auth-email-method-svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "20");
+  svg.setAttribute("height", "20");
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS(ns, "path");
+  p.setAttribute(
+    "d",
+    "M4 6h16v12H4V6zm2 0 6 4 6-4H6zm-2 2.2V18h16V8.2l-8 5.3-8-5.3z",
+  );
+  p.setAttribute("fill", "currentColor");
+  svg.appendChild(p);
+  return svg;
+}
+
+function emailMethodButton(id: string): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.id = id;
+  btn.className = "auth-email-method-btn";
+  btn.setAttribute("aria-label", "المتابعة بالبريد الإلكتروني وكلمة المرور");
+  btn.appendChild(mailOutlineSvg());
+  const label = document.createElement("span");
+  label.className = "auth-email-method-label";
+  label.textContent = "البريد الإلكتروني وكلمة المرور";
   btn.appendChild(label);
   return btn;
 }
@@ -81,6 +118,8 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   let step: AuthUiStep = passwordResetOob ? "reset_password" : "method_select";
   let pendingLink: InstanceType<typeof FahemProviderLinkError> | null = null;
   let emailSignupMode = false;
+  /** يُنسَخ إلى حقل «نسيت كلمة المرور» عند الانتقال من مسار الاسترداد السريع */
+  let forgotEmailPrefill = "";
 
   const state = getAuthState();
 
@@ -150,6 +189,13 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     return userFacingAuthMessage(error);
   };
 
+  const restoreEmailSubmitAppearance = (button: HTMLButtonElement): void => {
+    if (!button.classList.contains("auth-modal-email-submit")) return;
+    button.textContent = emailSignupMode ? "إنشاء الحساب" : "تسجيل الدخول";
+    button.id = emailSignupMode ? "auth-modal-signup" : "auth-modal-login";
+    button.setAttribute("aria-label", emailSignupMode ? "إنشاء حساب جديد" : "تسجيل الدخول");
+  };
+
   const withLoading = async (
     button: HTMLButtonElement | null,
     action: () => Promise<void>,
@@ -172,7 +218,11 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     } finally {
       if (document.body.contains(overlay)) {
         button.disabled = false;
-        button.textContent = prev;
+        if (button.classList.contains("auth-modal-email-submit")) {
+          restoreEmailSubmitAppearance(button);
+        } else {
+          button.textContent = prev;
+        }
       }
     }
   };
@@ -199,7 +249,11 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     } finally {
       if (document.body.contains(overlay)) {
         button.disabled = false;
-        button.textContent = prev;
+        if (button.classList.contains("auth-modal-email-submit")) {
+          restoreEmailSubmitAppearance(button);
+        } else {
+          button.textContent = prev;
+        }
       }
     }
   };
@@ -290,10 +344,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       });
       wrap.appendChild(gMain);
 
-      const btnEmail = document.createElement("button");
-      btnEmail.type = "button";
-      btnEmail.className = "ui-btn ui-btn--ghost py-2 w-full";
-      btnEmail.textContent = "البريد وكلمة المرور";
+      const btnEmail = emailMethodButton("auth-modal-email-method");
       btnEmail.addEventListener("click", () => {
         step = "email_auth";
         renderDynamic();
@@ -317,26 +368,35 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     if (step === "email_auth") {
       const wrap = document.createElement("div");
       wrap.className = "auth-modal-form auth-modal-step-section";
+      wrap.id = "auth-panel-email";
+      wrap.setAttribute("role", "tabpanel");
+      wrap.setAttribute("aria-label", "نموذج البريد وكلمة المرور");
       backButton(wrap);
 
-      const modeRow = document.createElement("div");
-      modeRow.className = "auth-modal-mode-row";
-      const modeLabel = document.createElement("span");
-      modeLabel.className = "auth-modal-mode-label";
-      modeLabel.textContent = emailSignupMode ? "إنشاء حساب جديد" : "تسجيل الدخول";
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "auth-modal-text-link auth-modal-inline-link";
-      toggle.textContent = emailSignupMode ? "لديك حساب؟ تسجيل الدخول" : "لسه جديد؟ إنشاء حساب";
-      toggle.addEventListener("click", () => {
-        emailSignupMode = !emailSignupMode;
-        modeLabel.textContent = emailSignupMode ? "إنشاء حساب جديد" : "تسجيل الدخول";
-        toggle.textContent = emailSignupMode ? "لديك حساب؟ تسجيل الدخول" : "لسه جديد؟ إنشاء حساب";
-        setErrorMsg("");
-      });
-      modeRow.appendChild(modeLabel);
-      modeRow.appendChild(toggle);
-      wrap.appendChild(modeRow);
+      const tablist = document.createElement("div");
+      tablist.className = "auth-auth-tablist";
+      tablist.setAttribute("role", "tablist");
+      tablist.setAttribute("aria-label", "تسجيل الدخول أو إنشاء حساب");
+
+      const tabLogin = document.createElement("button");
+      tabLogin.type = "button";
+      tabLogin.className = "auth-auth-tab";
+      tabLogin.setAttribute("role", "tab");
+      tabLogin.id = "auth-tab-login";
+      tabLogin.setAttribute("aria-controls", "auth-panel-email");
+      tabLogin.textContent = "تسجيل الدخول";
+
+      const tabSignup = document.createElement("button");
+      tabSignup.type = "button";
+      tabSignup.className = "auth-auth-tab";
+      tabSignup.setAttribute("role", "tab");
+      tabSignup.id = "auth-tab-signup";
+      tabSignup.setAttribute("aria-controls", "auth-panel-email");
+      tabSignup.textContent = "إنشاء حساب";
+
+      tablist.appendChild(tabLogin);
+      tablist.appendChild(tabSignup);
+      wrap.appendChild(tablist);
 
       const lblE = document.createElement("label");
       lblE.className = "auth-modal-label";
@@ -369,20 +429,124 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       actions.className = "auth-modal-actions auth-modal-actions--stack";
       const submit = document.createElement("button");
       submit.type = "button";
-      submit.className = "ui-btn ui-btn--cta py-2";
+      submit.className = "ui-btn ui-btn--cta py-2 auth-modal-email-submit";
       submit.id = emailSignupMode ? "auth-modal-signup" : "auth-modal-login";
-      submit.textContent = emailSignupMode ? "إنشاء الحساب" : "تسجيل الدخول";
-      submit.addEventListener("click", () => {
-        void withLoading(submit, async () => {
-          if (emailSignupMode) {
-            await signupWithEmailPassword(requireEmail(), requirePassword());
+
+      const loginRecoveryRow = document.createElement("div");
+      loginRecoveryRow.className = "auth-modal-login-recovery";
+      loginRecoveryRow.style.display = "none";
+      const forgotQuick = document.createElement("button");
+      forgotQuick.type = "button";
+      forgotQuick.className = "auth-modal-recovery-btn";
+      forgotQuick.textContent = "نسيت كلمة المرور؟ إرسال رابط الاسترداد";
+      forgotQuick.addEventListener("click", () => {
+        forgotEmailPrefill = String(inpE.value ?? "").trim();
+        step = "forgot";
+        setErrorMsg("");
+        renderDynamic();
+      });
+      loginRecoveryRow.appendChild(forgotQuick);
+
+      const syncTabsAndSubmit = (): void => {
+        const signup = emailSignupMode;
+        tabLogin.setAttribute("aria-selected", signup ? "false" : "true");
+        tabSignup.setAttribute("aria-selected", signup ? "true" : "false");
+        tabLogin.setAttribute("tabindex", signup ? "-1" : "0");
+        tabSignup.setAttribute("tabindex", signup ? "0" : "-1");
+        wrap.setAttribute("aria-labelledby", signup ? "auth-tab-signup" : "auth-tab-login");
+        tabLogin.classList.toggle("auth-auth-tab--active", !signup);
+        tabSignup.classList.toggle("auth-auth-tab--active", signup);
+        submit.id = signup ? "auth-modal-signup" : "auth-modal-login";
+        submit.textContent = signup ? "إنشاء الحساب" : "تسجيل الدخول";
+        submit.setAttribute("aria-label", signup ? "إنشاء حساب جديد" : "تسجيل الدخول");
+        inpP.autocomplete = signup ? "new-password" : "current-password";
+        if (signup) {
+          loginRecoveryRow.style.display = "none";
+        }
+      };
+
+      syncTabsAndSubmit();
+
+      const focusTabForMode = (): void => {
+        (emailSignupMode ? tabSignup : tabLogin).focus();
+      };
+
+      tabLogin.addEventListener("click", () => {
+        if (emailSignupMode) {
+          emailSignupMode = false;
+          setErrorMsg("");
+          loginRecoveryRow.style.display = "none";
+          syncTabsAndSubmit();
+        }
+      });
+      tabSignup.addEventListener("click", () => {
+        if (!emailSignupMode) {
+          emailSignupMode = true;
+          setErrorMsg("");
+          loginRecoveryRow.style.display = "none";
+          syncTabsAndSubmit();
+        }
+      });
+
+      tablist.addEventListener("keydown", (ev) => {
+        if (ev.key !== "ArrowRight" && ev.key !== "ArrowLeft" && ev.key !== "Home" && ev.key !== "End") return;
+        ev.preventDefault();
+        if (ev.key === "Home") {
+          emailSignupMode = false;
+        } else if (ev.key === "End") {
+          emailSignupMode = true;
+        } else {
+          const isRtl = document.documentElement.getAttribute("dir") === "rtl";
+          const forward = isRtl ? ev.key === "ArrowLeft" : ev.key === "ArrowRight";
+          if (forward) {
+            emailSignupMode = true;
           } else {
-            await loginWithEmailPassword(requireEmail(), requirePassword());
+            emailSignupMode = false;
           }
-        });
+        }
+        setErrorMsg("");
+        loginRecoveryRow.style.display = "none";
+        syncTabsAndSubmit();
+        focusTabForMode();
+      });
+
+      submit.addEventListener("click", () => {
+        if (emailSignupMode) {
+          void withLoading(submit, async () => {
+            await signupWithEmailPassword(requireEmail(), requirePassword());
+          });
+          return;
+        }
+        void (async () => {
+          submit.disabled = true;
+          tabLogin.disabled = true;
+          tabSignup.disabled = true;
+          submit.textContent = "جاري التنفيذ...";
+          setErrorMsg("");
+          loginRecoveryRow.style.display = "none";
+          try {
+            await loginWithEmailPassword(requireEmail(), requirePassword());
+            options.onCompleted?.();
+            closeModal();
+          } catch (error) {
+            setErrorMsg(handleMaybeLinkError(error));
+            const code = readFirebaseErrorCode(error);
+            if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+              loginRecoveryRow.style.display = "flex";
+            }
+          } finally {
+            if (document.body.contains(overlay)) {
+              submit.disabled = false;
+              tabLogin.disabled = false;
+              tabSignup.disabled = false;
+              syncTabsAndSubmit();
+            }
+          }
+        })();
       });
       actions.appendChild(submit);
       wrap.appendChild(actions);
+      wrap.appendChild(loginRecoveryRow);
 
       dynamicRoot.appendChild(wrap);
       return;
@@ -406,6 +570,10 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       inp.type = "email";
       inp.className = "app-input w-full px-3 py-2";
       inp.autocomplete = "email";
+      if (forgotEmailPrefill) {
+        inp.value = forgotEmailPrefill;
+        forgotEmailPrefill = "";
+      }
       emailInputRef = inp;
 
       const sendBtn = document.createElement("button");
