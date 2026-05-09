@@ -6,7 +6,7 @@ import { normalizePastedJsonForParse } from "./jsonNormalize";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
-import { bootstrapMagicLinkOnLoad, cleanupEmailLinkLandingUrl, completeGoogleRedirectLogin, getAuthReadableStatus } from "./auth/authFlows";
+import { cleanupEmailLinkLandingUrl, completeGoogleRedirectLogin, getAuthReadableStatus } from "./auth/authFlows";
 import { readPasswordResetModeFromUrl } from "./auth/emailLinkUrl";
 import { getAuthState, subscribeAuthState } from "./auth/authStore";
 import { hydrateAuthSession } from "./auth/sessionSync";
@@ -4588,19 +4588,7 @@ void (async () => {
       },
     });
   } else {
-    const magicBootstrap = await bootstrapMagicLinkOnLoad().catch(() => ({ kind: "idle" as const }));
     await hydrateAuthSession();
-    if (magicBootstrap.kind === "needs_modal") {
-      openAuthModal({
-        forceEmailLinkCompletion: true,
-        magicLinkReasonCode: magicBootstrap.reason,
-        magicLinkFirebaseCode: magicBootstrap.firebaseCode,
-        onCompleted: () => {
-          cleanupEmailLinkLandingUrl();
-          render();
-        },
-      });
-    }
   }
 })();
 attachSocketAuthSync(

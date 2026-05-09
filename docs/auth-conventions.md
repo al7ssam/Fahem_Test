@@ -45,7 +45,7 @@
 
 - ممنوع استيراد `firebase/*` خارج `client/src/auth/*`.
 - أي شاشة UI تتعامل مع المصادقة تستخدم `authFlows` و`authStore` فقط.
-- Passwordless Email Link يستخدم `linkDomain` الحديث مع `handleCodeInApp=true`.
+- Forgot/Reset Password يستخدم `sendPasswordResetEmail` و`confirmPasswordReset` مع `handleCodeInApp=true` عند الحاجة.
 
 ## 9) CSRF / Cookies
 

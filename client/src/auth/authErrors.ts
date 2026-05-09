@@ -17,7 +17,6 @@ export class FahemProviderLinkError extends Error {
     public readonly scenario:
       | "signup_requires_google_link"
       | "signup_use_login"
-      | "signup_use_magic_link"
       | "google_requires_password_link"
       | "login_suggest_google_only",
     public readonly email: string,
@@ -41,8 +40,6 @@ export function userFacingAuthMessage(error: unknown): string {
         return "هذا البريد مرتبط بحساب Google. سجّل الدخول عبر Google مرة واحدة ثم نربط كلمة المرور التي اخترتها بنفس الحساب.";
       case "signup_use_login":
         return "هذا البريد مسجّل مسبقًا بكلمة مرور. استخدم «تسجيل الدخول» بدل إنشاء حساب.";
-      case "signup_use_magic_link":
-        return "هذا البريد مفعّل لتسجيل الدخول بالرابط السحري. استخدم خيار الرابط السحري أو سجّل عبر Google ثم أضف كلمة مرور من إعدادات الحساب.";
       case "google_requires_password_link":
         return "هذا البريد مسجّل بكلمة مرور. أدخل كلمة المرور أدناه لربط حساب Google بنفس الحساب.";
       case "login_suggest_google_only":
@@ -68,13 +65,9 @@ export function userFacingAuthMessage(error: unknown): string {
     "auth/email-already-in-use": "هذا البريد مستخدم مسبقًا.",
     "auth/credential-already-in-use": "هذه البيانات مرتبطة بحساب آخر.",
     "auth/provider-already-linked": "طريقة الدخول هذه مربوطة بالفعل.",
-    "auth/invalid-hosting-link-domain":
-      "إعداد نطاق رابط الاستضافة غير صحيح في بيئة التطبيق. راجع التوثيق أو أفرغ VITE_FIREBASE_LINK_DOMAIN.",
     "auth/quota-exceeded": "تجاوز حد إرسال البريد في Firebase. حاول لاحقًا.",
     auth_email_exists_login: "استخدم تسجيل الدخول لأن البريد مسجّل بكلمة مرور.",
-    auth_email_exists_magic_link: "هذا البريد يستخدم الرابط السحري. جرّب خيار الرابط السحري.",
     auth_signup_use_login_instead: "استخدم تسجيل الدخول بدل إنشاء حساب.",
-    missing_email_for_email_link: "أدخل البريد المطلوب.",
     missing_password: "أدخل كلمة المرور.",
     missing_password_confirm: "أكد كلمة المرور الجديدة.",
     password_mismatch: "كلمتا المرور غير متطابقتين.",

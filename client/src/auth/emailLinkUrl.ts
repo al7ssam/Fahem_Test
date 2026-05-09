@@ -25,31 +25,6 @@ export function cleanupEmailLinkLandingUrl(options: { preserveAuthIntent?: boole
   history.replaceState({}, "", next);
 }
 
-/**
- * Canonical continue URL for ActionCodeSettings.url — stable across SPA deep links.
- * Set VITE_FIREBASE_EMAIL_LINK_CONTINUE_URL on Render (e.g. https://your-app.onrender.com/).
- */
-export function buildMagicLinkContinueUrl(): URL {
-  const raw = String(import.meta.env.VITE_FIREBASE_EMAIL_LINK_CONTINUE_URL ?? "").trim();
-  if (raw) {
-    try {
-      const abs = raw.includes("://") ? raw : new URL(raw, window.location.origin).toString();
-      const u = new URL(abs);
-      u.searchParams.set("authAction", "emailLinkComplete");
-      return u;
-    } catch {
-      console.warn("[auth-trace]", { stage: "magic_link_continue_url_invalid_env", raw });
-    }
-  }
-  const landing = new URL("/", window.location.origin);
-  landing.searchParams.set("authAction", "emailLinkComplete");
-  return landing;
-}
-
-export function readEmailLinkOobCode(): string | null {
-  return new URLSearchParams(window.location.search).get("oobCode");
-}
-
 /** Continue URL for Firebase password reset emails (handleCodeInApp). */
 export function buildPasswordResetContinueUrl(): URL {
   const raw = String(import.meta.env.VITE_FIREBASE_EMAIL_RESET_CONTINUE_URL ?? "").trim();
@@ -61,17 +36,6 @@ export function buildPasswordResetContinueUrl(): URL {
       return u;
     } catch {
       console.warn("[auth-trace]", { stage: "password_reset_continue_url_invalid_env", raw });
-    }
-  }
-  const fallback = String(import.meta.env.VITE_FIREBASE_EMAIL_LINK_CONTINUE_URL ?? "").trim();
-  if (fallback) {
-    try {
-      const abs = fallback.includes("://") ? fallback : new URL(fallback, window.location.origin).toString();
-      const u = new URL(abs);
-      u.searchParams.set("authAction", "passwordReset");
-      return u;
-    } catch {
-      /* fall through */
     }
   }
   const landing = new URL("/", window.location.origin);

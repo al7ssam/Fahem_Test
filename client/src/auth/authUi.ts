@@ -1,35 +1,21 @@
-import { isSignInWithEmailLink } from "firebase/auth";
 import {
   cleanupEmailLinkLandingUrl,
-  completePasswordlessEmailLink,
   confirmPasswordResetFlow,
   getAuthReadableStatus,
-  getPendingEmailLinkEmail,
   loginWithEmailPassword,
   loginWithGoogle,
   logoutFlow,
   nextTraceId,
-  sendPasswordlessEmailLink,
   sendPasswordResetEmailFlow,
   signupWithEmailPassword,
 } from "./authFlows";
 import { FahemProviderLinkError, isFahemProviderLinkError, userFacingAuthMessage } from "./authErrors";
-import { getFirebaseAuth } from "./firebaseClient";
 import { getAuthState } from "./authStore";
 import { signInGoogleThenLinkPendingPassword, signInPasswordThenLinkPendingGoogle } from "./linkingFlows";
 
-type AuthUiStep =
-  | "method_select"
-  | "email_auth"
-  | "magic"
-  | "forgot"
-  | "link"
-  | "reset_password";
+type AuthUiStep = "method_select" | "email_auth" | "forgot" | "link" | "reset_password";
 
 export type OpenAuthModalOptions = {
-  forceEmailLinkCompletion?: boolean;
-  magicLinkReasonCode?: string;
-  magicLinkFirebaseCode?: string;
   /** عند العودة من بريد إعادة تعيين كلمة المرور (oobCode من Firebase). */
   passwordResetOobCode?: string;
   onCompleted?: () => void;
@@ -86,41 +72,13 @@ function googleBrandedButton(id: string): HTMLButtonElement {
   return btn;
 }
 
-function magicLinkRecoverHint(reasonCode?: string): string | null {
-  if (!reasonCode || reasonCode === "missing_email_for_email_link") {
-    return "أدخل نفس عنوان البريد الذي طلبت الرابط له. إذا فتح الرابط على جهاز آخر، لن يكون البريد محفوظًا — أكمل الإدخال يدويًا ثم استخدم زر إكمال الرابط.";
-  }
-  if (reasonCode === "magic_link_invalid_url" || reasonCode === "magic_link_expired_or_stripped_query") {
-    return "تأكد أن النطاق مضاف في Authorized domains وأن عنوان المتابعة (continue URL) يطابق مستضيفك؛ افتح الرابط مباشرة من الرسالة دون مانع أو قصّ لـ ? في المتصفح.";
-  }
-  if (reasonCode === "magic_link_already_in_progress") {
-    return "هناك إكمال قائم الآن؛ انتظر قليلًا ثم جرّب مرة واحدة.";
-  }
-  return null;
-}
-
-function makeInitialMagicError(reasonCode?: string, firebaseCode?: string): string {
-  if (firebaseCode) {
-    const e = Object.assign(new Error(""), { code: firebaseCode });
-    return userFacingAuthMessage(e);
-  }
-  return reasonCode ? userFacingAuthMessage(new Error(reasonCode)) : "";
-}
-
 export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   const existing = document.querySelector<HTMLElement>("#auth-modal-overlay");
   if (existing) existing.remove();
 
-  const hint = options.forceEmailLinkCompletion ? magicLinkRecoverHint(options.magicLinkReasonCode) : null;
-  const initialErr = options.forceEmailLinkCompletion ? makeInitialMagicError(options.magicLinkReasonCode, options.magicLinkFirebaseCode) : "";
-
   const passwordResetOob = String(options.passwordResetOobCode ?? "").trim();
 
-  let step: AuthUiStep = passwordResetOob
-    ? "reset_password"
-    : options.forceEmailLinkCompletion
-      ? "magic"
-      : "method_select";
+  let step: AuthUiStep = passwordResetOob ? "reset_password" : "method_select";
   let pendingLink: InstanceType<typeof FahemProviderLinkError> | null = null;
   let emailSignupMode = false;
 
@@ -152,15 +110,10 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   subtitleEl.className = "auth-modal-subtitle";
   subtitleEl.textContent = `الحالة الحالية: ${getAuthReadableStatus()}`;
 
-  const hintEl = document.createElement("p");
-  hintEl.className = "auth-modal-hint text-sm text-slate-500 m-2";
-  if (options.forceEmailLinkCompletion && hint) hintEl.textContent = hint;
-
   const errorEl = document.createElement("p");
   errorEl.id = "auth-modal-error";
   errorEl.className = "auth-modal-error";
   errorEl.setAttribute("aria-live", "polite");
-  if (initialErr) errorEl.textContent = initialErr;
 
   const dynamicRoot = document.createElement("div");
   dynamicRoot.id = "auth-modal-dynamic";
@@ -170,7 +123,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   dialog.appendChild(closeBtn);
   dialog.appendChild(titleEl);
   dialog.appendChild(subtitleEl);
-  if (options.forceEmailLinkCompletion && hint) dialog.appendChild(hintEl);
   dialog.appendChild(errorEl);
   dialog.appendChild(dynamicRoot);
 
@@ -184,12 +136,10 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   };
 
   function onEscapeDown(ev: KeyboardEvent): void {
-    // إغلاق كامل؛ للرجوع بين الخطوات يستخدم زر «رجوع».
     if (ev.key === "Escape" && document.body.contains(overlay)) closeModal();
   }
   window.addEventListener("keydown", onEscapeDown);
 
-  /** يعامل أخطاء الربط بانتقال تلقائي لخطوة link ولا يعتبرها فشلًا نهائيًا إن لم تُكمَل بعد. */
   const handleMaybeLinkError = (error: unknown): string => {
     if (isFahemProviderLinkError(error)) {
       pendingLink = error;
@@ -227,7 +177,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     }
   };
 
-  /** نفس withLoading لكن لا يعيد توجيه Fahem إلى شاشة الربط (للزر داخل خطوة link). */
   const withLoadingStrict = async (
     button: HTMLButtonElement | null,
     action: () => Promise<void>,
@@ -262,7 +211,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
   const requireEmail = (): string => {
     const value = String(emailInputRef?.value ?? "").trim();
-    if (!value) throw new Error("missing_email_for_email_link");
+    if (!value) throw new Error("auth/invalid-email");
     return value;
   };
 
@@ -280,10 +229,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     b.addEventListener("click", () => {
       setErrorMsg("");
       if (pendingLink && step === "link") pendingLink = null;
-      if (options.forceEmailLinkCompletion && step === "magic") {
-        closeModal();
-        return;
-      }
       if (passwordResetOob && step === "reset_password") {
         closeModal();
         return;
@@ -353,18 +298,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
         step = "email_auth";
         renderDynamic();
       });
-
-      const btnMagic = document.createElement("button");
-      btnMagic.type = "button";
-      btnMagic.className = "ui-btn ui-btn--ghost py-2 w-full";
-      btnMagic.textContent = "رابط سحري للبريد";
-      btnMagic.addEventListener("click", () => {
-        step = "magic";
-        renderDynamic();
-      });
-
       wrap.appendChild(btnEmail);
-      wrap.appendChild(btnMagic);
 
       const forgot = document.createElement("button");
       forgot.type = "button";
@@ -413,7 +347,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       inpE.type = "email";
       inpE.className = "app-input w-full px-3 py-2";
       inpE.autocomplete = "email";
-      inpE.value = getPendingEmailLinkEmail();
       emailInputRef = inpE;
 
       const lblP = document.createElement("label");
@@ -455,53 +388,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       return;
     }
 
-    if (step === "magic") {
-      const wrap = document.createElement("div");
-      wrap.className = "auth-modal-form auth-modal-step-section";
-      if (!options.forceEmailLinkCompletion) backButton(wrap);
-
-      const lbl = document.createElement("label");
-      lbl.className = "auth-modal-label";
-      lbl.htmlFor = "auth-modal-magic-email";
-      lbl.textContent = "البريد للرابط السحري";
-      const inp = document.createElement("input");
-      inp.id = "auth-modal-magic-email";
-      inp.type = "email";
-      inp.className = "app-input w-full px-3 py-2";
-      inp.autocomplete = "email";
-      inp.value = getPendingEmailLinkEmail();
-      emailInputRef = inp;
-
-      wrap.appendChild(lbl);
-      wrap.appendChild(inp);
-
-      const go = document.createElement("button");
-      go.type = "button";
-      go.className = "ui-btn ui-btn--cta w-full py-2";
-      go.id = "auth-modal-email-link";
-      go.textContent = options.forceEmailLinkCompletion ? "إكمال الرابط السحري" : "إرسال رابط سحري";
-      go.addEventListener("click", () => {
-        if (options.forceEmailLinkCompletion) {
-          void withLoading(go, async () => {
-            await completePasswordlessEmailLink(requireEmail());
-          });
-          return;
-        }
-        void withLoading(
-          go,
-          () => sendPasswordlessEmailLink(requireEmail()),
-          {
-            closeOnSuccess: false,
-            successMessage:
-              "تم إرسال الرابط. افتح البريد واضغط الرابط؛ إذا وُجهت لتسجيل الدخول أكمل الإيميل هنا وأعد المحاولة عند الحاجة.",
-          },
-        );
-      });
-      wrap.appendChild(go);
-      dynamicRoot.appendChild(wrap);
-      return;
-    }
-
     if (step === "forgot") {
       const wrap = document.createElement("div");
       wrap.className = "auth-modal-form auth-modal-step-section";
@@ -529,8 +415,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       sendBtn.addEventListener("click", () => {
         void withLoadingStrict(sendBtn, () => sendPasswordResetEmailFlow(requireEmail()), {
           closeOnSuccess: false,
-          successMessage:
-            "إن وُجد حساب لهذا البريد سيصلُك رابط إعادة التعيين. راجع أيضًا مجلد الرسائل غير المرغوبة.",
+          successMessage: "إن وُجد حساب لهذا البريد سيصلُك رابط إعادة التعيين. راجع أيضًا مجلد الرسائل غير المرغوبة.",
         });
       });
 
@@ -609,17 +494,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
           );
         });
         wrap.appendChild(linkBtn);
-      } else if (pendingLink.scenario === "signup_use_magic_link") {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "ui-btn ui-btn--cta w-full py-2";
-        btn.textContent = "الانتقال لرابط سحري";
-        btn.addEventListener("click", () => {
-          pendingLink = null;
-          step = "magic";
-          renderDynamic();
-        });
-        wrap.appendChild(btn);
       } else if (pendingLink.scenario === "signup_use_login") {
         const btn = document.createElement("button");
         btn.type = "button";
@@ -705,16 +579,16 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       save.textContent = "حفظ كلمة المرور";
       save.addEventListener("click", () => {
         const a = String(newPasswordRef?.value ?? "").trim();
-        const b = String(newPasswordConfirmRef?.value ?? "").trim();
+        const b2 = String(newPasswordConfirmRef?.value ?? "").trim();
         if (!a) {
           setErrorMsg(userFacingAuthMessage(new Error("missing_password")));
           return;
         }
-        if (!b) {
+        if (!b2) {
           setErrorMsg(userFacingAuthMessage(new Error("missing_password_confirm")));
           return;
         }
-        if (a !== b) {
+        if (a !== b2) {
           setErrorMsg(userFacingAuthMessage(new Error("password_mismatch")));
           return;
         }
@@ -756,7 +630,6 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
   document.body.appendChild(overlay);
 
-  // للمستخدم المسجّل: العنوان والحالة من snapshot وقت الفتح — نعيد بناء لوحة الحساب فقط
   if (state.status === "authenticated" && state.user) {
     renderDynamic();
     closeBtn.focus();
@@ -765,20 +638,5 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     const focusAfterOpen: HTMLElement | null =
       emailInputRef ?? newPasswordRef ?? overlay.querySelector<HTMLElement>("#auth-modal-google-main");
     focusAfterOpen?.focus();
-  }
-
-  if (options.forceEmailLinkCompletion) {
-    queueMicrotask(() => {
-      void (async () => {
-        const auth = await getFirebaseAuth();
-        if (!isSignInWithEmailLink(auth, window.location.href)) return;
-        const email = getPendingEmailLinkEmail().trim();
-        if (!email || !overlay.isConnected) return;
-        const btn = overlay.querySelector<HTMLButtonElement>("#auth-modal-email-link");
-        await withLoading(btn, async () => {
-          await completePasswordlessEmailLink(email.trim().toLowerCase());
-        });
-      })();
-    });
   }
 }

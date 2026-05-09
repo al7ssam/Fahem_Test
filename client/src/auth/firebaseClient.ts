@@ -15,7 +15,6 @@ type FirebaseRuntimeConfig = {
   appId: string;
   messagingSenderId?: string;
   measurementId?: string;
-  linkDomain?: string;
   useEmulator?: boolean;
 };
 
@@ -39,7 +38,6 @@ export function getFirebaseConfig(): FirebaseRuntimeConfig {
     appId: readRequiredEnv("VITE_FIREBASE_APP_ID"),
     messagingSenderId: String(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID ?? "").trim() || undefined,
     measurementId: String(import.meta.env.VITE_FIREBASE_MEASUREMENT_ID ?? "").trim() || undefined,
-    linkDomain: String(import.meta.env.VITE_FIREBASE_LINK_DOMAIN ?? "").trim() || undefined,
     useEmulator: String(import.meta.env.VITE_FIREBASE_AUTH_EMULATOR ?? "").trim() === "1",
   };
   return firebaseConfigCache;

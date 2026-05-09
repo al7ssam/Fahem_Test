@@ -51,12 +51,12 @@
 
 - جميع استدعاءات Firebase Web SDK محصورة داخل `client/src/auth/*`.
 - `client/src/auth/authStore.ts` هو مصدر الحالة الموحد (loading/authenticated/unauthenticated/error).
-- `client/src/auth/authFlows.ts` يدير Google + Email/Password + Passwordless Email Link ويجري تبادل التوكن مع `/api/auth/exchange`.
+- `client/src/auth/authFlows.ts` يدير Google + Email/Password + Forgot/Reset Password ويجري تبادل التوكن مع `/api/auth/exchange`.
 - `client/src/auth/sessionSync.ts` ينفذ session restore deterministic عند bootstrap.
 - `client/src/auth/socketSync.ts` يمنع socket sessions قديمة بعد logout/expiration.
 
-## Passwordless Policy (Modern)
+## Password Reset Policy
 
-- تفعيل Email Link يعتمد `ActionCodeSettings.linkDomain` (Hosting link domain).
-- لا نعتمد `dynamicLinkDomain` (deprecated).
-- إكمال رابط الدخول يتم عبر `signInWithEmailLink` ثم exchange مع الباك-إند لإصدار جلسة داخلية.
+- إعادة التعيين تستخدم `sendPasswordResetEmail` مع `handleCodeInApp=true`.
+- تأكيد إعادة التعيين يتم عبر `confirmPasswordReset`.
+- الواجهة تنظف query params (`mode`, `oobCode`, ...) بعد إنهاء العملية لضمان عدم إعادة تنفيذ الأكواد.

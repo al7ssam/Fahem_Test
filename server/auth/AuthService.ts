@@ -182,10 +182,12 @@ export class AuthService {
     if (session.userId !== payload.sub) throw new AuthError("session_subject_mismatch");
     const userStatus = await getUserStatus(session.userId);
     if (userStatus !== "active") throw new AuthError("user_inactive");
+    /** أدوار فعلية من DB — لا نعتمد على claim الـ JWT حتى تنطبق تحديثات RBAC بدون إعادة تبادل. */
+    const roles = await listUserRoleKeys(payload.sub);
     return {
       userId: payload.sub,
       sessionId: payload.sid,
-      roles: payload.roles,
+      roles,
     };
   }
 
