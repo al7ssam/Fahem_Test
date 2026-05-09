@@ -300,8 +300,20 @@ export async function rotateSessionRefreshTokenHash(
   sessionId: string,
   expectedRefreshTokenHash: string,
   nextRefreshTokenHash: string,
+  slidingExpiresAt?: Date,
 ): Promise<boolean> {
   const pool = getPool();
+  if (slidingExpiresAt) {
+    const result = await pool.query(
+      `UPDATE public.user_sessions
+       SET refresh_token_hash = $3, updated_at = NOW(), expires_at = $4
+       WHERE id = $1::uuid
+         AND refresh_token_hash = $2
+         AND revoked_at IS NULL`,
+      [sessionId, expectedRefreshTokenHash, nextRefreshTokenHash, slidingExpiresAt.toISOString()],
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
   const result = await pool.query(
     `UPDATE public.user_sessions
      SET refresh_token_hash = $3, updated_at = NOW()

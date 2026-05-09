@@ -5,24 +5,26 @@ let refreshPromise: Promise<boolean> | null = null;
 async function tryRefreshTokens(): Promise<boolean> {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
-  const tokens = getAuthTokens();
-  if (!tokens?.refreshToken) return false;
-  const csrfToken = readCookie("fahem_csrf_token");
-  const r = await fetch("/api/auth/refresh", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
-    },
-    credentials: "include",
-    body: JSON.stringify({ refreshToken: tokens.refreshToken }),
-  });
-  if (!r.ok) return false;
-  const body = (await r.json()) as { accessToken?: string; refreshToken?: string };
-  if (!body.accessToken || !body.refreshToken) return false;
-  saveAuthTokens({ accessToken: body.accessToken, refreshToken: body.refreshToken });
-  window.dispatchEvent(new CustomEvent("fahem:auth-tokens-refreshed"));
-  return true;
+    const tokens = getAuthTokens();
+    /** الويب يضع refresh في كوكي HttpOnly فقط؛ الخادم يقبل التحديث من الكوكي إذا كان الجسم فارغاً. */
+    const refreshFromStorage = tokens?.refreshToken?.trim();
+    const payload = refreshFromStorage ? { refreshToken: refreshFromStorage } : {};
+    const csrfToken = readCookie("fahem_csrf_token");
+    const r = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(csrfToken ? { "X-CSRF-Token": csrfToken } : {}),
+      },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) return false;
+    const body = (await r.json()) as { accessToken?: string; refreshToken?: string };
+    if (!body.accessToken || !body.refreshToken) return false;
+    saveAuthTokens({ accessToken: body.accessToken, refreshToken: body.refreshToken });
+    window.dispatchEvent(new CustomEvent("fahem:auth-tokens-refreshed"));
+    return true;
   })().finally(() => {
     refreshPromise = null;
   });

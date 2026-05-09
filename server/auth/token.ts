@@ -3,9 +3,28 @@ import jwt from "jsonwebtoken";
 import { config } from "../config";
 import type { AccessTokenPayload, RefreshTokenPayload } from "./types";
 
-const ACCESS_TTL_SECONDS = 15 * 60;
-const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60;
-const WEB_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+/** ثوانٍ؛ يُقبل عدداً صحيحاً موجباً من process.env أو القيمة الافتراضية، مع سقف أمان */
+function parseEnvSeconds(key: string, defaultSeconds: number, maxSeconds: number): number {
+  const raw = process.env[key];
+  if (raw == null || String(raw).trim() === "") return defaultSeconds;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return defaultSeconds;
+  return Math.min(Math.floor(n), maxSeconds);
+}
+
+const DEFAULT_REFRESH_SEC = 30 * 24 * 60 * 60;
+const REFRESH_TTL_SECONDS = parseEnvSeconds(
+  "FAHEM_REFRESH_TTL_SECONDS",
+  DEFAULT_REFRESH_SEC,
+  365 * 24 * 60 * 60,
+);
+const ACCESS_TTL_SECONDS = parseEnvSeconds("FAHEM_ACCESS_TTL_SECONDS", 15 * 60, 24 * 60 * 60);
+/** كوكي refresh/csrf للويب؛ افتراضياً مساوٍ لصلاحية التحديث حتى لا يُحذف الكوكي قبل صف الجلسة في DB */
+const WEB_SESSION_TTL_SECONDS = parseEnvSeconds(
+  "FAHEM_WEB_SESSION_TTL_SECONDS",
+  REFRESH_TTL_SECONDS,
+  365 * 24 * 60 * 60,
+);
 
 function requireJwtSecret(): string {
   const secret = config.authJwtSecret.trim();

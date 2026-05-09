@@ -146,7 +146,13 @@ export class AuthService {
       sid: payload.sid,
       typ: "refresh",
     });
-    const rotated = await rotateSessionRefreshTokenHash(payload.sid, presentedHash, hashToken(nextRefreshToken));
+    const slidingExpiresAt = new Date(Date.now() + getRefreshTtlSeconds() * 1000);
+    const rotated = await rotateSessionRefreshTokenHash(
+      payload.sid,
+      presentedHash,
+      hashToken(nextRefreshToken),
+      slidingExpiresAt,
+    );
     if (!rotated) {
       await revokeSession(payload.sid, "refresh_rotation_conflict");
       await logAuthEvent({
