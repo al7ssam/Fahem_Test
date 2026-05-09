@@ -317,7 +317,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
       const profileSlot = document.createElement("div");
       profileSlot.className =
-        "auth-modal-profile-slot max-h-[min(65vh,520px)] overflow-y-auto overflow-x-hidden pb-2";
+        "auth-modal-profile-slot max-h-[min(82svh,540px)] overflow-y-auto overflow-x-hidden pb-1 -mx-1 px-1";
       dynamicRoot.appendChild(profileSlot);
 
       void mountProfileEditor(profileSlot, {

@@ -1,7 +1,8 @@
 const cache = new Map<string, string>();
 
+/** من `client/src/profile` إلى `node_modules` في جذر المشروع (وليس `client/src/node_modules`). */
 const loaders = import.meta.glob(
-  "../node_modules/country-flag-icons/string/3x2/*.js",
+  "../../../node_modules/country-flag-icons/string/3x2/*.js",
 ) as Record<string, () => Promise<{ default: string }>>;
 
 function loaderKeyForCountryCode(code: string): string | undefined {

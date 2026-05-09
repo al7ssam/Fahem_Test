@@ -821,7 +821,7 @@ function render(): void {
         ? `<label class="block text-right text-sm text-slate-400">اسمك في اللعبة (اختياري)</label>
               <input id="name-input" maxlength="32" type="text" placeholder="اتركه فارغاً لاستخدام «مجهول» دون اسم محفوظ" class="app-input w-full px-4 py-3 text-right text-lg" />
               <p class="text-xs text-slate-500 text-right m-0">إن لم يُعرَض لك حقلاً للاسم، سيُستخدم «مجهول» في التحدي حتى يتوفر اسم من الملف أو الحساب.</p>`
-        : `<p class="text-sm text-slate-400 text-right m-0">يُعرَض اسمك في اللعب من <strong>الملف الشخصي</strong> وحسابك. افتح <strong>الحساب والملف الشخصي</strong> لتعديل الاسم أو الدولة.</p>`;
+        : "";
     app.append(
       el(`
         <div class="app-screen min-h-screen text-white flex flex-col items-center justify-center p-4">

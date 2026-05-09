@@ -76,42 +76,43 @@ export async function mountProfileEditor(
   let searchQuery = "";
 
   container.innerHTML = `
-    <div class="app-card p-6 space-y-5 text-right profile-editor-root">
-      <p class="text-sm text-slate-400 m-0">يمكنك إكمال معلوماتك لاحقاً؛ لا يُعطل ذلك اللعب.</p>
-      <div class="space-y-2">
-        <label class="block text-sm text-slate-400" for="pf-first">الاسم الأول</label>
-        <input id="pf-first" class="app-input w-full px-4 py-3 text-right text-lg" maxlength="120" type="text"
-          value="${escapeHtml(p.firstName ?? "")}" autocomplete="given-name" />
+    <div class="app-card p-3 sm:p-4 space-y-2 sm:space-y-3 text-right profile-editor-root text-sm">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3">
+        <div class="space-y-1 min-w-0">
+          <label class="block text-[11px] text-slate-500 leading-tight" for="pf-first">الاسم الأول</label>
+          <input id="pf-first" class="app-input w-full px-2.5 py-1.5 text-right text-sm" maxlength="120" type="text"
+            value="${escapeHtml(p.firstName ?? "")}" autocomplete="given-name" />
+        </div>
+        <div class="space-y-1 min-w-0">
+          <label class="block text-[11px] text-slate-500 leading-tight" for="pf-last">اسم العائلة (اختياري)</label>
+          <input id="pf-last" class="app-input w-full px-2.5 py-1.5 text-right text-sm" maxlength="120" type="text"
+            value="${escapeHtml(p.lastName ?? "")}" autocomplete="family-name" />
+        </div>
       </div>
-      <div class="space-y-2">
-        <label class="block text-sm text-slate-400" for="pf-last">اسم العائلة (اختياري)</label>
-        <input id="pf-last" class="app-input w-full px-4 py-3 text-right text-lg" maxlength="120" type="text"
-          value="${escapeHtml(p.lastName ?? "")}" autocomplete="family-name" />
-      </div>
-      <fieldset class="space-y-2 border-0 p-0 m-0">
-        <legend class="block text-sm text-slate-400 mb-2">تاريخ الميلاد (اختياري)</legend>
-        <div class="grid grid-cols-3 gap-2">
+      <fieldset class="space-y-1 border-0 p-0 m-0">
+        <legend class="block text-[11px] text-slate-500 mb-1">تاريخ الميلاد (اختياري)</legend>
+        <div class="grid grid-cols-3 gap-1.5">
           <div>
             <label class="sr-only" for="pf-day">اليوم</label>
-            <select id="pf-day" class="app-input w-full px-2 py-2 text-right"></select>
+            <select id="pf-day" class="app-input w-full px-1.5 py-1 text-right text-xs"></select>
           </div>
           <div>
             <label class="sr-only" for="pf-month">الشهر</label>
-            <select id="pf-month" class="app-input w-full px-2 py-2 text-right"></select>
+            <select id="pf-month" class="app-input w-full px-1.5 py-1 text-right text-xs"></select>
           </div>
           <div>
             <label class="sr-only" for="pf-year">السنة</label>
-            <select id="pf-year" class="app-input w-full px-2 py-2 text-right"></select>
+            <select id="pf-year" class="app-input w-full px-1.5 py-1 text-right text-xs"></select>
           </div>
         </div>
       </fieldset>
-      <div class="space-y-2 relative">
-        <span class="block text-sm text-slate-400">الدولة</span>
+      <div class="space-y-1 relative">
+        <span class="block text-[11px] text-slate-500">الدولة</span>
         <div id="country-picker-root" class="relative"></div>
       </div>
-      <p id="pf-err" class="text-red-400 text-sm min-h-[1.25rem]"></p>
-      <p id="pf-ok" class="text-emerald-400 text-sm min-h-[1.25rem]"></p>
-      <button type="button" id="pf-save" class="ui-btn ui-btn--cta w-full py-3 text-lg">حفظ</button>
+      <p id="pf-err" class="text-red-400 text-xs min-h-[1rem] m-0"></p>
+      <p id="pf-ok" class="text-emerald-400 text-xs min-h-[1rem] m-0"></p>
+      <button type="button" id="pf-save" class="ui-btn ui-btn--cta w-full py-2 text-sm font-semibold">حفظ</button>
     </div>`;
 
   const slot = container;
@@ -202,12 +203,12 @@ export async function mountProfileEditor(
       const li = document.createElement("li");
       li.role = "option";
       li.tabIndex = -1;
-      li.className = `flex flex-row-reverse items-center gap-2 px-2 py-2 rounded-lg cursor-pointer hover:bg-white/5 ${
+      li.className = `flex flex-row-reverse items-center gap-1.5 px-1.5 py-1 rounded-md cursor-pointer hover:bg-white/5 ${
         row.code === countryCode ? "bg-white/10" : ""
       }`;
       li.dataset.code = row.code;
       const flagSpan = document.createElement("span");
-      flagSpan.className = "country-flag-slot w-10 h-7 shrink-0 inline-flex items-center justify-center";
+      flagSpan.className = "country-flag-slot w-8 h-[1.35rem] shrink-0 inline-flex items-center justify-center";
       flagSpan.setAttribute("aria-hidden", "true");
       const lab = document.createElement("span");
       lab.className = "flex-1 text-right";
@@ -228,16 +229,16 @@ export async function mountProfileEditor(
   function mountPicker(): void {
     pickerRoot.innerHTML = `
       <div class="country-picker-wrap">
-        <button type="button" id="country-picker-toggle" class="app-input w-full px-3 py-3 text-right flex flex-row-reverse items-center gap-3 justify-between"
+        <button type="button" id="country-picker-toggle" class="app-input w-full px-2 py-1.5 text-right text-sm flex flex-row-reverse items-center gap-2 justify-between"
           aria-haspopup="listbox" aria-expanded="${pickerOpen ? "true" : "false"}">
-          <span id="country-flag-btn" class="country-flag-slot shrink-0 w-10 h-7 inline-flex items-center justify-center" aria-hidden="true"></span>
+          <span id="country-flag-btn" class="country-flag-slot shrink-0 w-8 h-[1.35rem] inline-flex items-center justify-center" aria-hidden="true"></span>
           <span id="country-picker-label" class="flex-1 truncate">${escapeHtml(names[countryCode] ?? countryCode)}</span>
-          <span class="text-slate-400 text-sm">${pickerOpen ? "▲" : "▼"}</span>
+          <span class="text-slate-400 text-xs">${pickerOpen ? "▲" : "▼"}</span>
         </button>
-        <div id="country-picker-panel" class="${pickerOpen ? "" : "hidden"} absolute z-[100] mt-1 w-full rounded-xl border border-white/10 bg-slate-900 shadow-xl p-2 left-0 right-0 max-h-[70vh] overflow-visible">
-          <input id="country-search" type="search" class="app-input w-full px-3 py-2 mb-2 text-right" placeholder="ابحث عن الدولة…"
+        <div id="country-picker-panel" class="${pickerOpen ? "" : "hidden"} absolute z-[100] mt-1 w-full rounded-lg border border-white/10 bg-slate-900 shadow-xl p-1.5 left-0 right-0 max-h-[min(55vh,320px)] overflow-visible">
+          <input id="country-search" type="search" class="app-input w-full px-2 py-1.5 mb-1.5 text-right text-sm" placeholder="ابحث عن الدولة…"
             value="${escapeHtml(searchQuery)}" autocomplete="off" />
-          <ul id="country-ul" role="listbox" class="max-h-60 overflow-y-auto space-y-1 pr-1"></ul>
+          <ul id="country-ul" role="listbox" class="max-h-40 sm:max-h-48 overflow-y-auto space-y-0.5 pr-0.5 text-sm"></ul>
           <p id="country-live" class="sr-only" aria-live="polite"></p>
         </div>
       </div>`;
