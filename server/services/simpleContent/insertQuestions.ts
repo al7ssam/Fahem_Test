@@ -1,7 +1,7 @@
 import { getPool } from "../../db/pool";
-import type { FactoryQuestion } from "../aiFactory/types";
+import type { NormalizedQuestion } from "./questionJson";
 
-export async function insertSimpleContentQuestions(questions: FactoryQuestion[]): Promise<number[]> {
+export async function insertSimpleContentQuestions(questions: NormalizedQuestion[]): Promise<number[]> {
   const pool = getPool();
   const client = await pool.connect();
   const ids: number[] = [];

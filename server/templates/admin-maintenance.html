@@ -43,21 +43,6 @@
         <div id="cl-msg" class="msg"></div>
       </section>
 
-      <section class="panel">
-        <h3>تنظيف سجلات الذكاء الاصطناعي</h3>
-        <div class="grid">
-          <label><span class="muted">تفعيل الحذف التلقائي</span><br><input id="af-enabled" type="checkbox" /></label>
-          <label><span class="muted">عدد أيام الصلاحية</span><br><input id="af-days" type="number" min="1" max="3650" /></label>
-          <label><span class="muted">آخر تشغيل</span><br><input id="af-last" disabled /></label>
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button id="af-load">تحميل</button>
-          <button id="af-save">حفظ</button>
-          <button id="af-preview">معاينة الحذف</button>
-          <button id="af-run" class="danger">تنفيذ الحذف الآن</button>
-        </div>
-        <div id="af-msg" class="msg"></div>
-      </section>
     </div>
     <script>
       (function () {
@@ -71,14 +56,8 @@
         async function previewCleanup(){ try{ var j=await api("/api/admin/cleanup/preview","POST",{}); msg("cl-msg","المعاينة: سيُحذف "+j.expiredCount+" سؤال.",true);}catch{msg("cl-msg","تعذر المعاينة.",false);} }
         async function runCleanup(){ if(!confirm("سيتم حذف الأسئلة المنتهية الآن. متابعة؟")) return; try{ var j=await api("/api/admin/cleanup/run","POST",{}); msg("cl-msg","تم الحذف: "+j.deletedCount+" سؤال.",true); await loadCleanup();}catch{msg("cl-msg","تعذر التنفيذ.",false);} }
 
-        async function loadAiLogs(){ try{ var j=await api("/api/admin/ai-factory-logs-cleanup-settings","GET"); $("af-enabled").checked=!!j.autoDeleteEnabled; $("af-days").value=j.deletionThresholdDays; $("af-last").value=j.lastRunDate||"—"; msg("af-msg","تم التحميل.",true);}catch{msg("af-msg","تعذر التحميل.",false);} }
-        async function saveAiLogs(){ try{ await api("/api/admin/ai-factory-logs-cleanup-settings","PATCH",{autoDeleteEnabled:$("af-enabled").checked,deletionThresholdDays:Number($("af-days").value||30)}); msg("af-msg","تم الحفظ.",true);}catch{msg("af-msg","تعذر الحفظ.",false);} }
-        async function previewAiLogs(){ try{ var j=await api("/api/admin/ai-factory-logs-cleanup/preview","POST",{}); msg("af-msg","المعاينة: "+j.expiredCount+" سجل.",true);}catch{msg("af-msg","تعذر المعاينة.",false);} }
-        async function runAiLogs(){ if(!confirm("سيتم حذف سجلات الذكاء الاصطناعي الآن. متابعة؟")) return; try{ var j=await api("/api/admin/ai-factory-logs-cleanup/run","POST",{}); msg("af-msg","تم الحذف: "+j.deletedCount+" سجل.",true); await loadAiLogs();}catch{msg("af-msg","تعذر التنفيذ.",false);} }
-
         $("cache-bust").addEventListener("click", async function(){ try{ var j=await api("/api/admin/cache-bust","POST",{}); msg("global-msg","تم تحديث الإصدار: "+String(j.releaseVersion||""),true);}catch{msg("global-msg","تعذر تحديث الكاش.",false);} });
         $("cl-load").addEventListener("click",loadCleanup); $("cl-save").addEventListener("click",saveCleanup); $("cl-preview").addEventListener("click",previewCleanup); $("cl-run").addEventListener("click",runCleanup);
-        $("af-load").addEventListener("click",loadAiLogs); $("af-save").addEventListener("click",saveAiLogs); $("af-preview").addEventListener("click",previewAiLogs); $("af-run").addEventListener("click",runAiLogs);
       })();
     </script>
   </body>

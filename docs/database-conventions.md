@@ -20,7 +20,7 @@
 - صحيح:
   - `SELECT key, value FROM public.app_settings WHERE key = $1`
   - `DELETE FROM public.simple_content_runs WHERE id = $1`
-  - `INSERT INTO public.ai_factory_jobs (...) VALUES (...)`
+  - `INSERT INTO public.simple_content_runs (...) VALUES (...)`
 - خاطئ:
   - `SELECT key, value FROM app_settings WHERE key = $1`
   - `DELETE FROM simple_content_runs WHERE id = $1`

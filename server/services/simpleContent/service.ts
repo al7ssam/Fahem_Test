@@ -1,5 +1,9 @@
-import { extractJsonArray, normalizeFactoryQuestionsLenient } from "../aiFactory/utils";
-import type { FactoryDifficulty, FactoryQuestion } from "../aiFactory/types";
+import {
+  extractJsonArray,
+  normalizeSimpleContentQuestionsLenient,
+  type NormalizedQuestion,
+  type SimpleContentDifficultyMode,
+} from "./questionJson";
 import { readSubcategoryEditorContext } from "./context";
 import {
   buildDraftPromptSystemMessage,
@@ -67,7 +71,7 @@ function chooseDifficulty(mode: "mix" | "easy" | "medium" | "hard", index: numbe
 function buildUserPromptBlock(input: {
   promptBody: string;
   subcategoryKey: string;
-  difficultyMode: FactoryDifficulty;
+  difficultyMode: SimpleContentDifficultyMode;
   batchSize: number;
 }): string {
   return [
@@ -82,7 +86,7 @@ function buildUserPromptBlock(input: {
 
 export async function buildFinalSimpleContentPromptForAdmin(input: {
   subcategoryKey: string;
-  difficultyMode: FactoryDifficulty;
+  difficultyMode: SimpleContentDifficultyMode;
   batchSize: number;
 }): Promise<{ prompt: string }> {
   const promptBody = await getPromptBody(input.subcategoryKey);
@@ -284,12 +288,12 @@ async function llmNormalizeToFinalQuestions(
   input: {
     subcategoryKey: string;
     batchSize: number;
-    difficultyMode: FactoryDifficulty;
+    difficultyMode: SimpleContentDifficultyMode;
     preset: SimpleContentPreset;
     userPrompt: string;
   },
   snap: LlmSnap,
-): Promise<{ modelText: string; finishReason: string | null; finalQuestions: FactoryQuestion[] }> {
+): Promise<{ modelText: string; finishReason: string | null; finalQuestions: NormalizedQuestion[] }> {
   const provider = resolveSimpleContentProvider(input.preset);
   const out = await provider.complete({ prompt: input.userPrompt }, input.preset);
   snap.usage = out.usage ?? null;
@@ -301,7 +305,7 @@ async function llmNormalizeToFinalQuestions(
   if (!arr) {
     throw new Error("invalid_json_output:layer=simple_content");
   }
-  const normalized = normalizeFactoryQuestionsLenient(arr, {
+  const normalized = normalizeSimpleContentQuestionsLenient(arr, {
     fallbackSubcategoryKey: input.subcategoryKey,
     forcedDifficultyMode: input.difficultyMode,
   });
@@ -409,7 +413,7 @@ export async function generatePromptDraft(
 export async function runSimpleContentGenerate(input: {
   subcategoryKey: string;
   batchSize: number;
-  difficultyMode: FactoryDifficulty;
+  difficultyMode: SimpleContentDifficultyMode;
   presetId: number;
   triggerKind: "manual" | "scheduled";
 }): Promise<{ runId: number; inserted: number }> {
@@ -482,7 +486,7 @@ export async function runSimpleContentGenerate(input: {
 export async function runSimpleContentGeneratePreview(input: {
   subcategoryKey: string;
   batchSize: number;
-  difficultyMode: FactoryDifficulty;
+  difficultyMode: SimpleContentDifficultyMode;
   presetId: number;
 }): Promise<{ runId: number; questionCount: number }> {
   const preset = await getPresetById(input.presetId);
@@ -559,7 +563,7 @@ export async function commitSimpleContentRun(runId: number): Promise<{ inserted:
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new Error("simple_content_commit_empty");
   }
-  const questions = raw as FactoryQuestion[];
+  const questions = raw as NormalizedQuestion[];
   const questionIds = await insertSimpleContentQuestions(questions);
   await finalizeSimpleContentRun(runId, {
     status: "succeeded",

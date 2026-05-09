@@ -3,7 +3,11 @@
  * Run: npx tsx server/scripts/verifyRefinerScenarios.ts
  */
 import assert from "node:assert/strict";
-import { tryParseRefinerPatches, extractJsonArray, normalizeFactoryQuestion } from "../services/aiFactory/utils";
+import {
+  tryParseRefinerPatches,
+  extractJsonArray,
+  normalizeStrictQuestion,
+} from "../services/simpleContent/questionJson";
 
 function shouldRunFactoryRefiner(validationErrorsCount: number, requiresRefine: boolean): boolean {
   return validationErrorsCount > 0 || requiresRefine;
@@ -18,7 +22,7 @@ const patchJson = `{"patches":[{"index":1,"question":{"prompt":"Q2","options":["
 const parsed = tryParseRefinerPatches(patchJson);
 assert.ok(parsed);
 assert.equal(parsed!.patches.length, 1);
-const q = normalizeFactoryQuestion(parsed!.patches[0]!.question, 1);
+const q = normalizeStrictQuestion(parsed!.patches[0]!.question, 1);
 assert.equal(q.prompt, "Q2");
 
 const arrOnly = `[{"prompt":"A","options":["x","y"],"correctIndex":0,"studyBody":"p+w+t","subcategoryKey":"s","difficulty":"easy","questionType":"procedural"}]`;

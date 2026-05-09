@@ -613,11 +613,25 @@
           </div>
 
           <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
-            <h2 style="font-size: 0.88rem; margin: 0 0 0.35rem">إدارة التسعير</h2>
-            <p class="hint" style="margin: 0">
-              تم نقل إدارة تسعير النماذج بالكامل إلى صفحة الأدمن الرئيسية ضمن قسم
-              <strong>إدارة تسعير النماذج (OpenAI + Google)</strong>.
+            <h2 style="font-size: 0.88rem; margin: 0 0 0.35rem">إدارة التسعير (OpenAI + Google)</h2>
+            <p class="hint" style="margin: 0 0 0.5rem">
+              نفس واجهة <code>/api/admin/pricing/models</code> المستخدمة في الإدارة الموحّدة. عدّل JSON ثم احفظ.
             </p>
+            <div class="row" style="align-items: stretch; flex-wrap: wrap; gap: 0.75rem">
+              <label style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 0.25rem">
+                <span class="hint">OpenAI</span>
+                <textarea id="sc-pricing-openai" rows="10" style="width: 100%; font-family: ui-monospace, monospace; font-size: 0.78rem"></textarea>
+              </label>
+              <label style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 0.25rem">
+                <span class="hint">Google</span>
+                <textarea id="sc-pricing-google" rows="10" style="width: 100%; font-family: ui-monospace, monospace; font-size: 0.78rem"></textarea>
+              </label>
+            </div>
+            <div class="row" style="margin-top: 0.5rem">
+              <button type="button" class="btn btn-secondary" id="sc-pricing-load">تحميل التسعير</button>
+              <button type="button" class="btn" id="sc-pricing-save">حفظ التسعير</button>
+            </div>
+            <p class="hint" id="sc-pricing-msg" style="margin-top: 0.35rem"></p>
           </div>
 
           <div class="card" style="margin-top: 0.35rem; background: rgba(0, 0, 0, 0.22)">
@@ -1924,6 +1938,47 @@
           }
         });
 
+        function setPricingMsg(t, ok) {
+          var el = document.getElementById("sc-pricing-msg");
+          if (!el) return;
+          el.textContent = t || "";
+          el.style.color = ok ? "#34d399" : "#f87171";
+        }
+        document.getElementById("sc-pricing-load").addEventListener("click", async function () {
+          try {
+            var res = await fetch("/api/admin/pricing/models", hdr());
+            var j = await res.json();
+            if (res.ok && j.ok) {
+              document.getElementById("sc-pricing-openai").value = JSON.stringify(j.openai || {}, null, 2);
+              document.getElementById("sc-pricing-google").value = JSON.stringify(j.google || {}, null, 2);
+              setPricingMsg("تم تحميل التسعير.", true);
+            } else {
+              setPricingMsg("تعذر تحميل التسعير.", false);
+            }
+          } catch (e) {
+            setPricingMsg("تعذر تحميل التسعير.", false);
+          }
+        });
+        document.getElementById("sc-pricing-save").addEventListener("click", async function () {
+          try {
+            var openai = JSON.parse(document.getElementById("sc-pricing-openai").value || "{}");
+            var google = JSON.parse(document.getElementById("sc-pricing-google").value || "{}");
+            var res = await fetch("/api/admin/pricing/models", {
+              method: "PUT",
+              credentials: "same-origin",
+              headers: hdr().headers,
+              body: JSON.stringify({ openai: openai, google: google }),
+            });
+            var j = await res.json();
+            if (res.ok && j.ok) {
+              setPricingMsg("تم حفظ التسعير.", true);
+            } else {
+              setPricingMsg((j && j.error) || "تعذر الحفظ.", false);
+            }
+          } catch (e) {
+            setPricingMsg("JSON غير صالح أو فشل الحفظ.", false);
+          }
+        });
 
         document.getElementById("sc-runs-cleanup-save").addEventListener("click", async function () {
           var days = parseInt(String(document.getElementById("sc-runs-cleanup-days").value || ""), 10);

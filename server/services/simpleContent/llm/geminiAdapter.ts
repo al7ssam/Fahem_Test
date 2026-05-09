@@ -1,4 +1,4 @@
-import { extractGeminiFinishReason, runGeminiOneShot } from "../../aiFactory/modelManager";
+import { extractGeminiFinishReason, runGeminiOneShot } from "../../llm/geminiOneShot";
 import type { SimpleContentPreset } from "../types";
 import type { LLMCompletionInput, LLMCompletionOutput, SimpleContentLLMProvider } from "./types";
 

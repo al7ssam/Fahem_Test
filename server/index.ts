@@ -5,16 +5,13 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { GameManager } from "./game/GameManager";
 import {
-  maybeRunStartupAiFactoryLogsCleanup,
   maybeRunStartupCleanup,
   maybeRunStartupSimpleContentPricingAuditCleanup,
   maybeRunStartupSimpleContentRunsCleanup,
-  performAiFactoryLogsCleanup,
   performCleanup,
   performSimpleContentPricingAuditCleanup,
   performSimpleContentRunsCleanup,
 } from "./services/cleanup";
-import { aiFactoryRuntime } from "./services/aiFactory/runtime";
 import { startSimpleContentScheduler, stopSimpleContentScheduler } from "./services/simpleContent/scheduler";
 import { setReleaseVersionListener } from "./releaseVersionBus";
 import { authenticateSocket } from "./auth/socketAuth";
@@ -28,11 +25,6 @@ function scheduleCleanupCron(): void {
   cron.schedule("0 3 * * *", async () => {
     try {
       await performCleanup({ source: "cron" });
-    } catch {
-      // detailed log is emitted inside cleanup service
-    }
-    try {
-      await performAiFactoryLogsCleanup({ source: "cron" });
     } catch {
       // detailed log is emitted inside cleanup service
     }
@@ -77,11 +69,6 @@ async function startServer(): Promise<void> {
     // detailed log is emitted inside cleanup service
   }
   try {
-    await maybeRunStartupAiFactoryLogsCleanup();
-  } catch {
-    // detailed log is emitted inside cleanup service
-  }
-  try {
     await maybeRunStartupSimpleContentRunsCleanup();
   } catch {
     // detailed log is emitted inside cleanup service
@@ -91,7 +78,6 @@ async function startServer(): Promise<void> {
   } catch {
     // detailed log is emitted inside cleanup service
   }
-  await aiFactoryRuntime.start();
   startSimpleContentScheduler();
 
   scheduleCleanupCron();
@@ -103,11 +89,6 @@ async function startServer(): Promise<void> {
     setReleaseVersionListener(null);
     try {
       stopSimpleContentScheduler();
-    } catch {
-      // ignore
-    }
-    try {
-      await aiFactoryRuntime.stop();
     } catch {
       // ignore
     }

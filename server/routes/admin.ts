@@ -27,46 +27,26 @@ import {
 import { getResultMessages } from "../db/resultCopy";
 import { Match } from "../game/Match";
 import {
-  countExpiredAiFactoryLogs,
   countExpiredQuestions,
   countExpiredSimpleContentPricingAuditLogs,
   countExpiredSimpleContentRuns,
   getAiCleanupTableStats,
-  getAiFactoryLogsCleanupSettings,
   getCleanupSettings,
   getSimpleContentPricingAuditCleanupSettings,
   getSimpleContentRunsCleanupSettings,
-  performAiFactoryLogsCleanup,
   performCleanup,
   performSimpleContentPricingAuditCleanup,
   performSimpleContentRunsCleanup,
-  updateAiFactoryLogsCleanupSettings,
   updateCleanupSettings,
   updateSimpleContentPricingAuditCleanupSettings,
   updateSimpleContentRunsCleanupSettings,
 } from "../services/cleanup";
 import {
-  AI_FACTORY_AVAILABLE_MODELS,
-  AI_FACTORY_DEFAULT_API_KEY_ENV,
-  AI_FACTORY_DEFAULT_MODEL,
-  AI_FACTORY_AVAILABLE_REASONING_LEVELS,
-  AI_FACTORY_DEFAULT_REASONING_LEVEL,
-  AI_FACTORY_THINKING_LEVEL_MODEL_IDS,
-  getLayerConfigHealth,
-  listModelConfigs,
-  probeLayerModel,
-  saveModelConfig,
-} from "../services/aiFactory/modelManager";
-import {
   getRecentUsage,
   getUsageDailyCost,
   getUsageFilterOptions,
   getUsageSummary,
-} from "../services/aiFactory/usageAnalytics";
-import { buildFactoryJobEfficiencyReport } from "../services/aiFactory/efficiencyReport";
-import { getFactoryInspectionLogs, getFactoryJobErrorTimeline, getFactoryJobLogs, listFactoryJobs } from "../services/aiFactory/orchestrator";
-import { aiFactoryRuntime, readFactorySettings, saveFactorySettings } from "../services/aiFactory/runtime";
-import type { FactoryLayer } from "../services/aiFactory/types";
+} from "../services/usage/usageAnalytics";
 import {
   commitSimpleContentRun,
   buildFinalSimpleContentPromptForAdmin,
@@ -228,11 +208,6 @@ const cleanupSettingsPatchSchema = z.object({
   deletionThresholdDays: z.number().int().min(1).max(3650),
 });
 
-const aiFactoryLogsCleanupSettingsPatchSchema = z.object({
-  autoDeleteEnabled: z.boolean(),
-  deletionThresholdDays: z.number().int().min(1).max(3650),
-});
-
 const simpleContentRunsCleanupSettingsPatchSchema = z.object({
   autoDeleteEnabled: z.boolean(),
   deletionThresholdDays: z.number().int().min(1).max(3650),
@@ -241,29 +216,6 @@ const simpleContentRunsCleanupSettingsPatchSchema = z.object({
 const simpleContentPricingAuditCleanupSettingsPatchSchema = z.object({
   autoDeleteEnabled: z.boolean(),
   deletionThresholdDays: z.number().int().min(1).max(3650),
-});
-
-const factorySettingsPatchSchema = z.object({
-  enabled: z.boolean(),
-  batchSize: z.number().int().min(1).max(200),
-  intervalMinutes: z.number().int().min(1).max(1440),
-  defaultTargetCount: z.number().int().min(1).max(100000),
-  schedulerDifficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
-});
-
-const factoryRunNowSchema = z.object({
-  subcategoryKey: z.string().trim().min(1).max(120),
-  difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
-  targetCount: z.number().int().min(1).max(100000).optional(),
-  batchSize: z.number().int().min(1).max(200).optional(),
-});
-
-const factoryHealthProbeSchema = z.object({
-  layerName: z.enum(["architect", "creator", "auditor", "refiner"]).optional(),
-});
-
-const factoryCancelJobSchema = z.object({
-  jobId: z.number().int().min(1).optional(),
 });
 
 const simpleContentSubKeySchema = z.string().trim().min(1).max(120);
@@ -332,17 +284,6 @@ const unifiedPricingPutSchema = z.object({
       }),
     ),
   }),
-});
-
-const factoryModelPatchSchema = z.object({
-  layerName: z.enum(["architect", "creator", "auditor", "refiner"]),
-  provider: z.string().trim().min(1).max(50),
-  modelName: z.enum(AI_FACTORY_AVAILABLE_MODELS),
-  apiKeyEnv: z.string().trim().min(1).max(120),
-  temperature: z.number().min(0).max(2),
-  maxOutputTokens: z.number().int().min(256).max(65536),
-  isEnabled: z.boolean(),
-  reasoningLevel: z.enum(AI_FACTORY_AVAILABLE_REASONING_LEVELS),
 });
 
 const questionPatchSchema = z.object({
@@ -537,10 +478,6 @@ function adminTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin.html");
 }
 
-function adminInspectionTemplatePath(): string {
-  return path.join(process.cwd(), "server", "templates", "admin-ai-inspection.html");
-}
-
 function adminUsageAnalyticsTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-usage-analytics.html");
 }
@@ -569,10 +506,6 @@ function adminMaintenanceTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-maintenance.html");
 }
 
-function adminAiOpsTemplatePath(): string {
-  return path.join(process.cwd(), "server", "templates", "admin-ai-ops.html");
-}
-
 function adminNavPartialPath(): string {
   return path.join(process.cwd(), "server", "templates", "partials", "admin-nav.html");
 }
@@ -596,10 +529,8 @@ type AdminNavPageId =
   | "categories"
   | "matchBalance"
   | "lessons"
-  | "aiOps"
   | "simpleContent"
   | "usageAnalytics"
-  | "aiInspection"
   | "maintenance";
 
 type AdminNavLinkRow = {
@@ -624,10 +555,8 @@ const ADMIN_NAV_LINK_ROWS: AdminNavLinkRow[] = [
   { id: "categories", href: "/admin/categories", labelAr: "تصنيفات نمط المذاكرة", groupKey: "content" },
   { id: "matchBalance", href: "/admin/match-balance", labelAr: "موازنة المباراة", groupKey: "match" },
   { id: "lessons", href: "/admin/lessons", labelAr: "إدارة الدروس", groupKey: "lessons" },
-  { id: "aiOps", href: "/admin/ai-ops", labelAr: "AI Ops", groupKey: "ai" },
   { id: "simpleContent", href: "/admin/simple-content", labelAr: "المسار البسيط", groupKey: "ai" },
   { id: "usageAnalytics", href: "/admin/usage-analytics", labelAr: "تحليلات الاستخدام", groupKey: "ai" },
-  { id: "aiInspection", href: "/admin/ai-inspection", labelAr: "فحص الوظائف", groupKey: "ai" },
   { id: "maintenance", href: "/admin/maintenance", labelAr: "الصيانة والتنظيف", groupKey: "maintenance" },
 ];
 
@@ -712,13 +641,6 @@ function readAdminHtml(questionCount: number | null): string {
   });
 }
 
-function readAdminInspectionHtml(questionCount: number | null): string {
-  return applyAdminTemplate(fs.readFileSync(adminInspectionTemplatePath(), "utf8"), {
-    questionCount,
-    nav: "aiInspection",
-  });
-}
-
 function readAdminUsageAnalyticsHtml(questionCount: number | null): string {
   return applyAdminTemplate(fs.readFileSync(adminUsageAnalyticsTemplatePath(), "utf8"), {
     questionCount,
@@ -765,13 +687,6 @@ function readAdminMaintenanceHtml(questionCount: number | null): string {
   return applyAdminTemplate(fs.readFileSync(adminMaintenanceTemplatePath(), "utf8"), {
     questionCount,
     nav: "maintenance",
-  });
-}
-
-function readAdminAiOpsHtml(questionCount: number | null): string {
-  return applyAdminTemplate(fs.readFileSync(adminAiOpsTemplatePath(), "utf8"), {
-    questionCount,
-    nav: "aiOps",
   });
 }
 
@@ -1238,16 +1153,6 @@ export function registerAdminRoutes(app: Express): void {
     }
   });
 
-  app.get("/admin/ai-inspection", async (_req: Request, res: Response) => {
-    try {
-      const total = await countQuestions();
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.status(200).send(readAdminInspectionHtml(total));
-    } catch {
-      res.status(500).send("تعذر تحميل صفحة فحص الذكاء الاصطناعي.");
-    }
-  });
-
   app.get("/admin/usage-analytics", async (_req: Request, res: Response) => {
     try {
       const total = await countQuestions();
@@ -1315,16 +1220,6 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminMaintenanceHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة الصيانة.");
-    }
-  });
-
-  app.get("/admin/ai-ops", async (_req: Request, res: Response) => {
-    try {
-      const total = await countQuestions();
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.status(200).send(readAdminAiOpsHtml(total));
-    } catch {
-      res.status(500).send("تعذر تحميل صفحة الذكاء الاصطناعي والتكلفة.");
     }
   });
 
@@ -1699,402 +1594,6 @@ export function registerAdminRoutes(app: Express): void {
       });
     } catch {
       res.status(500).json({ ok: false, error: "cleanup_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory-logs-cleanup-settings", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const settings = await getAiFactoryLogsCleanupSettings();
-      res.json({
-        ok: true,
-        autoDeleteEnabled: settings.autoDeleteEnabled,
-        deletionThresholdDays: settings.deletionThresholdDays,
-        lastRunDate: settings.lastRunDate,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
-    }
-  });
-
-  app.patch("/api/admin/ai-factory-logs-cleanup-settings", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const parsed = aiFactoryLogsCleanupSettingsPatchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({
-        ok: false,
-        error: "invalid_body",
-        issues: zodIssuesSummary(parsed.error),
-      });
-      return;
-    }
-    try {
-      const settings = await updateAiFactoryLogsCleanupSettings(parsed.data);
-      res.json({
-        ok: true,
-        autoDeleteEnabled: settings.autoDeleteEnabled,
-        deletionThresholdDays: settings.deletionThresholdDays,
-        lastRunDate: settings.lastRunDate,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "update_failed" });
-    }
-  });
-
-  app.post("/api/admin/ai-factory-logs-cleanup/preview", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const settings = await getAiFactoryLogsCleanupSettings();
-      const counts = await countExpiredAiFactoryLogs(settings.deletionThresholdDays);
-      res.json({
-        ok: true,
-        deletionThresholdDays: settings.deletionThresholdDays,
-        jobLogsExpiredCount: counts.jobLogsDeletedCount,
-        inspectionLogsExpiredCount: counts.inspectionLogsDeletedCount,
-        expiredCount: counts.totalDeletedCount,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "preview_failed" });
-    }
-  });
-
-  app.post("/api/admin/ai-factory-logs-cleanup/run", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const result = await performAiFactoryLogsCleanup({ source: "manual", forceRun: true });
-      res.json({
-        ok: true,
-        deletionThresholdDays: result.thresholdDays,
-        jobLogsDeletedCount: result.jobLogsDeletedCount,
-        inspectionLogsDeletedCount: result.inspectionLogsDeletedCount,
-        deletedCount: result.totalDeletedCount,
-        runDate: result.runDate,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "cleanup_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory/settings", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const settings = await readFactorySettings();
-      res.json({ ok: true, ...settings });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
-    }
-  });
-
-  app.patch("/api/admin/ai-factory/settings", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const parsed = factorySettingsPatchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({
-        ok: false,
-        error: "invalid_body",
-        issues: zodIssuesSummary(parsed.error),
-      });
-      return;
-    }
-    try {
-      const settings = await saveFactorySettings(parsed.data);
-      res.json({ ok: true, ...settings });
-    } catch {
-      res.status(500).json({ ok: false, error: "update_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory/models", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const models = await listModelConfigs();
-      res.json({
-        ok: true,
-        models,
-        availableModels: AI_FACTORY_AVAILABLE_MODELS,
-        defaultModel: AI_FACTORY_DEFAULT_MODEL,
-        defaultApiKeyEnv: AI_FACTORY_DEFAULT_API_KEY_ENV,
-        availableReasoningLevels: AI_FACTORY_AVAILABLE_REASONING_LEVELS,
-        defaultReasoningLevel: AI_FACTORY_DEFAULT_REASONING_LEVEL,
-        thinkingLevelSupportedModelIds: [...AI_FACTORY_THINKING_LEVEL_MODEL_IDS],
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory/health/config", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const layers: FactoryLayer[] = ["architect", "creator", "auditor", "refiner"];
-      const items = await Promise.all(layers.map((layer) => getLayerConfigHealth(layer)));
-      res.json({ ok: true, items });
-    } catch (error) {
-      res.status(500).json({
-        ok: false,
-        error: "read_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
-      });
-    }
-  });
-
-  app.post("/api/admin/ai-factory/health/probe", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const parsed = factoryHealthProbeSchema.safeParse(req.body ?? {});
-    if (!parsed.success) {
-      res.status(400).json({
-        ok: false,
-        error: "invalid_body",
-        issues: zodIssuesSummary(parsed.error),
-      });
-      return;
-    }
-    try {
-      const targets: FactoryLayer[] = parsed.data.layerName
-        ? [parsed.data.layerName as FactoryLayer]
-        : ["architect", "creator", "auditor", "refiner"];
-      const items = await Promise.all(targets.map((layer) => probeLayerModel(layer)));
-      res.json({ ok: true, items });
-    } catch (error) {
-      res.status(500).json({
-        ok: false,
-        error: "probe_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
-      });
-    }
-  });
-
-  app.patch("/api/admin/ai-factory/models", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const body = req.body as { models?: unknown } | undefined;
-    const list = Array.isArray(body?.models) ? body?.models : [req.body];
-    const parsed: Array<z.infer<typeof factoryModelPatchSchema>> = [];
-    for (const item of list) {
-      const one = factoryModelPatchSchema.safeParse(item);
-      if (!one.success) {
-        res.status(400).json({
-          ok: false,
-          error: "invalid_body",
-          issues: zodIssuesSummary(one.error),
-        });
-        return;
-      }
-      parsed.push(one.data);
-    }
-    try {
-      for (const m of parsed) {
-        await saveModelConfig({
-          layerName: m.layerName as FactoryLayer,
-          provider: m.provider,
-          modelName: m.modelName,
-          apiKeyEnv: m.apiKeyEnv,
-          temperature: m.temperature,
-          maxOutputTokens: m.maxOutputTokens,
-          isEnabled: m.isEnabled,
-          reasoningLevel: m.reasoningLevel,
-        });
-      }
-      res.json({ ok: true });
-    } catch (error) {
-      res.status(500).json({
-        ok: false,
-        error: "update_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
-      });
-    }
-  });
-
-  app.post("/api/admin/ai-factory/run-now", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const parsed = factoryRunNowSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({
-        ok: false,
-        error: "invalid_body",
-        issues: zodIssuesSummary(parsed.error),
-      });
-      return;
-    }
-    try {
-      const settings = await readFactorySettings();
-      const result = await aiFactoryRuntime.runNow({
-        subcategoryKey: parsed.data.subcategoryKey,
-        difficultyMode: parsed.data.difficultyMode,
-        targetCount: parsed.data.targetCount ?? settings.defaultTargetCount,
-        batchSize: parsed.data.batchSize ?? settings.batchSize,
-      });
-      res.json({ ok: true, jobId: result.jobId });
-    } catch (error) {
-      res.status(500).json({
-        ok: false,
-        error: "run_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
-      });
-    }
-  });
-
-  app.post("/api/admin/ai-factory/jobs/cancel-all", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const result = await aiFactoryRuntime.cancelAllJobs();
-      res.json({ ok: true, ...result });
-    } catch (error) {
-      res.status(500).json({
-        ok: false,
-        error: "cancel_all_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
-      });
-    }
-  });
-
-  app.post("/api/admin/ai-factory/jobs/cancel-queued", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const result = await aiFactoryRuntime.cancelQueuedOnly();
-      res.json({ ok: true, ...result });
-    } catch (error) {
-      res.status(500).json({
-        ok: false,
-        error: "cancel_queued_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
-      });
-    }
-  });
-
-  app.post("/api/admin/ai-factory/jobs/:id/cancel", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const routeId = Number(req.params.id);
-    const body = factoryCancelJobSchema.safeParse(req.body ?? {});
-    const bodyId = body.success ? Number(body.data.jobId ?? 0) : 0;
-    const id = Number.isInteger(routeId) && routeId > 0 ? routeId : bodyId;
-    if (!Number.isInteger(id) || id < 1) {
-      res.status(400).json({ ok: false, error: "invalid_id" });
-      return;
-    }
-    try {
-      const result = await aiFactoryRuntime.cancelJob(id);
-      res.json({ ok: true, ...result });
-    } catch (error) {
-      res.status(500).json({
-        ok: false,
-        error: "cancel_job_failed",
-        reason: error instanceof Error ? error.message : "unknown_error",
-      });
-    }
-  });
-
-  app.get("/api/admin/ai-factory/status", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const [settings, runtime] = await Promise.all([
-        readFactorySettings(),
-        aiFactoryRuntime.getStatus(),
-      ]);
-      res.json({ ok: true, settings, runtime });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory/jobs", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
-    try {
-      const items = await listFactoryJobs(limit);
-      res.json({ ok: true, items });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory/jobs/:id/logs", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id < 1) {
-      res.status(400).json({ ok: false, error: "invalid_id" });
-      return;
-    }
-    try {
-      const logs = await getFactoryJobLogs(id);
-      res.json({ ok: true, logs });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory/jobs/:id/inspection", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id < 1) {
-      res.status(400).json({ ok: false, error: "invalid_id" });
-      return;
-    }
-    try {
-      const pool = getPool();
-      const jr = await pool.query<{
-        id: number;
-        subcategory_key: string;
-        difficulty_mode: "mix" | "easy" | "medium" | "hard";
-        status: string;
-        current_layer: string | null;
-        attempt_count: number;
-        max_attempts: number;
-        last_error: string | null;
-        final_output_json: unknown;
-        created_at: string;
-        started_at: string | null;
-        finished_at: string | null;
-      }>(
-        `SELECT id, subcategory_key, difficulty_mode, status, current_layer,
-                attempt_count, max_attempts, last_error, final_output_json, created_at, started_at, finished_at
-         FROM public.ai_factory_jobs
-         WHERE id = $1
-         LIMIT 1`,
-        [id],
-      );
-      const job = jr.rows[0];
-      if (!job) {
-        res.status(404).json({ ok: false, error: "not_found" });
-        return;
-      }
-      const layers = await getFactoryInspectionLogs(id);
-      const errorsTimeline = await getFactoryJobErrorTimeline(id);
-      res.json({
-        ok: true,
-        job: {
-          id: job.id,
-          subcategoryKey: job.subcategory_key,
-          difficultyMode: job.difficulty_mode,
-          status: job.status,
-          currentLayer: job.current_layer,
-          attemptCount: job.attempt_count,
-          maxAttempts: job.max_attempts,
-          lastError: job.last_error,
-          createdAt: job.created_at,
-          startedAt: job.started_at,
-          finishedAt: job.finished_at,
-        },
-        layers,
-        errorsTimeline,
-        finalOutput: job.final_output_json ?? null,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory/jobs/:id/efficiency", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const id = Number(req.params.id);
-    if (!Number.isInteger(id) || id < 1) {
-      res.status(400).json({ ok: false, error: "invalid_id" });
-      return;
-    }
-    try {
-      const report = await buildFactoryJobEfficiencyReport(id);
-      res.json({ ok: true, report });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
     }
   });
 

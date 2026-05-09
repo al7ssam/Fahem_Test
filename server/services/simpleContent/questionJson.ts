@@ -1,4 +1,29 @@
-import type { FactoryDifficulty, FactoryQuestion, FactoryValidationError } from "./types";
+/**
+ * استخراج مصفوفة JSON من نص النموذج وتطبيع أسئلة المسار البسيط (بدون اعتماد على مصنع الطبقات).
+ */
+
+export type SimpleContentDifficultyMode = "mix" | "easy" | "medium" | "hard";
+export type SimpleQuestionKind = "conceptual" | "procedural" | "application";
+
+/** سؤال مُطبَّع بعد توليد JSON — نفس شكل صف قاعدة البيانات المنطقي للمسار البسيط */
+export type NormalizedQuestion = {
+  prompt: string;
+  options: string[];
+  correctIndex: number;
+  studyBody: string;
+  subcategoryKey: string;
+  difficulty: "easy" | "medium" | "hard";
+  questionType: SimpleQuestionKind;
+};
+
+export type QuestionJsonValidationError = {
+  code: string;
+  field: string;
+  index: number;
+  message: string;
+  before?: unknown;
+  after?: unknown;
+};
 
 function normalizeJsonLikeText(input: string): string {
   return input
@@ -74,114 +99,7 @@ export function extractJsonArray(raw: string): unknown[] | null {
   return null;
 }
 
-function repairLikelyJsonObject(input: string): string {
-  const normalized = normalizeJsonLikeText(input);
-  const noFences = stripMarkdownFences(normalized);
-  return removeTrailingCommas(noFences).trim();
-}
-
-function tryParseJsonObjectCandidate(candidate: string, useRepair: boolean): Record<string, unknown> | null {
-  const payload = useRepair ? repairLikelyJsonObject(candidate) : candidate.trim();
-  if (!payload) return null;
-  try {
-    const parsed = JSON.parse(payload);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-/** Extract a single JSON object `{ ... }` from model text (fences, trailing commas). */
-export function extractJsonObject(raw: string): Record<string, unknown> | null {
-  const text = String(raw || "").trim();
-  if (!text) return null;
-
-  const blockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const firstBrace = text.indexOf("{");
-  const lastBrace = text.lastIndexOf("}");
-
-  const candidates: string[] = [text];
-  if (blockMatch?.[1]) candidates.push(blockMatch[1]);
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    candidates.push(text.slice(firstBrace, lastBrace + 1));
-  }
-
-  for (const c of candidates) {
-    const parsed = tryParseJsonObjectCandidate(c, false);
-    if (parsed) return parsed;
-  }
-  for (const c of candidates) {
-    const parsed = tryParseJsonObjectCandidate(c, true);
-    if (parsed) return parsed;
-  }
-  return null;
-}
-
-export type RefinerPatchRow = { index: number; question: unknown };
-
-/**
- * Parses optimized Refiner output: `{ "patches": [ { "index": n, "question": { ... } } ] }`.
- * Returns null if the payload is not that shape (caller may fall back to full-array parsing).
- */
-export function tryParseRefinerPatches(raw: string): { patches: RefinerPatchRow[] } | null {
-  const obj = extractJsonObject(raw);
-  if (!obj) return null;
-  if (!Array.isArray(obj.patches)) return null;
-  const patches: RefinerPatchRow[] = [];
-  for (const entry of obj.patches) {
-    if (!entry || typeof entry !== "object") return null;
-    const row = entry as Record<string, unknown>;
-    const index = Number(row.index);
-    if (!Number.isInteger(index) || index < 0) return null;
-    const q = row.question;
-    if (q === undefined || q === null || typeof q !== "object" || Array.isArray(q)) return null;
-    patches.push({ index, question: q });
-  }
-  return { patches };
-}
-
-export function normalizeFactoryQuestion(item: unknown, idx: number): FactoryQuestion {
-  if (!item || typeof item !== "object") {
-    throw new Error(`question_${idx + 1}_invalid_object`);
-  }
-  const o = item as Record<string, unknown>;
-  const prompt = String(o.prompt ?? "").trim();
-  const options = Array.isArray(o.options) ? o.options.map((x) => String(x ?? "").trim()) : [];
-  const correctIndex = Number(o.correctIndex ?? o.correct_index);
-  const studyBody = String(o.studyBody ?? o.study_body ?? "").trim();
-  const subcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
-  const difficulty = String(o.difficulty ?? "").trim().toLowerCase();
-  const questionType = mapQuestionTypeAlias(String(o.questionType ?? o.question_type ?? ""));
-
-  if (!prompt) throw new Error(`question_${idx + 1}_missing_prompt`);
-  if (!(options.length === 2 || options.length === 4)) {
-    throw new Error(`question_${idx + 1}_options_must_be_2_or_4`);
-  }
-  if (options.some((v) => !v)) throw new Error(`question_${idx + 1}_empty_option`);
-  if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= options.length) {
-    throw new Error(`question_${idx + 1}_invalid_correct_index`);
-  }
-  if (!studyBody) throw new Error(`question_${idx + 1}_missing_study_body`);
-  if (!subcategoryKey) throw new Error(`question_${idx + 1}_missing_subcategory_key`);
-  if (difficulty !== "easy" && difficulty !== "medium" && difficulty !== "hard") {
-    throw new Error(`question_${idx + 1}_invalid_difficulty`);
-  }
-  if (!questionType) throw new Error(`question_${idx + 1}_invalid_question_type`);
-  return {
-    prompt,
-    options,
-    correctIndex,
-    studyBody,
-    subcategoryKey,
-    difficulty,
-    questionType,
-  };
-}
-
-function mapDifficultyAlias(raw: string): FactoryQuestion["difficulty"] | null {
+export function mapDifficultyAlias(raw: string): NormalizedQuestion["difficulty"] | null {
   const v = String(raw || "").trim().toLowerCase();
   if (!v) return null;
   if (v === "easy" || v === "medium" || v === "hard") return v;
@@ -191,7 +109,7 @@ function mapDifficultyAlias(raw: string): FactoryQuestion["difficulty"] | null {
   return null;
 }
 
-function mapQuestionTypeAlias(raw: string): FactoryQuestion["questionType"] | null {
+export function mapQuestionTypeAlias(raw: string): SimpleQuestionKind | null {
   const v = String(raw || "").trim().toLowerCase();
   if (!v) return null;
   if (v === "conceptual" || v === "procedural" || v === "application") return v;
@@ -205,8 +123,8 @@ function mapQuestionTypeAlias(raw: string): FactoryQuestion["questionType"] | nu
 }
 
 function pushValidationError(
-  into: FactoryValidationError[],
-  input: Omit<FactoryValidationError, "index"> & { index: number },
+  into: QuestionJsonValidationError[],
+  input: Omit<QuestionJsonValidationError, "index"> & { index: number },
 ): void {
   into.push({
     code: input.code,
@@ -218,15 +136,15 @@ function pushValidationError(
   });
 }
 
-export function normalizeFactoryQuestionsLenient(
+export function normalizeSimpleContentQuestionsLenient(
   items: unknown[],
   options: {
     fallbackSubcategoryKey: string;
-    forcedDifficultyMode: FactoryDifficulty;
+    forcedDifficultyMode: SimpleContentDifficultyMode;
   },
-): { questions: FactoryQuestion[]; validationErrors: FactoryValidationError[] } {
-  const validationErrors: FactoryValidationError[] = [];
-  const questions: FactoryQuestion[] = [];
+): { questions: NormalizedQuestion[]; validationErrors: QuestionJsonValidationError[] } {
+  const validationErrors: QuestionJsonValidationError[] = [];
+  const questions: NormalizedQuestion[] = [];
 
   for (let idx = 0; idx < items.length; idx += 1) {
     const item = items[idx];
@@ -313,7 +231,7 @@ export function normalizeFactoryQuestionsLenient(
       });
     }
 
-    let difficulty: FactoryQuestion["difficulty"];
+    let difficulty: NormalizedQuestion["difficulty"];
     if (forcedDifficulty) {
       difficulty = forcedDifficulty;
       if (mappedDifficulty !== forcedDifficulty) {
@@ -351,7 +269,7 @@ export function normalizeFactoryQuestionsLenient(
       });
     }
 
-    let questionType: FactoryQuestion["questionType"];
+    let questionType: NormalizedQuestion["questionType"];
     if (mappedQuestionType) {
       questionType = mappedQuestionType;
       const rawQuestionType = String(o.questionType ?? o.question_type ?? "").trim().toLowerCase();
@@ -391,6 +309,109 @@ export function normalizeFactoryQuestionsLenient(
   return { questions, validationErrors };
 }
 
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function repairLikelyJsonObject(input: string): string {
+  const normalized = normalizeJsonLikeText(input);
+  const noFences = stripMarkdownFences(normalized);
+  return removeTrailingCommas(noFences).trim();
+}
+
+function tryParseJsonObjectCandidate(candidate: string, useRepair: boolean): Record<string, unknown> | null {
+  const payload = useRepair ? repairLikelyJsonObject(candidate) : candidate.trim();
+  if (!payload) return null;
+  try {
+    const parsed = JSON.parse(payload);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/** استخراج كائن JSON واحد `{ ... }` من نص النموذج */
+export function extractJsonObject(raw: string): Record<string, unknown> | null {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+
+  const blockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+
+  const candidates: string[] = [text];
+  if (blockMatch?.[1]) candidates.push(blockMatch[1]);
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(text.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const c of candidates) {
+    const parsed = tryParseJsonObjectCandidate(c, false);
+    if (parsed) return parsed;
+  }
+  for (const c of candidates) {
+    const parsed = tryParseJsonObjectCandidate(c, true);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+export type RefinerPatchRow = { index: number; question: unknown };
+
+/**
+ * تحليل مخرجات الـ Refiner: `{ "patches": [ { "index": n, "question": { ... } } ] }`.
+ */
+export function tryParseRefinerPatches(raw: string): { patches: RefinerPatchRow[] } | null {
+  const obj = extractJsonObject(raw);
+  if (!obj) return null;
+  if (!Array.isArray(obj.patches)) return null;
+  const patches: RefinerPatchRow[] = [];
+  for (const entry of obj.patches) {
+    if (!entry || typeof entry !== "object") return null;
+    const row = entry as Record<string, unknown>;
+    const index = Number(row.index);
+    if (!Number.isInteger(index) || index < 0) return null;
+    const q = row.question;
+    if (q === undefined || q === null || typeof q !== "object" || Array.isArray(q)) return null;
+    patches.push({ index, question: q });
+  }
+  return { patches };
+}
+
+/** تطبيع صارم لسؤال واحد (أخطاء تُرمى بدلاً من أخطاء تحقق لينِنت) */
+export function normalizeStrictQuestion(item: unknown, idx: number): NormalizedQuestion {
+  if (!item || typeof item !== "object") {
+    throw new Error(`question_${idx + 1}_invalid_object`);
+  }
+  const o = item as Record<string, unknown>;
+  const prompt = String(o.prompt ?? "").trim();
+  const options = Array.isArray(o.options) ? o.options.map((x) => String(x ?? "").trim()) : [];
+  const correctIndex = Number(o.correctIndex ?? o.correct_index);
+  const studyBody = String(o.studyBody ?? o.study_body ?? "").trim();
+  const subcategoryKey = String(o.subcategoryKey ?? o.subcategory_key ?? "").trim();
+  const difficulty = String(o.difficulty ?? "").trim().toLowerCase();
+  const questionType = mapQuestionTypeAlias(String(o.questionType ?? o.question_type ?? ""));
+
+  if (!prompt) throw new Error(`question_${idx + 1}_missing_prompt`);
+  if (!(options.length === 2 || options.length === 4)) {
+    throw new Error(`question_${idx + 1}_options_must_be_2_or_4`);
+  }
+  if (options.some((v) => !v)) throw new Error(`question_${idx + 1}_empty_option`);
+  if (!Number.isInteger(correctIndex) || correctIndex < 0 || correctIndex >= options.length) {
+    throw new Error(`question_${idx + 1}_invalid_correct_index`);
+  }
+  if (!studyBody) throw new Error(`question_${idx + 1}_missing_study_body`);
+  if (!subcategoryKey) throw new Error(`question_${idx + 1}_missing_subcategory_key`);
+  if (difficulty !== "easy" && difficulty !== "medium" && difficulty !== "hard") {
+    throw new Error(`question_${idx + 1}_invalid_difficulty`);
+  }
+  if (!questionType) throw new Error(`question_${idx + 1}_invalid_question_type`);
+  return {
+    prompt,
+    options,
+    correctIndex,
+    studyBody,
+    subcategoryKey,
+    difficulty,
+    questionType,
+  };
 }

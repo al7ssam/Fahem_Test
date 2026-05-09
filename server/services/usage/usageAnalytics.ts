@@ -1,5 +1,4 @@
 import { getPool } from "../../db/pool";
-import type { FactoryLayer } from "./types";
 
 const USD_TO_SAR_RATE = 3.75;
 const APP_KEY_PRICING_MODELS_GOOGLE_V1 = "pricing_models_google_v1";
@@ -188,7 +187,7 @@ logPricingVerificationSamples();
 export async function insertAiUsageLog(input: {
   jobId: number;
   modelId: string;
-  layerType: FactoryLayer;
+  layerType: string;
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
@@ -286,50 +285,26 @@ export async function getUsageSummary(filters: UsageFilters): Promise<{
 
   const qArgs: unknown[] = [];
   let qSql = `
-    SELECT COALESCE(SUM(COALESCE((j.result_summary->>'inserted')::int, 0)), 0)::bigint AS generated_questions
-    FROM public.ai_factory_jobs j
-    WHERE j.status = 'succeeded'
+    SELECT COALESCE(SUM(r.inserted_count), 0)::bigint AS generated_questions
+    FROM public.simple_content_runs r
+    WHERE r.status = 'succeeded'
   `;
   if (!filters.from && !filters.to) {
     qArgs.push(30);
-    qSql += ` AND j.created_at >= NOW() - ($1::text || ' days')::interval`;
+    qSql += ` AND r.finished_at >= NOW() - ($1::text || ' days')::interval`;
   } else {
     if (filters.from) {
       qArgs.push(filters.from);
-      qSql += ` AND j.created_at >= $${qArgs.length}::timestamptz`;
+      qSql += ` AND r.finished_at >= $${qArgs.length}::timestamptz`;
     }
     if (filters.to) {
       qArgs.push(filters.to);
-      qSql += ` AND j.created_at < ($${qArgs.length}::date + INTERVAL '1 day')`;
+      qSql += ` AND r.finished_at < ($${qArgs.length}::date + INTERVAL '1 day')`;
     }
-  }
-  const subClauses: string[] = [];
-  if (!filters.from && !filters.to) {
-    subClauses.push(`u.created_at >= NOW() - ($1::text || ' days')::interval`);
-  } else {
-    if (filters.from) {
-      qArgs.push(filters.from);
-      subClauses.push(`u.created_at >= $${qArgs.length}::timestamptz`);
-    }
-    if (filters.to) {
-      qArgs.push(filters.to);
-      subClauses.push(`u.created_at < ($${qArgs.length}::date + INTERVAL '1 day')`);
-    }
-  }
-  if (filters.subject) {
-    qArgs.push(filters.subject);
-    subClauses.push(`u.subject = $${qArgs.length}`);
   }
   if (filters.modelId) {
     qArgs.push(filters.modelId);
-    subClauses.push(`u.model_id = $${qArgs.length}`);
-  }
-  if (subClauses.length) {
-    qSql += ` AND EXISTS (
-      SELECT 1 FROM public.ai_usage_logs u
-      WHERE u.job_id = j.id
-        AND ${subClauses.join(" AND ")}
-    )`;
+    qSql += ` AND r.model_id = $${qArgs.length}`;
   }
   const questions = await pool.query<{ generated_questions: string }>(qSql, qArgs);
   const row = usage.rows[0];
@@ -387,7 +362,7 @@ export async function getRecentUsage(
     id: number;
     jobId: number;
     modelId: string;
-    layerType: FactoryLayer;
+    layerType: string;
     inputTokens: number;
     outputTokens: number;
     costUsd: number;
@@ -419,7 +394,7 @@ export async function getRecentUsage(
     id: number;
     job_id: number;
     model_id: string;
-    layer_type: FactoryLayer;
+    layer_type: string;
     input_tokens: number;
     output_tokens: number;
     cost_usd: number;
