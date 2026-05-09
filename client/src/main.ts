@@ -14,11 +14,13 @@ import { hydrateAuthSession } from "./auth/sessionSync";
 import { attachSocketAuthSync } from "./auth/socketSync";
 import { getAuthTokens } from "./auth/authClient";
 import { openAuthModal } from "./auth/authUi";
+import { renderProfileView } from "./profile/profileScreen";
 
 type GameMode = "direct" | "study_then_quiz" | "lesson";
 type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 type Phase =
   | "name"
+  | "profile"
   | "custom_lesson"
   | "lesson_menu"
   | "lesson_study"
@@ -774,6 +776,17 @@ function render(): void {
   clearTimer();
   app.innerHTML = "";
 
+  if (phase === "profile") {
+    void renderProfileView(app, {
+      onBack: () => {
+        phase = "name";
+        history.pushState({}, "", "/");
+        render();
+      },
+    });
+    return;
+  }
+
   if (phase === "name") {
     const isPrivateEntryFlow = Boolean(pendingJoinRoomCode);
     const renderModePicker = !isPrivateEntryFlow && nameFlowStep === "mode";
@@ -829,6 +842,15 @@ function render(): void {
                   ${getAuthState().status === "authenticated" ? "إدارة الحساب" : "تسجيل الدخول"}
                 </button>
               </div>
+              ${
+                getAuthState().status === "authenticated"
+                  ? `<div class="flex justify-center mt-2">
+                <button type="button" id="open-profile-btn" class="ui-btn ui-btn--ghost px-4 py-2 text-sm">
+                  الملف الشخصي
+                </button>
+              </div>`
+                  : ""
+              }
               <p class="text-sm text-slate-400 text-right m-0">${
                 isPrivateEntryFlow
                   ? `الانضمام للغرفة الخاصة (${pendingJoinRoomCode})`
@@ -943,6 +965,11 @@ function render(): void {
           render();
         },
       });
+    });
+    app.querySelector<HTMLButtonElement>("#open-profile-btn")?.addEventListener("click", () => {
+      phase = "profile";
+      history.pushState({}, "", "/profile");
+      render();
     });
     if (privateCodeInput) {
       privateCodeInput.value = pendingJoinRoomCode;
@@ -4548,7 +4575,16 @@ if (pendingJoinRoomCode) {
   privateEntryAutoJoinTried = false;
 }
 subscribeAuthState(() => {
-  if (phase === "name") render();
+  if (phase === "name" || phase === "profile") render();
+});
+window.addEventListener("popstate", () => {
+  const pathOnly = window.location.pathname.replace(/\/$/, "") || "/";
+  if (pathOnly === "/profile") {
+    phase = "profile";
+  } else if (phase === "profile") {
+    phase = "name";
+  }
+  render();
 });
 window.addEventListener("fahem:auth-tokens-refreshed", () => {
   if (!socket) return;
@@ -4637,6 +4673,10 @@ if (lessonPreviewBoot === "1") {
 } else if (Number.isInteger(lessonIdFromUrl) && lessonIdFromUrl > 0) {
   void openLessonById(lessonIdFromUrl);
 } else {
+  const pathOnly = window.location.pathname.replace(/\/$/, "") || "/";
+  if (pathOnly === "/profile") {
+    phase = "profile";
+  }
   render();
 }
 startReleaseVersionWatch();

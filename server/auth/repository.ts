@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { getPool } from "../db/pool";
 import type { ExternalIdentity } from "./types";
 import { config } from "../config";
+import { seedUserProfileNamesIfEmpty } from "../profile/seedFromDisplayName";
 
 type UserRow = {
   id: string;
@@ -161,6 +162,7 @@ export async function resolveOrCreateInternalUser(identity: ExternalIdentity): P
        WHERE id = $1::uuid`,
       [user.id, identity.email, identity.emailVerified, identity.displayName, identity.pictureUrl],
     );
+    await seedUserProfileNamesIfEmpty(client, user.id, identity.displayName);
     return { userId: user.id };
   });
 }

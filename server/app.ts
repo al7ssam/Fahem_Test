@@ -8,6 +8,7 @@ import { config } from "./config";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerCustomLessonRoutes } from "./routes/customLessons";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerProfileRoutes } from "./routes/profile";
 import { optionalAuth } from "./auth/middleware";
 
 export function createApp() {
@@ -46,6 +47,7 @@ export function createApp() {
   app.use(cookieParser());
   app.use(optionalAuth);
   registerAuthRoutes(app);
+  registerProfileRoutes(app);
   registerCustomLessonRoutes(app);
   registerAdminRoutes(app);
 
