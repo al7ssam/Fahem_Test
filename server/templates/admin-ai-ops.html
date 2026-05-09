@@ -261,37 +261,10 @@
         <pre id="af-health-out" class="mono-pre" style="margin-top: 8px; padding: 8px; border-radius: 10px; border: 1px solid var(--border); background: #0b1330"></pre>
       </section>
 
-      <section class="panel">
-        <h3>تنظيف سجلات مصنع الذكاء</h3>
-        <div class="grid">
-          <label>حذف تلقائي <input id="clog-auto" type="checkbox" /></label>
-          <label>عتبة الأيام <input id="clog-days" type="number" min="1" max="3650" /></label>
-          <span class="muted" id="clog-last">آخر تشغيل: —</span>
-        </div>
-        <div class="row" style="margin-top: 8px">
-          <button type="button" id="clog-load">تحميل الإعدادات</button>
-          <button type="button" id="clog-save">حفظ الإعدادات</button>
-          <button type="button" id="clog-preview">معاينة</button>
-          <button type="button" id="clog-run">تنفيذ الحذف</button>
-        </div>
-        <div id="clog-msg" class="msg"></div>
-      </section>
-
-      <section class="panel">
-        <h3>تنظيف وظائف مصنع الذكاء القديمة</h3>
-        <div class="grid">
-          <label>حذف تلقائي <input id="jlog-auto" type="checkbox" /></label>
-          <label>عتبة الأيام <input id="jlog-days" type="number" min="1" max="3650" /></label>
-          <span class="muted" id="jlog-last">آخر تشغيل: —</span>
-        </div>
-        <div class="row" style="margin-top: 8px">
-          <button type="button" id="jlog-load">تحميل الإعدادات</button>
-          <button type="button" id="jlog-save">حفظ الإعدادات</button>
-          <button type="button" id="jlog-preview">معاينة</button>
-          <button type="button" id="jlog-run">تنفيذ الحذف</button>
-        </div>
-        <div id="jlog-msg" class="msg"></div>
-      </section>
+      <p class="muted" style="margin: 0 0 12px">
+        تنظيف سجلات الذكاء الاصطناعي (مصنع المحتوى) يتم من صفحة
+        <a href="/admin/maintenance" style="color: inherit">الصيانة والتنظيف</a>.
+      </p>
 
       <section class="panel">
         <h3>تسعير النماذج والتكلفة</h3>
@@ -678,60 +651,6 @@
           $("af-health-out").textContent = JSON.stringify(data, null, 2);
         }
 
-        async function loadLogCleanup() {
-          var d = await api("/api/admin/ai-factory-logs-cleanup-settings", "GET");
-          $("clog-auto").checked = !!d.autoDeleteEnabled;
-          $("clog-days").value = d.deletionThresholdDays != null ? d.deletionThresholdDays : 90;
-          $("clog-last").textContent = "آخر تشغيل: " + (d.lastRunDate || "—");
-          msg("clog-msg", "تم التحميل.", true);
-        }
-
-        async function saveLogCleanup() {
-          await api("/api/admin/ai-factory-logs-cleanup-settings", "PATCH", {
-            autoDeleteEnabled: $("clog-auto").checked,
-            deletionThresholdDays: Number($("clog-days").value || 90),
-          });
-          msg("clog-msg", "تم الحفظ.", true);
-        }
-
-        async function previewLogCleanup() {
-          var d = await api("/api/admin/ai-factory-logs-cleanup/preview", "POST", {});
-          msg("clog-msg", JSON.stringify(d), true);
-        }
-
-        async function runLogCleanup() {
-          if (!confirm("تنفيذ حذف السجلات المنتهية؟")) return;
-          var d = await api("/api/admin/ai-factory-logs-cleanup/run", "POST", {});
-          msg("clog-msg", JSON.stringify(d), true);
-        }
-
-        async function loadJobCleanupSettings() {
-          var d = await api("/api/admin/ai-factory-jobs-cleanup-settings", "GET");
-          $("jlog-auto").checked = !!d.autoDeleteEnabled;
-          $("jlog-days").value = d.deletionThresholdDays != null ? d.deletionThresholdDays : 90;
-          $("jlog-last").textContent = "آخر تشغيل: " + (d.lastRunDate || "—");
-          msg("jlog-msg", "تم التحميل.", true);
-        }
-
-        async function saveJobCleanupSettings() {
-          await api("/api/admin/ai-factory-jobs-cleanup-settings", "PATCH", {
-            autoDeleteEnabled: $("jlog-auto").checked,
-            deletionThresholdDays: Number($("jlog-days").value || 90),
-          });
-          msg("jlog-msg", "تم الحفظ.", true);
-        }
-
-        async function previewJobCleanup() {
-          var d = await api("/api/admin/ai-factory-jobs-cleanup/preview", "POST", {});
-          msg("jlog-msg", JSON.stringify(d), true);
-        }
-
-        async function runJobCleanup() {
-          if (!confirm("تنفيذ حذف الوظائف القديمة؟")) return;
-          var d = await api("/api/admin/ai-factory-jobs-cleanup/run", "POST", {});
-          msg("jlog-msg", JSON.stringify(d), true);
-        }
-
         async function loadPricing() {
           var j = await api("/api/admin/pricing/models", "GET");
           $("pricing-openai").value = JSON.stringify(j.openai || {}, null, 2);
@@ -756,8 +675,6 @@
               loadModelsPanel(),
               loadFactoryStatus(),
               loadPricing(),
-              loadLogCleanup(),
-              loadJobCleanupSettings(),
             ]);
             msg("global-msg", "اكتمل التحميل.", true);
           } catch (e) {
@@ -867,62 +784,6 @@
             await runHealthProbe();
           } catch (e) {
             $("af-health-out").textContent = String(e && e.message ? e.message : e);
-          }
-        });
-        $("clog-load").addEventListener("click", async function () {
-          try {
-            await loadLogCleanup();
-          } catch (e) {
-            msg("clog-msg", String(e && e.message ? e.message : e), false);
-          }
-        });
-        $("clog-save").addEventListener("click", async function () {
-          try {
-            await saveLogCleanup();
-          } catch (e) {
-            msg("clog-msg", String(e && e.message ? e.message : e), false);
-          }
-        });
-        $("clog-preview").addEventListener("click", async function () {
-          try {
-            await previewLogCleanup();
-          } catch (e) {
-            msg("clog-msg", String(e && e.message ? e.message : e), false);
-          }
-        });
-        $("clog-run").addEventListener("click", async function () {
-          try {
-            await runLogCleanup();
-          } catch (e) {
-            msg("clog-msg", String(e && e.message ? e.message : e), false);
-          }
-        });
-        $("jlog-load").addEventListener("click", async function () {
-          try {
-            await loadJobCleanupSettings();
-          } catch (e) {
-            msg("jlog-msg", String(e && e.message ? e.message : e), false);
-          }
-        });
-        $("jlog-save").addEventListener("click", async function () {
-          try {
-            await saveJobCleanupSettings();
-          } catch (e) {
-            msg("jlog-msg", String(e && e.message ? e.message : e), false);
-          }
-        });
-        $("jlog-preview").addEventListener("click", async function () {
-          try {
-            await previewJobCleanup();
-          } catch (e) {
-            msg("jlog-msg", String(e && e.message ? e.message : e), false);
-          }
-        });
-        $("jlog-run").addEventListener("click", async function () {
-          try {
-            await runJobCleanup();
-          } catch (e) {
-            msg("jlog-msg", String(e && e.message ? e.message : e), false);
           }
         });
         $("pricing-load").addEventListener("click", async function () {

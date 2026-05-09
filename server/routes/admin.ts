@@ -27,23 +27,19 @@ import {
 import { getResultMessages } from "../db/resultCopy";
 import { Match } from "../game/Match";
 import {
-  countExpiredAiFactoryJobs,
   countExpiredAiFactoryLogs,
   countExpiredQuestions,
   countExpiredSimpleContentPricingAuditLogs,
   countExpiredSimpleContentRuns,
   getAiCleanupTableStats,
-  getAiFactoryJobsCleanupSettings,
   getAiFactoryLogsCleanupSettings,
   getCleanupSettings,
   getSimpleContentPricingAuditCleanupSettings,
   getSimpleContentRunsCleanupSettings,
-  performAiFactoryJobsCleanup,
   performAiFactoryLogsCleanup,
   performCleanup,
   performSimpleContentPricingAuditCleanup,
   performSimpleContentRunsCleanup,
-  updateAiFactoryJobsCleanupSettings,
   updateAiFactoryLogsCleanupSettings,
   updateCleanupSettings,
   updateSimpleContentPricingAuditCleanupSettings,
@@ -238,11 +234,6 @@ const aiFactoryLogsCleanupSettingsPatchSchema = z.object({
 });
 
 const simpleContentRunsCleanupSettingsPatchSchema = z.object({
-  autoDeleteEnabled: z.boolean(),
-  deletionThresholdDays: z.number().int().min(1).max(3650),
-});
-
-const aiFactoryJobsCleanupSettingsPatchSchema = z.object({
   autoDeleteEnabled: z.boolean(),
   deletionThresholdDays: z.number().int().min(1).max(3650),
 });
@@ -1777,75 +1768,6 @@ export function registerAdminRoutes(app: Express): void {
         jobLogsDeletedCount: result.jobLogsDeletedCount,
         inspectionLogsDeletedCount: result.inspectionLogsDeletedCount,
         deletedCount: result.totalDeletedCount,
-        runDate: result.runDate,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "cleanup_failed" });
-    }
-  });
-
-  app.get("/api/admin/ai-factory-jobs-cleanup-settings", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const settings = await getAiFactoryJobsCleanupSettings();
-      res.json({
-        ok: true,
-        autoDeleteEnabled: settings.autoDeleteEnabled,
-        deletionThresholdDays: settings.deletionThresholdDays,
-        lastRunDate: settings.lastRunDate,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "read_failed" });
-    }
-  });
-
-  app.patch("/api/admin/ai-factory-jobs-cleanup-settings", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const parsed = aiFactoryJobsCleanupSettingsPatchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({
-        ok: false,
-        error: "invalid_body",
-        issues: zodIssuesSummary(parsed.error),
-      });
-      return;
-    }
-    try {
-      const settings = await updateAiFactoryJobsCleanupSettings(parsed.data);
-      res.json({
-        ok: true,
-        autoDeleteEnabled: settings.autoDeleteEnabled,
-        deletionThresholdDays: settings.deletionThresholdDays,
-        lastRunDate: settings.lastRunDate,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "update_failed" });
-    }
-  });
-
-  app.post("/api/admin/ai-factory-jobs-cleanup/preview", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const settings = await getAiFactoryJobsCleanupSettings();
-      const expiredCount = await countExpiredAiFactoryJobs(settings.deletionThresholdDays);
-      res.json({
-        ok: true,
-        deletionThresholdDays: settings.deletionThresholdDays,
-        expiredCount,
-      });
-    } catch {
-      res.status(500).json({ ok: false, error: "preview_failed" });
-    }
-  });
-
-  app.post("/api/admin/ai-factory-jobs-cleanup/run", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const result = await performAiFactoryJobsCleanup({ source: "manual", forceRun: true });
-      res.json({
-        ok: true,
-        deletionThresholdDays: result.thresholdDays,
-        deletedCount: result.deletedCount,
         runDate: result.runDate,
       });
     } catch {
