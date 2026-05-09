@@ -12,6 +12,11 @@
       input,button { background:#0b1330; border:1px solid var(--border); color:var(--text); border-radius:10px; padding:8px 10px; font-family:inherit; }
       button { cursor:pointer; } .msg { min-height:20px; margin-top:6px; font-size:13px; } .muted{color:var(--muted);}
       .danger { background:#3b1120; border-color:#7f1d1d; }
+      .hint { font-size: 13px; color: var(--muted); margin: 0.35rem 0 0.5rem; line-height: 1.5; }
+      table.maint-overview { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px; }
+      table.maint-overview th, table.maint-overview td { border:1px solid var(--border); padding:6px 8px; text-align:right; }
+      table.maint-overview th { color: var(--muted); font-weight: 600; }
+      h3 { margin: 0 0 0.5rem; font-size: 1.1rem; }
     </style>
   </head>
   <body>
@@ -26,6 +31,87 @@
         </div>
         <div id="global-msg" class="msg"></div>
       </div>
+
+      <section class="panel" id="maint-ai-overview-panel">
+        <h3>نظرة على التخزين (الذكاء والمسار البسيط)</h3>
+        <p class="hint">عدد الصفوف والحجم التقريبي في الجداول ذات الصلة قبل ضبط أيام الاحتفاظ أو التشغيل اليدوي.</p>
+        <div class="row">
+          <button type="button" id="maint-ai-overview-refresh">تحديث الجدول</button>
+        </div>
+        <table class="maint-overview" aria-label="إحصاءات جداول الذكاء">
+          <thead>
+            <tr>
+              <th>الجدول</th>
+              <th>عدد الصفوف</th>
+              <th>الحجم</th>
+              <th>أقدم تاريخ</th>
+              <th>أحدث تاريخ</th>
+            </tr>
+          </thead>
+          <tbody id="maint-ai-overview-body">
+            <tr><td colspan="5" class="muted">اضغط «تحديث الجدول» أو انتظر التحميل التلقائي.</td></tr>
+          </tbody>
+        </table>
+        <div id="maint-ai-overview-msg" class="msg"></div>
+      </section>
+
+      <section class="panel">
+        <h3>سجلات المسار البسيط — تشغيلات التوليد (<code>simple_content_runs</code>)</h3>
+        <p class="hint">
+          حذف صفوف التشغيل الأقدم من عدد الأيام المحدد (معاينات وطلبات/ردود محفوظة). لا يحذف أسئلة
+          <code>questions</code> المدرجة.
+        </p>
+        <p class="hint">
+          <strong>ملاحظة:</strong> عند حفظ «أيام الاحتفاظ» هنا يُحدَّث أيضاً المفتاح الموحّد
+          <code>ai_cleanup_retention_days</code> إن وُجد استخدام له في أماكن أخرى.
+        </p>
+        <div class="grid">
+          <label><span class="muted">تفعيل الحذف التلقائي (مهمة يومية 03:00)</span><br><input id="maint-sc-runs-enabled" type="checkbox" /></label>
+          <label><span class="muted">حذف ما هو أقدم من (يومًا)</span><br><input id="maint-sc-runs-days" type="number" min="1" max="3650" value="30" /></label>
+          <label><span class="muted">آخر تشغيل تلقائي</span><br><input id="maint-sc-runs-last" disabled /></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button type="button" id="maint-sc-runs-load">تحميل</button>
+          <button type="button" id="maint-sc-runs-save">حفظ الإعدادات</button>
+          <button type="button" id="maint-sc-runs-preview">معاينة العدد</button>
+          <button type="button" id="maint-sc-runs-run" class="danger">تشغيل الحذف الآن</button>
+        </div>
+        <div id="maint-sc-runs-msg" class="msg"></div>
+      </section>
+
+      <section class="panel">
+        <h3>سجلات المسار البسيط — تدقيق التسعير (<code>simple_content_pricing_audit_logs</code>)</h3>
+        <p class="hint">سجل تغييرات إعدادات التسعير من لوحة الإدارة؛ يُنظَّف بمعزل عن سجلات التشغيل.</p>
+        <div class="grid">
+          <label><span class="muted">تفعيل الحذف التلقائي (مهمة يومية 03:00)</span><br><input id="maint-sc-audit-enabled" type="checkbox" /></label>
+          <label><span class="muted">حذف ما هو أقدم من (يومًا)</span><br><input id="maint-sc-audit-days" type="number" min="1" max="3650" value="180" /></label>
+          <label><span class="muted">آخر تشغيل تلقائي</span><br><input id="maint-sc-audit-last" disabled /></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button type="button" id="maint-sc-audit-load">تحميل</button>
+          <button type="button" id="maint-sc-audit-save">حفظ الإعدادات</button>
+          <button type="button" id="maint-sc-audit-preview">معاينة العدد</button>
+          <button type="button" id="maint-sc-audit-run" class="danger">تشغيل الحذف الآن</button>
+        </div>
+        <div id="maint-sc-audit-msg" class="msg"></div>
+      </section>
+
+      <section class="panel">
+        <h3>سجلات استهلاك الذكاء (<code>ai_usage_logs</code>)</h3>
+        <p class="hint">سجلات التكلفة/الرموز للتحليلات؛ الحذف حسب <code>created_at</code>.</p>
+        <div class="grid">
+          <label><span class="muted">تفعيل الحذف التلقائي (مهمة يومية 03:00)</span><br><input id="maint-usage-enabled" type="checkbox" /></label>
+          <label><span class="muted">حذف ما هو أقدم من (يومًا)</span><br><input id="maint-usage-days" type="number" min="1" max="3650" value="30" /></label>
+          <label><span class="muted">آخر تشغيل تلقائي</span><br><input id="maint-usage-last" disabled /></label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button type="button" id="maint-usage-load">تحميل</button>
+          <button type="button" id="maint-usage-save">حفظ الإعدادات</button>
+          <button type="button" id="maint-usage-preview">معاينة العدد</button>
+          <button type="button" id="maint-usage-run" class="danger">تشغيل الحذف الآن</button>
+        </div>
+        <div id="maint-usage-msg" class="msg"></div>
+      </section>
 
       <section class="panel">
         <h3>تنظيف بيانات الأسئلة</h3>
@@ -51,13 +137,80 @@
         function hdr(){ return {"Content-Type":"application/json"}; }
         async function api(url,method,body){ var r=await fetch(url,{method:method||"GET",credentials:"same-origin",headers:hdr(),body:body?JSON.stringify(body):undefined}); var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||"request_failed"); return j; }
 
+        var tableTitles = {
+          "ai_usage_logs": "سجلات الاستهلاك (ai_usage_logs)",
+          "simple_content_runs": "تشغيلات المسار البسيط",
+          "simple_content_pricing_audit_logs": "تدقيق تسعير المسار البسيط"
+        };
+
+        async function loadAiOverview(){
+          var bodyEl = $("maint-ai-overview-body");
+          try {
+            var j = await api("/api/admin/ai-cleanup/overview", "GET");
+            var rows = j.rows || [];
+            if (!rows.length) {
+              bodyEl.innerHTML = '<tr><td colspan="5" class="muted">لا توجد بيانات.</td></tr>';
+            } else {
+              bodyEl.innerHTML = rows.map(function (row) {
+                var name = tableTitles[row.tableName] || row.tableName;
+                var old = row.oldestCreatedAt || "—";
+                var neu = row.newestCreatedAt || "—";
+                return "<tr><td>" + name + "</td><td>" + String(row.rowCount) + "</td><td>" + String(row.totalSize || "—") +
+                  "</td><td>" + old + "</td><td>" + neu + "</td></tr>";
+              }).join("");
+            }
+            msg("maint-ai-overview-msg", "تم التحديث.", true);
+          } catch (e) {
+            bodyEl.innerHTML = '<tr><td colspan="5" class="muted">تعذر التحميل.</td></tr>';
+            msg("maint-ai-overview-msg", "تعذر تحميل النظرة العامة.", false);
+          }
+        }
+
+        async function loadRuns(){ try{ var j=await api("/api/admin/simple-content/runs-cleanup-settings","GET"); $("maint-sc-runs-enabled").checked=!!j.autoDeleteEnabled; $("maint-sc-runs-days").value=j.deletionThresholdDays; $("maint-sc-runs-last").value=j.lastRunDate||"—"; msg("maint-sc-runs-msg","تم التحميل.",true);}catch{msg("maint-sc-runs-msg","تعذر التحميل.",false);} }
+        async function saveRuns(){ try{ await api("/api/admin/simple-content/runs-cleanup-settings","PATCH",{autoDeleteEnabled:$("maint-sc-runs-enabled").checked,deletionThresholdDays:Number($("maint-sc-runs-days").value||30)}); msg("maint-sc-runs-msg","تم الحفظ.",true);}catch{msg("maint-sc-runs-msg","تعذر الحفظ.",false);} }
+        async function previewRuns(){ try{ var j=await api("/api/admin/simple-content/runs-cleanup/preview","POST",{}); msg("maint-sc-runs-msg","المعاينة: "+j.expiredCount+" صف أقدم من "+j.deletionThresholdDays+" يومًا.",true);}catch{msg("maint-sc-runs-msg","تعذر المعاينة.",false);} }
+        async function runRuns(){ if(!confirm("سيتم حذف سجلات التشغيل المنتهية الآن. متابعة؟")) return; try{ var j=await api("/api/admin/simple-content/runs-cleanup/run","POST",{}); msg("maint-sc-runs-msg","تم الحذف: "+j.deletedCount+" صف. آخر تشغيل: "+(j.runDate||""),true); await loadRuns(); await loadAiOverview();}catch{msg("maint-sc-runs-msg","تعذر التنفيذ.",false);} }
+
+        async function loadAudit(){ try{ var j=await api("/api/admin/simple-content/pricing-audit-cleanup-settings","GET"); $("maint-sc-audit-enabled").checked=!!j.autoDeleteEnabled; $("maint-sc-audit-days").value=j.deletionThresholdDays; $("maint-sc-audit-last").value=j.lastRunDate||"—"; msg("maint-sc-audit-msg","تم التحميل.",true);}catch{msg("maint-sc-audit-msg","تعذر التحميل.",false);} }
+        async function saveAudit(){ try{ await api("/api/admin/simple-content/pricing-audit-cleanup-settings","PATCH",{autoDeleteEnabled:$("maint-sc-audit-enabled").checked,deletionThresholdDays:Number($("maint-sc-audit-days").value||180)}); msg("maint-sc-audit-msg","تم الحفظ.",true);}catch{msg("maint-sc-audit-msg","تعذر الحفظ.",false);} }
+        async function previewAudit(){ try{ var j=await api("/api/admin/simple-content/pricing-audit-cleanup/preview","POST",{}); msg("maint-sc-audit-msg","المعاينة: "+j.expiredCount+" صف أقدم من "+j.deletionThresholdDays+" يومًا.",true);}catch{msg("maint-sc-audit-msg","تعذر المعاينة.",false);} }
+        async function runAudit(){ if(!confirm("سيتم حذف سجلات تدقيق التسعير المنتهية الآن. متابعة؟")) return; try{ var j=await api("/api/admin/simple-content/pricing-audit-cleanup/run","POST",{}); msg("maint-sc-audit-msg","تم الحذف: "+j.deletedCount+" صف. آخر تشغيل: "+(j.runDate||""),true); await loadAudit(); await loadAiOverview();}catch{msg("maint-sc-audit-msg","تعذر التنفيذ.",false);} }
+
+        async function loadUsage(){ try{ var j=await api("/api/admin/usage-logs-cleanup-settings","GET"); $("maint-usage-enabled").checked=!!j.autoDeleteEnabled; $("maint-usage-days").value=j.deletionThresholdDays; $("maint-usage-last").value=j.lastRunDate||"—"; msg("maint-usage-msg","تم التحميل.",true);}catch{msg("maint-usage-msg","تعذر التحميل.",false);} }
+        async function saveUsage(){ try{ await api("/api/admin/usage-logs-cleanup-settings","PATCH",{autoDeleteEnabled:$("maint-usage-enabled").checked,deletionThresholdDays:Number($("maint-usage-days").value||30)}); msg("maint-usage-msg","تم الحفظ.",true);}catch{msg("maint-usage-msg","تعذر الحفظ.",false);} }
+        async function previewUsage(){ try{ var j=await api("/api/admin/usage-logs-cleanup/preview","POST",{}); msg("maint-usage-msg","المعاينة: "+j.expiredCount+" صف أقدم من "+j.deletionThresholdDays+" يومًا.",true);}catch{msg("maint-usage-msg","تعذر المعاينة.",false);} }
+        async function runUsage(){ if(!confirm("سيتم حذف سجلات ai_usage_logs الأقدم من عدد الأيام الآن. متابعة؟")) return; try{ var j=await api("/api/admin/usage-logs-cleanup/run","POST",{}); msg("maint-usage-msg","تم الحذف: "+j.deletedCount+" صف. آخر تشغيل: "+(j.runDate||""),true); await loadUsage(); await loadAiOverview();}catch{msg("maint-usage-msg","تعذر التنفيذ.",false);} }
+
         async function loadCleanup(){ try{ var j=await api("/api/admin/cleanup-settings","GET"); $("cl-enabled").checked=!!j.autoDeleteEnabled; $("cl-days").value=j.deletionThresholdDays; $("cl-last").value=j.lastRunDate||"—"; msg("cl-msg","تم التحميل.",true);}catch{msg("cl-msg","تعذر التحميل.",false);} }
         async function saveCleanup(){ try{ await api("/api/admin/cleanup-settings","PATCH",{autoDeleteEnabled:$("cl-enabled").checked,deletionThresholdDays:Number($("cl-days").value||30)}); msg("cl-msg","تم الحفظ.",true);}catch{msg("cl-msg","تعذر الحفظ.",false);} }
         async function previewCleanup(){ try{ var j=await api("/api/admin/cleanup/preview","POST",{}); msg("cl-msg","المعاينة: سيُحذف "+j.expiredCount+" سؤال.",true);}catch{msg("cl-msg","تعذر المعاينة.",false);} }
         async function runCleanup(){ if(!confirm("سيتم حذف الأسئلة المنتهية الآن. متابعة؟")) return; try{ var j=await api("/api/admin/cleanup/run","POST",{}); msg("cl-msg","تم الحذف: "+j.deletedCount+" سؤال.",true); await loadCleanup();}catch{msg("cl-msg","تعذر التنفيذ.",false);} }
 
         $("cache-bust").addEventListener("click", async function(){ try{ var j=await api("/api/admin/cache-bust","POST",{}); msg("global-msg","تم تحديث الإصدار: "+String(j.releaseVersion||""),true);}catch{msg("global-msg","تعذر تحديث الكاش.",false);} });
+        $("maint-ai-overview-refresh").addEventListener("click", loadAiOverview);
+
+        $("maint-sc-runs-load").addEventListener("click", loadRuns);
+        $("maint-sc-runs-save").addEventListener("click", saveRuns);
+        $("maint-sc-runs-preview").addEventListener("click", previewRuns);
+        $("maint-sc-runs-run").addEventListener("click", runRuns);
+
+        $("maint-sc-audit-load").addEventListener("click", loadAudit);
+        $("maint-sc-audit-save").addEventListener("click", saveAudit);
+        $("maint-sc-audit-preview").addEventListener("click", previewAudit);
+        $("maint-sc-audit-run").addEventListener("click", runAudit);
+
+        $("maint-usage-load").addEventListener("click", loadUsage);
+        $("maint-usage-save").addEventListener("click", saveUsage);
+        $("maint-usage-preview").addEventListener("click", previewUsage);
+        $("maint-usage-run").addEventListener("click", runUsage);
+
         $("cl-load").addEventListener("click",loadCleanup); $("cl-save").addEventListener("click",saveCleanup); $("cl-preview").addEventListener("click",previewCleanup); $("cl-run").addEventListener("click",runCleanup);
+
+        loadAiOverview();
+        loadRuns();
+        loadAudit();
+        loadUsage();
+        loadCleanup();
       })();
     </script>
   </body>

@@ -608,6 +608,178 @@ export async function maybeRunStartupSimpleContentPricingAuditCleanup(): Promise
   return performSimpleContentPricingAuditCleanup({ source: "startup" });
 }
 
+const AI_USAGE_LOGS_SETTINGS_KEYS = {
+  enabled: "ai_usage_logs_cleanup_enabled",
+  thresholdDays: "ai_usage_logs_cleanup_threshold_days",
+  lastRunDate: "ai_usage_logs_cleanup_last_run_date",
+} as const;
+
+type AiUsageLogsCleanupSettings = {
+  autoDeleteEnabled: boolean;
+  deletionThresholdDays: number;
+  lastRunDate: string;
+};
+
+type AiUsageLogsCleanupResult = {
+  deletedCount: number;
+  thresholdDays: number;
+  runDate: string;
+};
+
+let runningAiUsageLogsCleanup: Promise<AiUsageLogsCleanupResult> | null = null;
+
+async function readAiUsageLogsSettingsMap(client: PoolClient): Promise<Map<string, string>> {
+  const keys = [
+    AI_USAGE_LOGS_SETTINGS_KEYS.enabled,
+    AI_USAGE_LOGS_SETTINGS_KEYS.thresholdDays,
+    AI_USAGE_LOGS_SETTINGS_KEYS.lastRunDate,
+  ];
+  const rows = await client.query<{ key: string; value: string }>(
+    `SELECT key, value FROM public.app_settings WHERE key = ANY($1::text[])`,
+    [keys],
+  );
+  return new Map(rows.rows.map((r) => [r.key, r.value]));
+}
+
+export async function getAiUsageLogsCleanupSettings(): Promise<AiUsageLogsCleanupSettings> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const map = await readAiUsageLogsSettingsMap(client);
+    return {
+      autoDeleteEnabled: parseEnabled(map.get(AI_USAGE_LOGS_SETTINGS_KEYS.enabled)),
+      deletionThresholdDays: parseThreshold(map.get(AI_USAGE_LOGS_SETTINGS_KEYS.thresholdDays)),
+      lastRunDate: normalizeRunDate(map.get(AI_USAGE_LOGS_SETTINGS_KEYS.lastRunDate)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateAiUsageLogsCleanupSettings(input: {
+  autoDeleteEnabled: boolean;
+  deletionThresholdDays: number;
+}): Promise<AiUsageLogsCleanupSettings> {
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    const thresholdDays = Math.max(1, Math.floor(input.deletionThresholdDays));
+    await upsertSettings(client, [
+      {
+        key: AI_USAGE_LOGS_SETTINGS_KEYS.enabled,
+        value: input.autoDeleteEnabled ? "1" : "0",
+      },
+      {
+        key: AI_USAGE_LOGS_SETTINGS_KEYS.thresholdDays,
+        value: String(thresholdDays),
+      },
+    ]);
+    const map = await readAiUsageLogsSettingsMap(client);
+    return {
+      autoDeleteEnabled: parseEnabled(map.get(AI_USAGE_LOGS_SETTINGS_KEYS.enabled)),
+      deletionThresholdDays: thresholdDays,
+      lastRunDate: normalizeRunDate(map.get(AI_USAGE_LOGS_SETTINGS_KEYS.lastRunDate)),
+    };
+  } finally {
+    client.release();
+  }
+}
+
+export async function countExpiredAiUsageLogs(thresholdDays: number, clientArg?: PoolClient): Promise<number> {
+  const threshold = Math.max(1, Math.floor(thresholdDays));
+  const run = async (client: PoolClient): Promise<number> => {
+    const r = await client.query<{ c: string }>(
+      `SELECT COUNT(*)::text AS c
+       FROM public.ai_usage_logs
+       WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+      [threshold],
+    );
+    return Number(r.rows[0]?.c ?? 0);
+  };
+  if (clientArg) return run(clientArg);
+  const pool = getPool();
+  const client = await pool.connect();
+  try {
+    return await run(client);
+  } finally {
+    client.release();
+  }
+}
+
+export async function performAiUsageLogsCleanup(input: {
+  source: CleanupSource;
+  forceRun?: boolean;
+}): Promise<AiUsageLogsCleanupResult> {
+  if (runningAiUsageLogsCleanup) return runningAiUsageLogsCleanup;
+
+  const pool = getPool();
+  runningAiUsageLogsCleanup = (async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const settingsMap = await readAiUsageLogsSettingsMap(client);
+      const enabled = parseEnabled(settingsMap.get(AI_USAGE_LOGS_SETTINGS_KEYS.enabled));
+      const thresholdDays = parseThreshold(settingsMap.get(AI_USAGE_LOGS_SETTINGS_KEYS.thresholdDays));
+      const today = toISODate();
+
+      if (!input.forceRun && !enabled) {
+        await client.query("ROLLBACK");
+        console.log(`[ai_usage_logs_cleanup] skipped source=${input.source} reason=disabled`);
+        return {
+          deletedCount: 0,
+          thresholdDays,
+          runDate: normalizeRunDate(settingsMap.get(AI_USAGE_LOGS_SETTINGS_KEYS.lastRunDate)),
+        };
+      }
+
+      const expiredCount = await countExpiredAiUsageLogs(thresholdDays, client);
+      await client.query(
+        `DELETE FROM public.ai_usage_logs
+         WHERE created_at < NOW() - ($1::int * INTERVAL '1 day')`,
+        [thresholdDays],
+      );
+
+      await upsertSettings(client, [{ key: AI_USAGE_LOGS_SETTINGS_KEYS.lastRunDate, value: today }]);
+      await client.query("COMMIT");
+      console.log(
+        `[ai_usage_logs_cleanup] success source=${input.source} date=${today} thresholdDays=${thresholdDays} deleted=${expiredCount}`,
+      );
+      return {
+        deletedCount: expiredCount,
+        thresholdDays,
+        runDate: today,
+      };
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      console.error(`[ai_usage_logs_cleanup] failed source=${input.source}`, error);
+      throw error;
+    } finally {
+      client.release();
+      runningAiUsageLogsCleanup = null;
+    }
+  })();
+
+  return runningAiUsageLogsCleanup;
+}
+
+export async function maybeRunStartupAiUsageLogsCleanup(): Promise<AiUsageLogsCleanupResult | null> {
+  const settings = await getAiUsageLogsCleanupSettings();
+  const today = toISODate();
+  if (!settings.autoDeleteEnabled) {
+    console.log("[ai_usage_logs_cleanup] startup skipped reason=disabled");
+    return null;
+  }
+  if (settings.lastRunDate === today) {
+    console.log("[ai_usage_logs_cleanup] startup skipped reason=already-ran-today");
+    return null;
+  }
+  return performAiUsageLogsCleanup({ source: "startup" });
+}
+
 type CleanupStatsSqlRow = {
   row_count: string;
   total_bytes: string | null;

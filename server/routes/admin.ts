@@ -27,16 +27,20 @@ import {
 import { getResultMessages } from "../db/resultCopy";
 import { Match } from "../game/Match";
 import {
+  countExpiredAiUsageLogs,
   countExpiredQuestions,
   countExpiredSimpleContentPricingAuditLogs,
   countExpiredSimpleContentRuns,
   getAiCleanupTableStats,
+  getAiUsageLogsCleanupSettings,
   getCleanupSettings,
   getSimpleContentPricingAuditCleanupSettings,
   getSimpleContentRunsCleanupSettings,
+  performAiUsageLogsCleanup,
   performCleanup,
   performSimpleContentPricingAuditCleanup,
   performSimpleContentRunsCleanup,
+  updateAiUsageLogsCleanupSettings,
   updateCleanupSettings,
   updateSimpleContentPricingAuditCleanupSettings,
   updateSimpleContentRunsCleanupSettings,
@@ -214,6 +218,11 @@ const simpleContentRunsCleanupSettingsPatchSchema = z.object({
 });
 
 const simpleContentPricingAuditCleanupSettingsPatchSchema = z.object({
+  autoDeleteEnabled: z.boolean(),
+  deletionThresholdDays: z.number().int().min(1).max(3650),
+});
+
+const aiUsageLogsCleanupSettingsPatchSchema = z.object({
   autoDeleteEnabled: z.boolean(),
   deletionThresholdDays: z.number().int().min(1).max(3650),
 });
@@ -1889,6 +1898,75 @@ export function registerAdminRoutes(app: Express): void {
       res.json({ ok: true, rows });
     } catch {
       res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.get("/api/admin/usage-logs-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getAiUsageLogsCleanupSettings();
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "read_failed" });
+    }
+  });
+
+  app.patch("/api/admin/usage-logs-cleanup-settings", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    const parsed = aiUsageLogsCleanupSettingsPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        ok: false,
+        error: "invalid_body",
+        issues: zodIssuesSummary(parsed.error),
+      });
+      return;
+    }
+    try {
+      const settings = await updateAiUsageLogsCleanupSettings(parsed.data);
+      res.json({
+        ok: true,
+        autoDeleteEnabled: settings.autoDeleteEnabled,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        lastRunDate: settings.lastRunDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "update_failed" });
+    }
+  });
+
+  app.post("/api/admin/usage-logs-cleanup/preview", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const settings = await getAiUsageLogsCleanupSettings();
+      const expiredCount = await countExpiredAiUsageLogs(settings.deletionThresholdDays);
+      res.json({
+        ok: true,
+        deletionThresholdDays: settings.deletionThresholdDays,
+        expiredCount,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "preview_failed" });
+    }
+  });
+
+  app.post("/api/admin/usage-logs-cleanup/run", async (req: Request, res: Response) => {
+    if (!verifyAdmin(req, res)) return;
+    try {
+      const result = await performAiUsageLogsCleanup({ source: "manual", forceRun: true });
+      res.json({
+        ok: true,
+        deletionThresholdDays: result.thresholdDays,
+        deletedCount: result.deletedCount,
+        runDate: result.runDate,
+      });
+    } catch {
+      res.status(500).json({ ok: false, error: "cleanup_failed" });
     }
   });
 

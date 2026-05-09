@@ -5,9 +5,11 @@ import { createApp } from "./app";
 import { config } from "./config";
 import { GameManager } from "./game/GameManager";
 import {
+  maybeRunStartupAiUsageLogsCleanup,
   maybeRunStartupCleanup,
   maybeRunStartupSimpleContentPricingAuditCleanup,
   maybeRunStartupSimpleContentRunsCleanup,
+  performAiUsageLogsCleanup,
   performCleanup,
   performSimpleContentPricingAuditCleanup,
   performSimpleContentRunsCleanup,
@@ -35,6 +37,11 @@ function scheduleCleanupCron(): void {
     }
     try {
       await performSimpleContentPricingAuditCleanup({ source: "cron" });
+    } catch {
+      // detailed log is emitted inside cleanup service
+    }
+    try {
+      await performAiUsageLogsCleanup({ source: "cron" });
     } catch {
       // detailed log is emitted inside cleanup service
     }
@@ -75,6 +82,11 @@ async function startServer(): Promise<void> {
   }
   try {
     await maybeRunStartupSimpleContentPricingAuditCleanup();
+  } catch {
+    // detailed log is emitted inside cleanup service
+  }
+  try {
+    await maybeRunStartupAiUsageLogsCleanup();
   } catch {
     // detailed log is emitted inside cleanup service
   }
