@@ -18,7 +18,7 @@ import {
 import { beginAuthOperation, commitAuthOperation, getAuthState, setAuthState } from "./authStore";
 import { buildPasswordResetContinueUrl, cleanupEmailLinkLandingUrl } from "./emailLinkUrl";
 import { getFirebaseAuth, getGoogleProvider } from "./firebaseClient";
-import { exchangeFirebaseToken, fetchCurrentUser, logout as backendLogout } from "./sessionClient";
+import { exchangeFirebaseToken, logout as backendLogout } from "./sessionClient";
 import {
   FahemProviderLinkError,
   isFahemProviderLinkError,
@@ -66,6 +66,27 @@ export function authTrace(traceId: string, stage: string, details: Record<string
   console.info("[auth-trace]", payload);
 }
 
+/** قياس زمني خفيف في DevTools → Performance (يفشل صامتاً إن تعذّر). */
+function perfAuthMark(name: string): void {
+  try {
+    if (typeof performance !== "undefined" && typeof performance.mark === "function") {
+      performance.mark(`fahem-auth:${name}`);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function perfAuthMeasure(name: string, startName: string, endName: string): void {
+  try {
+    if (typeof performance !== "undefined" && typeof performance.measure === "function") {
+      performance.measure(`fahem-auth:${name}`, `fahem-auth:${startName}`, `fahem-auth:${endName}`);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function asMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown_error";
 }
@@ -75,6 +96,7 @@ async function syncBackendFromFirebaseUser(
   traceId: string,
   instrumentation: "firebase" = "firebase",
 ): Promise<void> {
+  perfAuthMark("sync-start");
   authTrace(traceId, "firebase_credential_received", {
     hasUser: true,
     uid: firebaseUser.uid,
@@ -88,7 +110,7 @@ async function syncBackendFromFirebaseUser(
   authTrace(traceId, tokenStart);
   let idToken: string;
   try {
-    idToken = await firebaseUser.getIdToken(true);
+    idToken = await firebaseUser.getIdToken();
     authTrace(traceId, tokenSuccess, { tokenLength: idToken.length });
   } catch (error) {
     authTrace(traceId, "firebase_get_id_token_fail", {
@@ -99,7 +121,7 @@ async function syncBackendFromFirebaseUser(
   }
 
   authTrace(traceId, "exchange_request_start");
-  await exchangeFirebaseToken({
+  const { user } = await exchangeFirebaseToken({
     firebaseIdToken: idToken,
     clientType: "web",
     traceId,
@@ -107,8 +129,13 @@ async function syncBackendFromFirebaseUser(
   });
   authTrace(traceId, "exchange_request_success");
 
-  const user = await fetchCurrentUser();
-  authTrace(traceId, "fetch_current_user_success", { userId: user.id, roles: user.roles.length });
+  authTrace(traceId, "session_user_ready", {
+    userId: user.id,
+    roles: user.roles.length,
+    profileSource: "exchange",
+  });
+  perfAuthMark("sync-end");
+  perfAuthMeasure("firebase-sync-total", "sync-start", "sync-end");
   setAuthState({ status: "authenticated", user, lastError: null });
 }
 
@@ -167,8 +194,11 @@ export async function loginWithGoogle(): Promise<void> {
   const auth = await getFirebaseAuth();
   try {
     authTrace(traceId, "google_popup_start");
+    perfAuthMark("google-popup-open");
     const credential = await signInWithPopup(auth, getGoogleProvider());
     authTrace(traceId, "google_popup_success");
+    perfAuthMark("google-popup-close");
+    perfAuthMeasure("google-popup-ui", "google-popup-open", "google-popup-close");
     await syncBackendFromFirebaseCredential(credential, traceId, "firebase");
   } catch (error) {
     const code = readFirebaseErrorCode(error);

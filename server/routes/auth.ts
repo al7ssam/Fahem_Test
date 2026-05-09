@@ -76,6 +76,8 @@ export function registerAuthRoutes(app: Express): void {
         user: {
           id: result.userId,
           roles: result.roles,
+          email: result.email,
+          displayName: result.displayName,
         },
         /** الويب والجوال: يُحدَّث localStorage في العميل ليتوافق مع الكوكيات ويُجنَّب رمز قديم في التخزين. */
         tokens: {

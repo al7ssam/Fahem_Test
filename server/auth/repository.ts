@@ -177,6 +177,29 @@ export async function listUserRoleKeys(userId: string): Promise<string[]> {
   return r.rows.map((row) => row.role_key);
 }
 
+/** صف المستخدم العام كما في GET /api/auth/me — لدمجه في استجابة التبادل وتقليل طلب إضافي. */
+export async function getUserPublicProfile(userId: string): Promise<{
+  id: string;
+  email: string | null;
+  displayName: string | null;
+} | null> {
+  const pool = getPool();
+  const r = await pool.query<{ id: string; primary_email: string | null; display_name: string | null }>(
+    `SELECT id::text, primary_email, display_name
+     FROM public.users
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [userId],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    email: row.primary_email,
+    displayName: row.display_name,
+  };
+}
+
 export async function createSession(input: {
   userId: string;
   clientType: "web" | "mobile";

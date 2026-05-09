@@ -59,7 +59,6 @@ export async function getFirebaseAuth(): Promise<Auth> {
 export function getGoogleProvider(): GoogleAuthProvider {
   if (firebaseGoogleProvider) return firebaseGoogleProvider;
   const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account" });
   firebaseGoogleProvider = provider;
   return provider;
 }

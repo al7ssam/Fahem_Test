@@ -1,12 +1,19 @@
 import { clearAuthTokens, getAuthTokens, readCookie, saveAuthTokens } from "./authClient";
 import { apiFetch } from "./apiClient";
 
+export type SessionUserPayload = {
+  id: string;
+  roles: string[];
+  email: string | null;
+  displayName: string | null;
+};
+
 export async function exchangeFirebaseToken(input: {
   firebaseIdToken: string;
   clientType?: "web" | "mobile";
   traceId?: string;
   traceStagesFlow?: "default";
-}): Promise<{ user: { id: string; roles: string[] } }> {
+}): Promise<{ user: SessionUserPayload }> {
   const ts = new Date().toISOString();
   if (input.traceId) {
     console.info("[auth-trace]", {
@@ -42,7 +49,7 @@ export async function exchangeFirebaseToken(input: {
     throw new Error(body.reason || body.error || "auth_exchange_failed");
   }
   const body = (await r.json()) as {
-    user?: { id: string; roles: string[] };
+    user?: SessionUserPayload;
     tokens?: { accessToken?: string; refreshToken?: string };
   };
   if (body.tokens?.accessToken && body.tokens?.refreshToken) {
@@ -52,6 +59,12 @@ export async function exchangeFirebaseToken(input: {
     });
   }
   if (!body.user) throw new Error("auth_user_missing");
+  const user: SessionUserPayload = {
+    id: body.user.id,
+    roles: body.user.roles,
+    email: body.user.email ?? null,
+    displayName: body.user.displayName ?? null,
+  };
   if (input.traceId) {
     console.info("[auth-trace]", {
       ts: new Date().toISOString(),
@@ -61,7 +74,7 @@ export async function exchangeFirebaseToken(input: {
       hasUser: true,
     });
   }
-  return { user: body.user };
+  return { user };
 }
 
 export async function fetchCurrentUser(): Promise<{ id: string; email: string | null; displayName: string | null; roles: string[] }> {

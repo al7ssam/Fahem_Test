@@ -230,12 +230,12 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   const withLoadingStrict = async (
     button: HTMLButtonElement | null,
     action: () => Promise<void>,
-    actionOptions: { closeOnSuccess?: boolean; successMessage?: string } = {},
+    actionOptions: { closeOnSuccess?: boolean; successMessage?: string; loadingLabel?: string } = {},
   ): Promise<void> => {
     if (!button) return;
     const prev = button.textContent ?? "";
     button.disabled = true;
-    button.textContent = "جاري التنفيذ...";
+    button.textContent = actionOptions.loadingLabel ?? "جاري التنفيذ...";
     setErrorMsg("");
     try {
       await action();
@@ -323,7 +323,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       logoutBtn.id = "auth-modal-logout";
       logoutBtn.textContent = "تسجيل خروج";
       logoutBtn.addEventListener("click", () => {
-        void withLoading(logoutBtn, () => logoutFlow());
+        void withLoading(logoutBtn, () => logoutFlow(), { loadingLabel: "جاري تسجيل الخروج..." });
       });
       dynamicRoot.appendChild(card);
       dynamicRoot.appendChild(logoutBtn);
@@ -340,7 +340,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
 
       const gMain = googleBrandedButton("auth-modal-google-main");
       gMain.addEventListener("click", () => {
-        void withLoading(gMain, () => loginWithGoogle());
+        void withLoading(gMain, () => loginWithGoogle(), { loadingLabel: "جاري تسجيل الدخول..." });
       });
       wrap.appendChild(gMain);
 
@@ -587,6 +587,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       sendBtn.addEventListener("click", () => {
         void withLoadingStrict(sendBtn, () => sendPasswordResetEmailFlow(requireEmail()), {
           closeOnSuccess: false,
+          loadingLabel: "جاري إرسال الرابط...",
           successMessage: "إن وُجد حساب لهذا البريد سيصلُك رابط إعادة التعيين. راجع أيضًا مجلد الرسائل غير المرغوبة.",
         });
       });
@@ -622,8 +623,15 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
         wrap.appendChild(note);
         const doGoogle = googleBrandedButton("auth-modal-link-google-brand");
         doGoogle.addEventListener("click", () => {
-          void withLoadingStrict(doGoogle, () =>
-            signInGoogleThenLinkPendingPassword(pendingLink!.email, pendingLink!.passwordForLinking!, nextTraceId("ui-link-goog-pw")),
+          void withLoadingStrict(
+            doGoogle,
+            () =>
+              signInGoogleThenLinkPendingPassword(
+                pendingLink!.email,
+                pendingLink!.passwordForLinking!,
+                nextTraceId("ui-link-goog-pw"),
+              ),
+            { loadingLabel: "جاري تسجيل الدخول..." },
           );
         });
         wrap.appendChild(doGoogle);
@@ -656,13 +664,16 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
         linkBtn.className = "ui-btn ui-btn--cta w-full py-2";
         linkBtn.textContent = "ربط Google بحسابي";
         linkBtn.addEventListener("click", () => {
-          void withLoadingStrict(linkBtn, () =>
-            signInPasswordThenLinkPendingGoogle(
-              pendingLink!.email,
-              requirePassword(),
-              pendingLink!.pendingGoogleOAuthCredential!,
-              nextTraceId("ui-link-pw-goog"),
-            ),
+          void withLoadingStrict(
+            linkBtn,
+            () =>
+              signInPasswordThenLinkPendingGoogle(
+                pendingLink!.email,
+                requirePassword(),
+                pendingLink!.pendingGoogleOAuthCredential!,
+                nextTraceId("ui-link-pw-goog"),
+              ),
+            { loadingLabel: "جاري ربط الحساب..." },
           );
         });
         wrap.appendChild(linkBtn);
@@ -681,7 +692,7 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
       } else if (pendingLink.scenario === "login_suggest_google_only") {
         const gOnly = googleBrandedButton("auth-modal-google-link-hint");
         gOnly.addEventListener("click", () => {
-          void withLoading(gOnly, () => loginWithGoogle());
+          void withLoading(gOnly, () => loginWithGoogle(), { loadingLabel: "جاري تسجيل الدخول..." });
         });
         wrap.appendChild(gOnly);
       } else {
@@ -764,12 +775,16 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
           setErrorMsg(userFacingAuthMessage(new Error("password_mismatch")));
           return;
         }
-        void withLoadingStrict(save, async () => {
-          await confirmPasswordResetFlow(passwordResetOob, a);
-          cleanupEmailLinkLandingUrl();
-          options.onCompleted?.();
-          closeModal();
-        });
+        void withLoadingStrict(
+          save,
+          async () => {
+            await confirmPasswordResetFlow(passwordResetOob, a);
+            cleanupEmailLinkLandingUrl();
+            options.onCompleted?.();
+            closeModal();
+          },
+          { loadingLabel: "جاري حفظ كلمة المرور..." },
+        );
       });
 
       wrap.appendChild(save);

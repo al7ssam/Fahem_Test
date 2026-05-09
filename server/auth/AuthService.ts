@@ -3,6 +3,7 @@ import type { AuthProvider } from "./AuthProvider";
 import {
   createSession,
   getActiveSession,
+  getUserPublicProfile,
   getUserStatus,
   listUserRoleKeys,
   logAuthEvent,
@@ -41,6 +42,9 @@ type ExchangeResult = {
   sessionId: string;
   roles: string[];
   userId: string;
+  /** مطابق لـ users للعرض؛ null في مسار التحديث بالـ refresh فقط */
+  email: string | null;
+  displayName: string | null;
   accessTtlSeconds: number;
   refreshTtlSeconds: number;
   webSessionTtlSeconds: number;
@@ -99,6 +103,8 @@ export class AuthService {
       userAgent: input.userAgent ?? null,
     });
 
+    const profile = await getUserPublicProfile(userId);
+
     return {
       accessToken,
       refreshToken,
@@ -106,6 +112,8 @@ export class AuthService {
       sessionId,
       roles,
       userId,
+      email: profile?.email ?? null,
+      displayName: profile?.displayName ?? null,
       accessTtlSeconds: getAccessTtlSeconds(),
       refreshTtlSeconds: getRefreshTtlSeconds(),
       webSessionTtlSeconds: getWebSessionTtlSeconds(),
@@ -174,6 +182,8 @@ export class AuthService {
       sessionId: payload.sid,
       roles,
       userId: session.userId,
+      email: null,
+      displayName: null,
       accessTtlSeconds: getAccessTtlSeconds(),
       refreshTtlSeconds: getRefreshTtlSeconds(),
       webSessionTtlSeconds: getWebSessionTtlSeconds(),

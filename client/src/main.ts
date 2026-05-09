@@ -9,6 +9,7 @@ import { createAuthedSocket } from "./auth/socketFactory";
 import { cleanupEmailLinkLandingUrl, completeGoogleRedirectLogin, getAuthReadableStatus } from "./auth/authFlows";
 import { readPasswordResetModeFromUrl } from "./auth/emailLinkUrl";
 import { getAuthState, subscribeAuthState } from "./auth/authStore";
+import { getFirebaseAuth } from "./auth/firebaseClient";
 import { hydrateAuthSession } from "./auth/sessionSync";
 import { attachSocketAuthSync } from "./auth/socketSync";
 import { getAuthTokens } from "./auth/authClient";
@@ -4565,6 +4566,9 @@ window.addEventListener("storage", (event) => {
   }
 });
 void (async () => {
+  void getFirebaseAuth().catch(() => {
+    /* تهيئة SDK مسبقاً؛ النقر على تسجيل الدخول يعيد المحاولة */
+  });
   try {
     await completeGoogleRedirectLogin();
   } catch (error) {
