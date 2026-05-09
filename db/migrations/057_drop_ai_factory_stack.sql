@@ -1,6 +1,12 @@
--- إزالة جداول مصنع المحتوى ذي الطبقات بعد توقف التطبيق عن استخدامها.
--- تحذير: يحذف سجلات الاستخدام السابقة في ai_usage_logs ثم يُعيد إنشاء الجدول بلا FK إلى ai_factory_jobs.
+-- إزالة مخلفات مصنع المحتوى ذي الطبقات (كانت migrations 023، 027، 031، …).
+--
+-- متطلبات مسبقة: نسخ احتياطي؛ هذا الملف غير قابل للعكس من ناحية البيانات.
+-- تأثير البيانات: حذف كل صفوف public.ai_usage_logs ثم إعادة إنشاء الجدول فارغاً بلا FK إلى ai_factory_jobs.
+-- ترتيب DROP: الجداول التي تشير إلى ai_factory_jobs أولاً، ثم ai_factory_jobs، ثم الإعدادات المستقلة.
+--
+-- يُنفَّذ الملف كمعاملة واحدة من قبل server/scripts/migrate.ts (BEGIN خارج هذا الملف).
 
+-- CASCADE: يحذف أيضاً أي view أو object يعتمد على هذه الجداول (نادر في هذا المشروع).
 DROP TABLE IF EXISTS public.ai_usage_logs CASCADE;
 DROP TABLE IF EXISTS public.ai_factory_inspection_logs CASCADE;
 DROP TABLE IF EXISTS public.ai_factory_job_logs CASCADE;
@@ -8,7 +14,7 @@ DROP TABLE IF EXISTS public.ai_factory_pipeline_state CASCADE;
 DROP TABLE IF EXISTS public.ai_factory_jobs CASCADE;
 DROP TABLE IF EXISTS public.ai_factory_model_config CASCADE;
 
-CREATE TABLE IF NOT EXISTS public.ai_usage_logs (
+CREATE TABLE public.ai_usage_logs (
   id BIGSERIAL PRIMARY KEY,
   job_id BIGINT NOT NULL,
   model_id TEXT NOT NULL,
@@ -32,4 +38,5 @@ CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_model_created ON public.ai_usage_lo
 CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_layer_created ON public.ai_usage_logs (layer_type, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_subject_model_created ON public.ai_usage_logs (subject, model_id, created_at DESC);
 
+-- مفاتيح المصنع والسجلات المرتبطة (مثل ai_factory_logs_cleanup_* من 029)
 DELETE FROM public.app_settings WHERE key LIKE 'ai_factory%';
