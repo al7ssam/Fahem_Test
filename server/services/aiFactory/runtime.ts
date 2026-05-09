@@ -12,6 +12,8 @@ type FactorySettings = {
   batchSize: number;
   intervalMinutes: number;
   defaultTargetCount: number;
+  /** صعوبة الوظائف التي يُنشئها الجدول التلقائي لكل تصنيف فرعي تحت الهدف. */
+  schedulerDifficultyMode: FactoryDifficulty;
   lastSchedulerRun: string;
 };
 
@@ -34,6 +36,7 @@ const SETTING_KEYS = {
   batchSize: "ai_factory_batch_size",
   intervalMinutes: "ai_factory_interval_minutes",
   defaultTargetCount: "ai_factory_default_target_count",
+  schedulerDifficultyMode: "ai_factory_scheduler_difficulty_mode",
   lastSchedulerRun: "ai_factory_last_scheduler_run",
 } as const;
 
@@ -54,6 +57,12 @@ function parsePromptVariant(v: unknown): PromptVariant | null {
   return null;
 }
 
+function parseSchedulerDifficulty(v: string | undefined): FactoryDifficulty {
+  const s = String(v ?? "").trim().toLowerCase();
+  if (s === "easy" || s === "medium" || s === "hard" || s === "mix") return s;
+  return "mix";
+}
+
 function resolvePromptVariantForNewJob(): PromptVariant {
   const abPercent = Number(process.env.AI_FACTORY_AB_OPTIMIZED_PERCENT ?? 0);
   if (Number.isFinite(abPercent) && abPercent > 0) {
@@ -68,12 +77,13 @@ export async function readFactorySettings(): Promise<FactorySettings> {
   const rows = await pool.query<{ key: string; value: string }>(
     `SELECT key, value
      FROM public.app_settings
-     WHERE key IN ($1, $2, $3, $4, $5)`,
+     WHERE key IN ($1, $2, $3, $4, $5, $6)`,
     [
       SETTING_KEYS.enabled,
       SETTING_KEYS.batchSize,
       SETTING_KEYS.intervalMinutes,
       SETTING_KEYS.defaultTargetCount,
+      SETTING_KEYS.schedulerDifficultyMode,
       SETTING_KEYS.lastSchedulerRun,
     ],
   );
@@ -83,6 +93,7 @@ export async function readFactorySettings(): Promise<FactorySettings> {
     batchSize: toInt(map.get(SETTING_KEYS.batchSize), 20, 1, 200),
     intervalMinutes: toInt(map.get(SETTING_KEYS.intervalMinutes), 30, 1, 1440),
     defaultTargetCount: toInt(map.get(SETTING_KEYS.defaultTargetCount), 200, 1, 100000),
+    schedulerDifficultyMode: parseSchedulerDifficulty(map.get(SETTING_KEYS.schedulerDifficultyMode)),
     lastSchedulerRun: String(map.get(SETTING_KEYS.lastSchedulerRun) ?? "").trim(),
   };
 }
@@ -92,6 +103,7 @@ export async function saveFactorySettings(input: {
   batchSize: number;
   intervalMinutes: number;
   defaultTargetCount: number;
+  schedulerDifficultyMode: FactoryDifficulty;
 }): Promise<FactorySettings> {
   const pool = getPool();
   await pool.query(
@@ -99,7 +111,8 @@ export async function saveFactorySettings(input: {
        ($1, $2),
        ($3, $4),
        ($5, $6),
-       ($7, $8)
+       ($7, $8),
+       ($9, $10)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [
       SETTING_KEYS.enabled,
@@ -110,6 +123,8 @@ export async function saveFactorySettings(input: {
       String(toInt(String(input.intervalMinutes), 30, 1, 1440)),
       SETTING_KEYS.defaultTargetCount,
       String(toInt(String(input.defaultTargetCount), 200, 1, 100000)),
+      SETTING_KEYS.schedulerDifficultyMode,
+      parseSchedulerDifficulty(input.schedulerDifficultyMode),
     ],
   );
   return readFactorySettings();
@@ -429,7 +444,7 @@ export class AIFactoryRuntime {
       if (generated >= target) continue;
       await enqueueJob({
         subcategoryKey: key,
-        difficultyMode: "mix",
+        difficultyMode: settings.schedulerDifficultyMode,
         targetCount: target,
         batchSize: settings.batchSize,
         payload: { scheduled: true },

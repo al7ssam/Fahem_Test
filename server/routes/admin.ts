@@ -257,6 +257,7 @@ const factorySettingsPatchSchema = z.object({
   batchSize: z.number().int().min(1).max(200),
   intervalMinutes: z.number().int().min(1).max(1440),
   defaultTargetCount: z.number().int().min(1).max(100000),
+  schedulerDifficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
 });
 
 const factoryRunNowSchema = z.object({
