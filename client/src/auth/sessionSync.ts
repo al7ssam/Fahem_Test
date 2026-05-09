@@ -1,4 +1,5 @@
 import { beginAuthOperation, commitAuthOperation, getAuthState } from "./authStore";
+import { refreshProfileCacheAfterAuth } from "../playerDisplayName";
 import { fetchCurrentUser } from "./sessionClient";
 
 export async function hydrateAuthSession(): Promise<void> {
@@ -7,6 +8,7 @@ export async function hydrateAuthSession(): Promise<void> {
   try {
     const user = await fetchCurrentUser();
     commitAuthOperation(op, { status: "authenticated", user, lastError: null });
+    void refreshProfileCacheAfterAuth();
   } catch (error) {
     const reason = error instanceof Error ? error.message : "auth_hydration_failed";
     commitAuthOperation(op, {

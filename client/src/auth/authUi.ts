@@ -1,6 +1,7 @@
 import {
   cleanupEmailLinkLandingUrl,
   confirmPasswordResetFlow,
+  getAuthWelcomeLine,
   getAuthReadableStatus,
   loginWithEmailPassword,
   loginWithGoogle,
@@ -15,6 +16,7 @@ import {
   readFirebaseErrorCode,
   userFacingAuthMessage,
 } from "./authErrors";
+import { mountProfileEditor } from "../profile/profileEditor";
 import { getAuthState } from "./authStore";
 import { signInGoogleThenLinkPendingPassword, signInPasswordThenLinkPendingGoogle } from "./linkingFlows";
 
@@ -143,11 +145,12 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
   const titleEl = document.createElement("h2");
   titleEl.id = "auth-modal-title";
   titleEl.className = "auth-modal-title";
-  titleEl.textContent = "الحساب";
+  titleEl.textContent = getAuthState().status === "authenticated" ? "الحساب والملف الشخصي" : "الحساب";
 
   const subtitleEl = document.createElement("p");
   subtitleEl.className = "auth-modal-subtitle";
-  subtitleEl.textContent = `الحالة الحالية: ${getAuthReadableStatus()}`;
+  subtitleEl.textContent =
+    getAuthState().status === "authenticated" ? getAuthWelcomeLine() : `الحالة الحالية: ${getAuthReadableStatus()}`;
 
   const errorEl = document.createElement("p");
   errorEl.id = "auth-modal-error";
@@ -304,28 +307,35 @@ export function openAuthModal(options: OpenAuthModalOptions = {}): void {
     dynamicRoot.classList.add("auth-modal-panel--enter");
 
     if (state.status === "authenticated" && state.user) {
-      const card = document.createElement("div");
-      card.className = "auth-user-card";
-      const p1 = document.createElement("p");
-      p1.className = "m-0 text-sm";
-      p1.append("مسجل كـ: ");
-      const strong = document.createElement("strong");
-      strong.textContent = state.user.displayName ?? state.user.email ?? "مستخدم";
-      p1.appendChild(strong);
-      const p2 = document.createElement("p");
-      p2.className = "m-0 text-xs text-slate-400";
-      p2.textContent = state.user.email ?? "بدون بريد";
-      card.appendChild(p1);
-      card.appendChild(p2);
+      subtitleEl.textContent = getAuthWelcomeLine();
+      titleEl.textContent = "الحساب والملف الشخصي";
+
+      const emailHint = document.createElement("p");
+      emailHint.className = "m-0 text-xs text-slate-400 mb-3 text-right";
+      emailHint.textContent = state.user.email ? `البريد: ${state.user.email}` : "بدون بريد";
+      dynamicRoot.appendChild(emailHint);
+
+      const profileSlot = document.createElement("div");
+      profileSlot.className =
+        "auth-modal-profile-slot max-h-[min(65vh,520px)] overflow-y-auto overflow-x-hidden pb-2";
+      dynamicRoot.appendChild(profileSlot);
+
+      void mountProfileEditor(profileSlot, {
+        onSaved: () => {
+          subtitleEl.textContent = getAuthWelcomeLine();
+          options.onCompleted?.();
+          window.dispatchEvent(new CustomEvent("fahem:profile-cache-updated"));
+        },
+      });
+
       const logoutBtn = document.createElement("button");
       logoutBtn.type = "button";
-      logoutBtn.className = "ui-btn ui-btn--ghost w-full py-2";
+      logoutBtn.className = "ui-btn ui-btn--ghost w-full py-2 mt-2";
       logoutBtn.id = "auth-modal-logout";
       logoutBtn.textContent = "تسجيل خروج";
       logoutBtn.addEventListener("click", () => {
         void withLoading(logoutBtn, () => logoutFlow(), { loadingLabel: "جاري تسجيل الخروج..." });
       });
-      dynamicRoot.appendChild(card);
       dynamicRoot.appendChild(logoutBtn);
       return;
     }

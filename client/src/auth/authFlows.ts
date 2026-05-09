@@ -15,6 +15,7 @@ import {
   type User,
   type UserCredential,
 } from "firebase/auth";
+import { getWelcomeDisplayName, refreshProfileCacheAfterAuth } from "../playerDisplayName";
 import { beginAuthOperation, commitAuthOperation, getAuthState, setAuthState } from "./authStore";
 import { buildPasswordResetContinueUrl, cleanupEmailLinkLandingUrl } from "./emailLinkUrl";
 import { getFirebaseAuth, getGoogleProvider } from "./firebaseClient";
@@ -137,6 +138,7 @@ async function syncBackendFromFirebaseUser(
   perfAuthMark("sync-end");
   perfAuthMeasure("firebase-sync-total", "sync-start", "sync-end");
   setAuthState({ status: "authenticated", user, lastError: null });
+  void refreshProfileCacheAfterAuth();
 }
 
 async function syncBackendFromFirebaseCredential(
@@ -399,6 +401,15 @@ export function getAuthReadableStatus(): string {
   if (s === "loading") return "جاري التحقق";
   if (s === "error") return "خطأ مصادقة";
   return "غير مسجل";
+}
+
+/** سطر ترحيب للواجهة: أهلاً مع الاسم الفعّال (يمرَّر مسودة الاسم من الشاشة الرئيسية إن وُجدت). */
+export function getAuthWelcomeLine(playerNameDraft = ""): string {
+  const s = getAuthState().status;
+  if (s === "loading") return "جاري التحقق…";
+  if (s === "error") return "خطأ مصادقة";
+  if (s !== "authenticated") return "يمكنك تسجيل الدخول أو المتابعة كضيف";
+  return `أهلاً، ${getWelcomeDisplayName(playerNameDraft)}`;
 }
 
 export { cleanupEmailLinkLandingUrl } from "./emailLinkUrl";

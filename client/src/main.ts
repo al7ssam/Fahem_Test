@@ -6,7 +6,11 @@ import { normalizePastedJsonForParse } from "./jsonNormalize";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
-import { cleanupEmailLinkLandingUrl, completeGoogleRedirectLogin, getAuthReadableStatus } from "./auth/authFlows";
+import {
+  cleanupEmailLinkLandingUrl,
+  completeGoogleRedirectLogin,
+  getAuthWelcomeLine,
+} from "./auth/authFlows";
 import { readPasswordResetModeFromUrl } from "./auth/emailLinkUrl";
 import { getAuthState, subscribeAuthState } from "./auth/authStore";
 import { getFirebaseAuth } from "./auth/firebaseClient";
@@ -14,13 +18,16 @@ import { hydrateAuthSession } from "./auth/sessionSync";
 import { attachSocketAuthSync } from "./auth/socketSync";
 import { getAuthTokens } from "./auth/authClient";
 import { openAuthModal } from "./auth/authUi";
-import { renderProfileView } from "./profile/profileScreen";
+import {
+  getEffectivePlayerName,
+  getStoredPlayerName,
+  storePlayerName,
+} from "./playerDisplayName";
 
 type GameMode = "direct" | "study_then_quiz" | "lesson";
 type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 type Phase =
   | "name"
-  | "profile"
   | "custom_lesson"
   | "lesson_menu"
   | "lesson_study"
@@ -250,7 +257,6 @@ const DEFAULT_RESULT_MESSAGES = {
   loser: "انتهت الجولة لصالح لاعب آخر.",
   tie: "تعادل أو لا فائز — حاول مرة أخرى!",
 } as const;
-const PLAYER_NAME_STORAGE_KEY = "fahem.playerName";
 const PLAYER_SESSION_STORAGE_KEY = "fahem.playerSessionId";
 const RELEASE_VERSION_QUERY_KEY = "v";
 const RELEASE_WATCH_FOREGROUND_INTERVAL_MS = 30_000;
@@ -282,23 +288,6 @@ const RESULT_VIDEO_SRC = {
 } as const;
 
 type ResultScreenKind = "win" | "lose" | "tie" | "empty";
-
-function getStoredPlayerName(): string {
-  try {
-    const raw = window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY);
-    return (raw ?? "").trim();
-  } catch {
-    return "";
-  }
-}
-
-function storePlayerName(name: string): void {
-  try {
-    window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, name);
-  } catch {
-    /* ignore storage failures */
-  }
-}
 
 function getOrCreatePlayerSessionId(): string {
   try {
@@ -772,20 +761,19 @@ function clearTimer(): void {
   }
 }
 
+function openAccountProfileModal(): void {
+  const run = (): void => {
+    openAuthModal({
+      onCompleted: () => render(),
+    });
+  };
+  if (typeof queueMicrotask === "function") queueMicrotask(run);
+  else window.setTimeout(run, 0);
+}
+
 function render(): void {
   clearTimer();
   app.innerHTML = "";
-
-  if (phase === "profile") {
-    void renderProfileView(app, {
-      onBack: () => {
-        phase = "name";
-        history.pushState({}, "", "/");
-        render();
-      },
-    });
-    return;
-  }
 
   if (phase === "name") {
     const isPrivateEntryFlow = Boolean(pendingJoinRoomCode);
@@ -827,6 +815,13 @@ function render(): void {
         </button>`,
       )
       .join("");
+    const authUi = getAuthState();
+    const guestNameFieldsHtml =
+      authUi.status !== "authenticated"
+        ? `<label class="block text-right text-sm text-slate-400">اسمك في اللعبة (اختياري)</label>
+              <input id="name-input" maxlength="32" type="text" placeholder="اتركه فارغاً لاستخدام «مجهول» دون اسم محفوظ" class="app-input w-full px-4 py-3 text-right text-lg" />
+              <p class="text-xs text-slate-500 text-right m-0">إن لم يُعرَض لك حقلاً للاسم، سيُستخدم «مجهول» في التحدي حتى يتوفر اسم من الملف أو الحساب.</p>`
+        : `<p class="text-sm text-slate-400 text-right m-0">يُعرَض اسمك في اللعب من <strong>الملف الشخصي</strong> وحسابك. افتح <strong>الحساب والملف الشخصي</strong> لتعديل الاسم أو الدولة.</p>`;
     app.append(
       el(`
         <div class="app-screen min-h-screen text-white flex flex-col items-center justify-center p-4">
@@ -834,23 +829,13 @@ function render(): void {
             <h1 class="text-4xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-l from-amber-300 to-orange-400">فاهم</h1>
             <p class="text-slate-300 text-lg">تحدٍّ سريع — من يبقى آخر يفوز؟</p>
             <div class="app-card p-6 space-y-5">
-              <label class="block text-right text-sm text-slate-400">اسمك في اللعبة</label>
-              <input id="name-input" maxlength="32" type="text" placeholder="مثال: سارة" class="app-input w-full px-4 py-3 text-right text-lg" />
+              ${guestNameFieldsHtml}
               <div class="auth-entry-inline">
-                <span class="auth-entry-status">${escapeHtml(getAuthReadableStatus())}</span>
+                <span class="auth-entry-status">${escapeHtml(getAuthWelcomeLine(playerNameDraft))}</span>
                 <button id="auth-open-btn" type="button" class="ui-btn ui-btn--ghost px-3 py-2 text-sm">
-                  ${getAuthState().status === "authenticated" ? "إدارة الحساب" : "تسجيل الدخول"}
+                  ${authUi.status === "authenticated" ? "الحساب والملف الشخصي" : "تسجيل الدخول"}
                 </button>
               </div>
-              ${
-                getAuthState().status === "authenticated"
-                  ? `<div class="flex justify-center mt-2">
-                <button type="button" id="open-profile-btn" class="ui-btn ui-btn--ghost px-4 py-2 text-sm">
-                  الملف الشخصي
-                </button>
-              </div>`
-                  : ""
-              }
               <p class="text-sm text-slate-400 text-right m-0">${
                 isPrivateEntryFlow
                   ? `الانضمام للغرفة الخاصة (${pendingJoinRoomCode})`
@@ -938,20 +923,32 @@ function render(): void {
         </div>
       `),
     );
-    const input = app.querySelector<HTMLInputElement>("#name-input")!;
+    const input = app.querySelector<HTMLInputElement>("#name-input");
     const storedName = getStoredPlayerName();
-    if (playerNameDraft || storedName) {
-      input.value = playerNameDraft || storedName;
-    }
-    input.addEventListener("input", () => {
-      playerNameDraft = input.value;
-    });
-    input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        input.blur();
+    if (input) {
+      if (playerNameDraft || storedName) {
+        input.value = playerNameDraft || storedName;
       }
-    });
+      input.addEventListener("input", () => {
+        playerNameDraft = input.value;
+      });
+      input.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          input.blur();
+        }
+      });
+    }
+    const syncDraftFromGuestInput = (): void => {
+      if (input) playerNameDraft = input.value;
+    };
+    const resolveJoinDisplayName = (): string => {
+      syncDraftFromGuestInput();
+      const n = getEffectivePlayerName(playerNameDraft);
+      storePlayerName(n);
+      playerNameDraft = n;
+      return n;
+    };
     const btn = app.querySelector<HTMLButtonElement>("#join-btn")!;
     const soloBtn = app.querySelector<HTMLButtonElement>("#solo-learning-btn");
     const createPrivateBtn = app.querySelector<HTMLButtonElement>("#create-private-room-btn");
@@ -966,11 +963,6 @@ function render(): void {
         },
       });
     });
-    app.querySelector<HTMLButtonElement>("#open-profile-btn")?.addEventListener("click", () => {
-      phase = "profile";
-      history.pushState({}, "", "/profile");
-      render();
-    });
     if (privateCodeInput) {
       privateCodeInput.value = pendingJoinRoomCode;
       privateCodeInput.addEventListener("input", () => {
@@ -981,7 +973,7 @@ function render(): void {
     const goToStudyCategories = async () => {
       if (btn.disabled) return;
       err.textContent = "";
-      playerNameDraft = input.value;
+      syncDraftFromGuestInput();
       selectedModeInName = "study_then_quiz";
       selectedMainCategoryId = null;
       selectedSubcategoryKey = null;
@@ -1003,7 +995,7 @@ function render(): void {
     if (renderModePicker) {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
-          playerNameDraft = input.value;
+          syncDraftFromGuestInput();
           if (b.dataset.flow === "lessons") {
             err.textContent = "";
             lessonBrowseMsg = "جاري تحميل الدروس…";
@@ -1074,7 +1066,7 @@ function render(): void {
     } else if (nameFlowStep === "main_categories") {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
-          playerNameDraft = input.value;
+          syncDraftFromGuestInput();
           const id = Number(b.dataset.mainId);
           if (!Number.isInteger(id)) return;
           selectedMainCategoryId = id;
@@ -1087,7 +1079,7 @@ function render(): void {
     } else if (nameFlowStep === "sub_categories") {
       modeBtns.forEach((b) => {
         b.addEventListener("click", () => {
-          playerNameDraft = input.value;
+          syncDraftFromGuestInput();
           const key = b.dataset.subKey?.trim();
           const label = b.dataset.subName?.trim();
           if (!key) return;
@@ -1125,16 +1117,37 @@ function render(): void {
     btn.addEventListener("click", async () => {
       if (btn.disabled) return;
       err.textContent = "";
-      const name = input.value.trim();
-      if (!name) {
-        err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
+      syncDraftFromGuestInput();
+      if (nameFlowStep === "main_categories") {
+        if (!selectedMainCategoryId) {
+          err.textContent = "اختر تصنيفًا رئيسيًا.";
+          return;
+        }
+        btn.disabled = true;
+        btn.classList.add("btn-pending");
+        nameFlowStep = "sub_categories";
+        btn.disabled = false;
+        btn.classList.remove("btn-pending");
+        render();
         return;
       }
+      if (nameFlowStep === "sub_categories") {
+        if (!selectedSubcategoryKey) {
+          err.textContent = "اختر تصنيفًا فرعيًا.";
+          return;
+        }
+        btn.disabled = true;
+        btn.classList.add("btn-pending");
+        nameFlowStep = "difficulty";
+        btn.disabled = false;
+        btn.classList.remove("btn-pending");
+        render();
+        return;
+      }
+      const name = resolveJoinDisplayName();
       btn.disabled = true;
       btn.classList.add("btn-pending");
-      storePlayerName(name);
       if (isPrivateEntryFlow) {
-        playerNameDraft = name;
         phase = "matchmaking";
         soloLearningPending = false;
         privateRoomCodeState = pendingJoinRoomCode;
@@ -1144,32 +1157,6 @@ function render(): void {
         lobbyNotice = "جاري الانضمام للغرفة الخاصة...";
         render();
         connectSocket(name, "direct", null, "mix", "private_join", pendingJoinRoomCode);
-        return;
-      }
-      if (nameFlowStep === "main_categories") {
-        if (!selectedMainCategoryId) {
-          btn.disabled = false;
-          btn.classList.remove("btn-pending");
-          err.textContent = "اختر تصنيفًا رئيسيًا.";
-          return;
-        }
-        nameFlowStep = "sub_categories";
-        btn.disabled = false;
-        btn.classList.remove("btn-pending");
-        render();
-        return;
-      }
-      if (nameFlowStep === "sub_categories") {
-        if (!selectedSubcategoryKey) {
-          btn.disabled = false;
-          btn.classList.remove("btn-pending");
-          err.textContent = "اختر تصنيفًا فرعيًا.";
-          return;
-        }
-        nameFlowStep = "difficulty";
-        btn.disabled = false;
-        btn.classList.remove("btn-pending");
-        render();
         return;
       }
       btn.textContent = "جاري الدخول...";
@@ -1187,17 +1174,11 @@ function render(): void {
     soloBtn?.addEventListener("click", () => {
       if (soloBtn.disabled) return;
       err.textContent = "";
-      const name = input.value.trim();
-      if (!name) {
-        err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
-        return;
-      }
       if (selectedModeInName === "study_then_quiz" && !selectedSubcategoryKey) {
         err.textContent = "اختر تصنيفًا فرعيًا أولاً.";
         return;
       }
-      storePlayerName(name);
-      playerNameDraft = name;
+      const name = resolveJoinDisplayName();
       soloBtn.disabled = true;
       soloBtn.classList.add("btn-pending");
       soloBtn.textContent = "جاري بدء التعلم الفردي...";
@@ -1217,12 +1198,7 @@ function render(): void {
       );
     });
     createPrivateBtn?.addEventListener("click", () => {
-      const name = input.value.trim();
-      if (!name) {
-        err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
-        return;
-      }
-      storePlayerName(name);
+      const name = resolveJoinDisplayName();
       phase = "private_room_lobby";
       soloLearningPending = false;
       privateRoomCodeState = null;
@@ -1241,18 +1217,13 @@ function render(): void {
       );
     });
     joinPrivateBtn?.addEventListener("click", () => {
-      const name = input.value.trim();
+      const name = resolveJoinDisplayName();
       const roomCode = (privateCodeInput?.value || pendingJoinRoomCode).trim().toUpperCase();
-      if (!name) {
-        err.textContent = "أدخل اسماً من حرف واحد على الأقل.";
-        return;
-      }
       if (!roomCode) {
         err.textContent = "أدخل كود الغرفة.";
         return;
       }
       pendingJoinRoomCode = roomCode;
-      storePlayerName(name);
       phase = "matchmaking";
       soloLearningPending = false;
       privateRoomCodeState = roomCode;
@@ -1269,7 +1240,7 @@ function render(): void {
       storedName &&
       !privateEntryAutoJoinTried
     ) {
-      input.value = storedName;
+      if (input) input.value = storedName;
       playerNameDraft = storedName;
       privateEntryAutoJoinTried = true;
       phase = "matchmaking";
@@ -1279,7 +1250,7 @@ function render(): void {
       isPrivateRoomSession = true;
       lobbyNotice = "جاري الانضمام التلقائي للغرفة الخاصة...";
       render();
-      connectSocket(storedName, "direct", null, "mix", "private_join", pendingJoinRoomCode);
+      connectSocket(resolveJoinDisplayName(), "direct", null, "mix", "private_join", pendingJoinRoomCode);
     }
     return;
   }
@@ -1517,13 +1488,7 @@ function render(): void {
         render();
         return;
       }
-      const name = getStoredPlayerName() || playerNameDraft.trim();
-      if (!name) {
-        customLessonErr = "عرّف اسماً من الشاشة الرئيسية أولاً (الرئيسية).";
-        persistDraft();
-        render();
-        return;
-      }
+      const name = getEffectivePlayerName(playerNameDraft);
       try {
         const res = await fetch("/api/custom-lessons/session", {
           method: "POST",
@@ -1770,11 +1735,6 @@ function render(): void {
         if (menuErr) menuErr.textContent = "تعذر تحديد الدرس.";
         return;
       }
-      if (!name) {
-        if (menuErr)
-          menuErr.textContent = "لم يُعرَّف اسم اللاعب. استخدم زر «الذهاب للرئيسية لإدخال الاسم».";
-        return;
-      }
       storePlayerName(name);
       playerNameDraft = name;
       phase = "matchmaking";
@@ -1787,11 +1747,6 @@ function render(): void {
     app.querySelector("#lesson-menu-create-private")?.addEventListener("click", () => {
       clearMenuErr();
       const name = lessonMenuPlayerName();
-      if (!name) {
-        if (menuErr)
-          menuErr.textContent = "لم يُعرَّف اسم اللاعب. استخدم زر «الذهاب للرئيسية لإدخال الاسم».";
-        return;
-      }
       if (!selectedLessonMatchId) {
         if (menuErr) menuErr.textContent = "تعذر تحديد الدرس.";
         return;
@@ -1821,11 +1776,6 @@ function render(): void {
       clearMenuErr();
       const name = lessonMenuPlayerName();
       const roomCode = (roomMenuInput?.value || pendingJoinRoomCode).trim().toUpperCase();
-      if (!name) {
-        if (menuErr)
-          menuErr.textContent = "لم يُعرَّف اسم اللاعب. استخدم زر «الذهاب للرئيسية لإدخال الاسم».";
-        return;
-      }
       if (!roomCode) {
         if (menuErr) menuErr.textContent = "أدخل كود الغرفة.";
         return;
@@ -2628,16 +2578,7 @@ function render(): void {
     backPrivateRoomBtn?.addEventListener("click", () => {
       const roomCode = lastPrivateRoomCode;
       if (!roomCode) return;
-      const name = (playerNameDraft || getStoredPlayerName()).trim();
-      if (!name) {
-        phase = "name";
-        pendingJoinRoomCode = roomCode;
-        privateEntryAutoJoinTried = false;
-        render();
-        const errEl = document.querySelector<HTMLParagraphElement>("#join-err");
-        if (errEl) errEl.textContent = "أدخل الاسم للعودة إلى الغرفة الخاصة.";
-        return;
-      }
+      const name = getEffectivePlayerName(playerNameDraft);
       phase = "matchmaking";
       privateRoomCodeState = roomCode;
       privateRoomInviteUrl = `${window.location.origin}?room=${roomCode}`;
@@ -2831,7 +2772,7 @@ function startLessonStudyForCurrentSection(): void {
 }
 
 function lessonMenuPlayerName(): string {
-  return (playerNameDraft || getStoredPlayerName() || "").trim();
+  return getEffectivePlayerName(playerNameDraft);
 }
 
 function lessonBrowseSortedCategories(): typeof lessonBrowseCategories {
@@ -4575,14 +4516,15 @@ if (pendingJoinRoomCode) {
   privateEntryAutoJoinTried = false;
 }
 subscribeAuthState(() => {
-  if (phase === "name" || phase === "profile") render();
+  if (phase === "name") render();
+});
+window.addEventListener("fahem:profile-cache-updated", () => {
+  if (phase === "name") render();
 });
 window.addEventListener("popstate", () => {
   const pathOnly = window.location.pathname.replace(/\/$/, "") || "/";
   if (pathOnly === "/profile") {
-    phase = "profile";
-  } else if (phase === "profile") {
-    phase = "name";
+    openAccountProfileModal();
   }
   render();
 });
@@ -4675,7 +4617,8 @@ if (lessonPreviewBoot === "1") {
 } else {
   const pathOnly = window.location.pathname.replace(/\/$/, "") || "/";
   if (pathOnly === "/profile") {
-    phase = "profile";
+    history.replaceState({}, "", "/");
+    openAccountProfileModal();
   }
   render();
 }
