@@ -53,7 +53,13 @@ export function readCookie(name: string): string {
     const parts = document.cookie.split(";").map((x) => x.trim());
     const hit = parts.find((p) => p.startsWith(target));
     if (!hit) return "";
-    return decodeURIComponent(hit.slice(target.length));
+    const raw = hit.slice(target.length);
+    /** المتصفح يعيد قيمة الكوكي مفسَّرة؛ تجنُّب decodeURIComponent قد يفسد قيم base64url لـ CSRF */
+    try {
+      return /%[0-9A-Fa-f]{2}/.test(raw) ? decodeURIComponent(raw) : raw;
+    } catch {
+      return raw;
+    }
   } catch {
     return "";
   }

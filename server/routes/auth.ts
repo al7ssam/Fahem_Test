@@ -32,6 +32,13 @@ function readTraceId(req: Request): string {
   return String(req.header("x-auth-trace-id") ?? req.header("x-request-id") ?? "").trim();
 }
 
+/** يفضّل كوكي refresh (مصدر المتصفح الموثوق) على الجسم لتجنّب رمز قديم في localStorage. */
+function resolveRefreshToken(cookieRt: string, bodyRt: string): string {
+  const c = cookieRt.trim();
+  const b = bodyRt.trim();
+  return c.length >= 10 ? c : b;
+}
+
 export function registerAuthRoutes(app: Express): void {
   app.post("/api/auth/exchange", async (req: Request, res: Response) => {
     const parsed = exchangeBodySchema.safeParse(req.body ?? {});
@@ -70,14 +77,12 @@ export function registerAuthRoutes(app: Express): void {
           id: result.userId,
           roles: result.roles,
         },
-        tokens:
-          parsed.data.clientType === "mobile"
-            ? {
-                accessToken: result.accessToken,
-                refreshToken: result.refreshToken,
-                expiresIn: result.accessTtlSeconds,
-              }
-            : undefined,
+        /** الويب والجوال: يُحدَّث localStorage في العميل ليتوافق مع الكوكيات ويُجنَّب رمز قديم في التخزين. */
+        tokens: {
+          accessToken: result.accessToken,
+          refreshToken: result.refreshToken,
+          expiresIn: result.accessTtlSeconds,
+        },
       });
     } catch (error) {
       await logAuthEvent({
@@ -107,7 +112,10 @@ export function registerAuthRoutes(app: Express): void {
       return;
     }
     try {
-      const refreshToken = String(parsed.data.refreshToken ?? req.cookies?.fahem_refresh_token ?? "").trim();
+      const refreshToken = resolveRefreshToken(
+        String(req.cookies?.fahem_refresh_token ?? ""),
+        String(parsed.data.refreshToken ?? ""),
+      );
       if (!refreshToken) {
         res.status(401).json({ ok: false, error: "missing_refresh_token" });
         return;
@@ -158,7 +166,10 @@ export function registerAuthRoutes(app: Express): void {
 
   app.post("/api/auth/logout", requireAuth, async (req: Request, res: Response) => {
     try {
-      const refreshToken = String(req.cookies?.fahem_refresh_token ?? req.body?.refreshToken ?? "").trim();
+      const refreshToken = resolveRefreshToken(
+        String(req.cookies?.fahem_refresh_token ?? ""),
+        String(req.body?.refreshToken ?? ""),
+      );
       const csrfHeader = readCsrfHeader(req);
       const csrfCookie = String(req.cookies?.fahem_csrf_token ?? "").trim();
       if (refreshToken) {
