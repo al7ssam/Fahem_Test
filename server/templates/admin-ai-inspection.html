@@ -471,10 +471,6 @@
 
       <div class="card toolbar">
         <div>
-          <label for="admin-secret">Admin Secret</label>
-          <input id="admin-secret" type="password" placeholder="أدخل مفتاح الأدمن" />
-        </div>
-        <div>
           <label for="job-id">Job ID</label>
           <input id="job-id" type="number" min="1" placeholder="مثال: 12" />
         </div>
@@ -1132,19 +1128,11 @@
           next.disabled = finalIndex >= finalPreviewItems.length - 1;
         }
         async function loadInspection() {
-          var secret = document.getElementById("admin-secret").value.trim();
           var jobId = Number(document.getElementById("job-id").value || "0");
           var msg = document.getElementById("msg");
           var effSection = document.getElementById("efficiency-section");
           var effInner = document.getElementById("efficiency-section-inner");
           msg.textContent = "";
-          if (!secret) {
-            effSection.hidden = true;
-            window.__afInspectionPageBundle = null;
-            setPageExportUi(false);
-            msg.textContent = "أدخل Admin Secret أولاً.";
-            return;
-          }
           if (!Number.isInteger(jobId) || jobId < 1) {
             effSection.hidden = true;
             window.__afInspectionPageBundle = null;
@@ -1154,7 +1142,7 @@
           }
           effSection.hidden = false;
           effInner.innerHTML = '<p class="muted" style="margin:0">جاري تحميل تقرير الكفاءة…</p>';
-          var hdr = { headers: { "X-Admin-Secret": secret } };
+          var hdr = { credentials: "same-origin" };
           var base = "/api/admin/ai-factory/jobs/" + jobId + "/";
           try {
             var resEff = await Promise.all([

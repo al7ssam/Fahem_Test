@@ -14,5 +14,3 @@ services:
     envVars:
       - key: CLIENT_ORIGIN
         sync: false
-      - key: ADMIN_SECRET
-        sync: false

@@ -479,16 +479,12 @@
       {{ADMIN_NAV}}
 
       <div class="topbar">
-        <div>
-          <label for="sc-secret">مفتاح الإدارة</label>
-          <input id="sc-secret" type="password" autocomplete="off" placeholder="X-Admin-Secret" />
-        </div>
         <button type="button" class="btn" id="sc-load-cats">تحميل التصنيفات</button>
         <button type="button" class="btn btn-secondary" id="sc-load-templates">قوالب النظام (مرجع)</button>
         <span class="sc-section-status" id="sc-sec-templates-status" aria-live="polite"></span>
       </div>
       <p class="sc-top-steps">
-        مفتاح الإدارة ← <strong>تحميل التصنيفات</strong> ← رئيسي ثم فرعي. «قوالب النظام» للاطلاع فقط.
+        <strong>تحميل التصنيفات</strong> ← رئيسي ثم فرعي. «قوالب النظام» للاطلاع فقط.
       </p>
       <div class="msg" id="sc-msg"></div>
       <div class="card" id="sc-templates-wrap" style="display: none">
@@ -798,9 +794,6 @@
           },
         };
 
-        function secret() {
-          return String(document.getElementById("sc-secret").value || "").trim();
-        }
         function setPromptReadOnly(ro) {
           var ta = document.getElementById("sc-prompt");
           if (ta) ta.readOnly = !!ro;
@@ -855,7 +848,7 @@
             simple_content_no_valid_questions: "لم يُنتج النموذج أسئلة صالحة بعد التحقق. عدّل البرومبت أو الصعوبة أو حجم الدفعة.",
             simple_content_commit_invalid: "لا يمكن التعميد: يلزم معاينة يدوية قيد المراجعة. نفّذ «توليد معاينة» أو اختر التشغيل المناسب من السجل.",
             simple_content_commit_empty: "لا توجد أسئلة مطبّعة في هذا التشغيل للإدراج.",
-            draft_failed: "فشل اقتراح البرومبت بالذكاء. تحقق من المفتاح والنموذج وحاول مرة أخرى.",
+            draft_failed: "فشل اقتراح البرومبت بالذكاء. تحقق من النموذج والاتصال وحاول مرة أخرى.",
             generate_preview_failed: "فشل توليد المعاينة. راجع البرومبت والنموذج والاتصال بالخدمة.",
           };
           return map[s] || "";
@@ -900,7 +893,7 @@
 
         async function loadUsageSummary(subKey) {
           var el = document.getElementById("sc-usage-summary");
-          if (!el || !subKey || !secret()) return;
+          if (!el || !subKey) return;
           var enc = encodeURIComponent(subKey);
           var res = await fetch("/api/admin/simple-content/runs/summary?subcategoryKey=" + enc, hdr());
           var data = await res.json();
@@ -932,7 +925,7 @@
 
         async function loadSchedulerStatsLine() {
           var el = document.getElementById("sc-scheduler-stats-line");
-          if (!el || !secret()) return;
+          if (!el) return;
           var res = await fetch("/api/admin/simple-content/scheduler-stats", hdr());
           var data = await res.json();
           if (res.ok && data.ok && typeof data.skippedTicksBusy === "number") {
@@ -952,7 +945,7 @@
         }
 
         function hdr() {
-          return { headers: { "X-Admin-Secret": secret(), "Content-Type": "application/json" } };
+          return { credentials: "same-origin", headers: { "Content-Type": "application/json" } };
         }
 
         function applyRunsCleanupSettings(j) {
@@ -964,7 +957,7 @@
         }
 
         async function refreshRunsListForWorkspace() {
-          if (!selectedSubKey || !secret()) return;
+          if (!selectedSubKey) return;
           var enc = encodeURIComponent(selectedSubKey);
           var tk = String(document.getElementById("sc-runs-filter-trigger").value || "").trim();
           var st = String(document.getElementById("sc-runs-filter-status").value || "").trim();
@@ -1054,10 +1047,6 @@
         }
 
         document.getElementById("sc-load-templates").addEventListener("click", async function () {
-          if (!secret()) {
-            msg("أدخل مفتاح الإدارة.", false);
-            return;
-          }
           setSectionBusy("templates", true, "جاري التحميل…");
           try {
             var res = await fetch("/api/admin/simple-content/prompt-templates", hdr());
@@ -1142,7 +1131,6 @@
         }
 
         async function loadDraftTemplateFromApi(silent) {
-          if (!secret()) return;
           try {
             var res = await fetch("/api/admin/simple-content/draft-template", hdr());
             var data = await res.json();
@@ -1312,7 +1300,7 @@
         }
 
         async function loadRunDetail(id) {
-          if (!secret() || !id) return;
+          if (!id) return;
           setSectionStatus("sc-sec-review-status", "جاري تحميل التشغيل…", true);
           var res = await fetch("/api/admin/simple-content/runs/" + id, hdr());
           var data = await res.json();
@@ -1399,16 +1387,6 @@
           if (ban0) {
             ban0.hidden = true;
             ban0.textContent = "";
-          }
-          if (!secret()) {
-            msg("أدخل مفتاح الإدارة أعلاه لتحميل البرومبت والنماذج والتوليد.", false);
-            document.getElementById("sc-prompt").value = "";
-            setPromptReadOnly(true);
-            document.getElementById("sc-preset").innerHTML = "";
-            document.getElementById("sc-auto-preset").innerHTML = "";
-            document.getElementById("sc-draft-preset").innerHTML = "";
-            document.getElementById("sc-runs").innerHTML = "";
-            return;
           }
           msg("جاري تحميل البرومبت…", true);
           setWorkspaceLoading(true);
@@ -1562,7 +1540,7 @@
         });
 
         document.getElementById("sc-copy-final-prompt").addEventListener("click", async function () {
-          if (!selectedSubKey || !secret()) return;
+          if (!selectedSubKey) return;
           setSectionBusy("prompt", true, "جاري تجهيز النسخة الكاملة…");
           try {
             var payload = {
@@ -1573,7 +1551,7 @@
             };
             var res = await fetch("/api/admin/simple-content/prompt/final", {
               method: "POST",
-              headers: hdr().headers,
+              credentials: "same-origin", headers: hdr().headers,
               body: JSON.stringify(payload),
             });
             var data = await res.json().catch(function () {
@@ -1598,7 +1576,7 @@
         async function putPresetDefaults(body) {
           var res = await fetch("/api/admin/simple-content/preset-defaults", {
             method: "PUT",
-            headers: hdr().headers,
+            credentials: "same-origin", headers: hdr().headers,
             body: JSON.stringify(body),
           });
           var data = { ok: false };
@@ -1609,7 +1587,6 @@
         }
 
         document.getElementById("sc-save-default-draft").addEventListener("click", async function () {
-          if (!secret()) return;
           var pid = Number(document.getElementById("sc-draft-preset").value);
           if (!Number.isFinite(pid) || pid < 1) {
             msg("اختر نموذجًا من القائمة.", false);
@@ -1626,7 +1603,6 @@
         });
 
         document.getElementById("sc-save-default-generate").addEventListener("click", async function () {
-          if (!secret()) return;
           var pid = Number(document.getElementById("sc-preset").value);
           if (!Number.isFinite(pid) || pid < 1) {
             msg("اختر نموذجًا من القائمة.", false);
@@ -1643,12 +1619,12 @@
         });
 
         document.getElementById("sc-save-prompt").addEventListener("click", async function () {
-          if (!selectedSubKey || !secret()) return;
+          if (!selectedSubKey) return;
           setSectionBusy("prompt", true, "جاري الحفظ…");
           try {
             var enc = encodeURIComponent(selectedSubKey);
             var body = JSON.stringify({ promptBody: document.getElementById("sc-prompt").value });
-            var res = await fetch("/api/admin/simple-content/prompt/" + enc, { method: "PUT", headers: hdr().headers, body: body });
+            var res = await fetch("/api/admin/simple-content/prompt/" + enc, { method: "PUT", credentials: "same-origin", headers: hdr().headers, body: body });
             var data = await res.json();
             var okSave = res.ok && data.ok;
             msg(okSave ? "تم حفظ البرومبت." : "فشل الحفظ.", okSave);
@@ -1660,7 +1636,7 @@
         });
 
         document.getElementById("sc-draft-prompt").addEventListener("click", async function () {
-          if (!selectedSubKey || !secret()) return;
+          if (!selectedSubKey) return;
           msg("جاري اقتراح المسودة…", true);
           var draftPid = Number(document.getElementById("sc-draft-preset").value);
           var preset = lastPresetsItems.find(function (x) {
@@ -1681,7 +1657,7 @@
             if (Number.isFinite(draftPid) && draftPid > 0) body.presetId = draftPid;
             var res = await fetch("/api/admin/simple-content/prompt/generate-draft", {
               method: "POST",
-              headers: hdr().headers,
+              credentials: "same-origin", headers: hdr().headers,
               body: JSON.stringify(body),
             });
             var data = await res.json();
@@ -1716,7 +1692,7 @@
         });
 
         document.getElementById("sc-generate-preview").addEventListener("click", async function () {
-          if (!selectedSubKey || !secret()) return;
+          if (!selectedSubKey) return;
           msg("جاري توليد المعاينة…", true);
           setSectionBusy("generate", true, "جاري التوليد…");
           try {
@@ -1730,7 +1706,7 @@
             try {
               res = await fetch("/api/admin/simple-content/generate-preview", {
                 method: "POST",
-                headers: hdr().headers,
+                credentials: "same-origin", headers: hdr().headers,
                 body: body,
               });
             } catch (netErr) {
@@ -1781,14 +1757,14 @@
         });
 
         document.getElementById("sc-commit").addEventListener("click", async function () {
-          if (!secret() || pendingRunId == null) return;
+          if (pendingRunId == null) return;
           var rid = pendingRunId;
           msg("جاري تعميد الإدراج…", true);
           setSectionBusy("generate", true, "جاري التعميد…");
           try {
             var res = await fetch("/api/admin/simple-content/runs/" + rid + "/commit", {
               method: "POST",
-              headers: hdr().headers,
+              credentials: "same-origin", headers: hdr().headers,
               body: "{}",
             });
             var data = await res.json();
@@ -1809,7 +1785,7 @@
         });
 
         document.getElementById("sc-save-auto").addEventListener("click", async function () {
-          if (!selectedSubKey || !secret()) return;
+          if (!selectedSubKey) return;
           setSectionBusy("auto", true, "جاري الحفظ…");
           try {
             var enc = encodeURIComponent(selectedSubKey);
@@ -1821,7 +1797,7 @@
             });
             var res = await fetch("/api/admin/simple-content/automation/" + enc, {
               method: "PUT",
-              headers: hdr().headers,
+              credentials: "same-origin", headers: hdr().headers,
               body: body,
             });
             var data = await res.json();
@@ -1869,8 +1845,8 @@
         });
 
         document.getElementById("sc-runs-copy-last10-success").addEventListener("click", async function () {
-          if (!selectedSubKey || !secret()) {
-            msg("اختر تصنيفًا فرعيًا وأدخل مفتاح الإدارة أولًا.", false);
+          if (!selectedSubKey) {
+            msg("اختر تصنيفًا فرعيًا أولًا.", false);
             return;
           }
           if (!selectedRunIds.size) {
@@ -1950,10 +1926,6 @@
 
 
         document.getElementById("sc-runs-cleanup-save").addEventListener("click", async function () {
-          if (!secret()) {
-            msg("أدخل مفتاح الإدارة.", false);
-            return;
-          }
           var days = parseInt(String(document.getElementById("sc-runs-cleanup-days").value || ""), 10);
           if (!days || days < 1) {
             msg("عدد الأيام يجب أن يكون 1 أو أكثر.", false);
@@ -1963,7 +1935,7 @@
           try {
             var res = await fetch("/api/admin/simple-content/runs-cleanup-settings", {
               method: "PATCH",
-              headers: hdr().headers,
+              credentials: "same-origin", headers: hdr().headers,
               body: JSON.stringify({
                 autoDeleteEnabled: document.getElementById("sc-runs-cleanup-enabled").checked,
                 deletionThresholdDays: days,
@@ -1984,10 +1956,9 @@
         });
 
         document.getElementById("sc-runs-cleanup-preview").addEventListener("click", async function () {
-          if (!secret()) return;
           setSectionBusy("runsCleanup", true, "جاري العدّ…");
           try {
-            var res = await fetch("/api/admin/simple-content/runs-cleanup/preview", { method: "POST", headers: hdr().headers });
+            var res = await fetch("/api/admin/simple-content/runs-cleanup/preview", { method: "POST", credentials: "same-origin", headers: hdr().headers });
             var data = await res.json();
             if (res.ok && data.ok) {
               msg(
@@ -2005,11 +1976,10 @@
         });
 
         document.getElementById("sc-runs-cleanup-run").addEventListener("click", async function () {
-          if (!secret()) return;
           if (!confirm("سيتم حذف سجلات التشغيل الأقدم من عدد الأيام المحدد في الإعدادات (كل الفروع). متابعة؟")) return;
           setSectionBusy("runsCleanup", true, "جاري الحذف…");
           try {
-            var res = await fetch("/api/admin/simple-content/runs-cleanup/run", { method: "POST", headers: hdr().headers });
+            var res = await fetch("/api/admin/simple-content/runs-cleanup/run", { method: "POST", credentials: "same-origin", headers: hdr().headers });
             var data = await res.json();
             if (res.ok && data.ok) {
               applyRunsCleanupSettings({
@@ -2031,7 +2001,6 @@
         });
 
         document.getElementById("sc-draft-template-load").addEventListener("click", async function () {
-          if (!secret()) return;
           setSectionBusy("project", true, "جاري التحميل…");
           try {
             await loadDraftTemplateFromApi(false);
@@ -2042,7 +2011,6 @@
         });
 
         document.getElementById("sc-draft-template-save").addEventListener("click", async function () {
-          if (!secret()) return;
           setSectionBusy("project", true, "جاري الحفظ…");
           try {
             var body = JSON.stringify({
@@ -2050,7 +2018,7 @@
             });
             var res = await fetch("/api/admin/simple-content/draft-template", {
               method: "PUT",
-              headers: hdr().headers,
+              credentials: "same-origin", headers: hdr().headers,
               body: body,
             });
             var data = await res.json();

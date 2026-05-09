@@ -26,7 +26,6 @@
 
       <div class="top">
         <div class="row">
-          <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" />
           <input id="q" type="search" placeholder="بحث بالنص..." />
           <select id="mode">
             <option value="all">كل الأنماط</option>
@@ -73,10 +72,9 @@
         var state = { offset: 0, limit: 20, total: 0, rows: [], selected: {} };
         var $ = function (id) { return document.getElementById(id); };
         function msg(t, ok) { $("msg").textContent = t || ""; $("msg").style.color = ok ? "#34d399" : "#f87171"; }
-        function sec() { return String($("sec").value || "").trim(); }
-        function hdr() { return { "X-Admin-Secret": sec(), "Content-Type": "application/json" }; }
+        function hdr() { return { "Content-Type": "application/json" }; }
         async function api(url, method, body) {
-          var r = await fetch(url, { method: method || "GET", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+          var r = await fetch(url, { method: method || "GET", credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
           var j = await r.json().catch(function () { return {}; });
           if (!r.ok || !j.ok) throw new Error(j.error || "request_failed");
           return j;
@@ -171,7 +169,6 @@
           });
         }
         async function refreshAll() {
-          if (!sec()) return msg("أدخل مفتاح الإدارة.", false);
           msg("جاري التحميل...", true);
           try { await loadCategories(); await loadRows(); msg("تم التحميل.", true); }
           catch { msg("تعذر التحميل.", false); }

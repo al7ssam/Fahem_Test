@@ -29,7 +29,7 @@
       .stat-value { font-size: 1.4rem; font-weight: 800; margin-top: 0.25rem; }
       .toolbar {
         display: grid;
-        grid-template-columns: 1.2fr 1fr 1fr auto auto;
+        grid-template-columns: 1fr 1fr auto;
         gap: 0.6rem;
       }
       .time-toolbar {
@@ -73,10 +73,8 @@
 
       <div class="card">
         <div class="toolbar">
-          <input id="admin-secret" type="password" placeholder="مفتاح الإدارة ADMIN_SECRET" />
           <select id="subject-filter"><option value="">كل المواد</option></select>
           <select id="model-filter"><option value="">كل الموديلات</option></select>
-          <button id="save-secret-btn" type="button">حفظ المفتاح</button>
           <button id="refresh-btn" type="button">تحديث</button>
         </div>
         <div class="time-toolbar">
@@ -120,26 +118,15 @@
     </div>
     <script>
       const $ = (id) => document.getElementById(id);
-      const adminSecret = () => ($("admin-secret").value || localStorage.getItem("adminSecret") || "").trim();
       const fmtInt = (n) => Number(n || 0).toLocaleString("en-US");
       const fmtMoney = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 6 });
       const setMsg = (t, ok = false) => { const el = $("page-msg"); el.textContent = t || ""; el.style.color = ok ? "#35d07f" : "#ff8e8e"; };
-      function saveAdminSecret() {
-        const val = $("admin-secret").value.trim();
-        if (!val) {
-          setMsg("أدخل مفتاح الإدارة أولًا.", false);
-          return false;
-        }
-        localStorage.setItem("adminSecret", val);
-        setMsg("تم حفظ مفتاح الإدارة.", true);
-        return true;
-      }
 
       async function api(path) {
-        const r = await fetch(path, { headers: { "x-admin-secret": adminSecret() } });
+        const r = await fetch(path, { credentials: "same-origin" });
         let j = null; try { j = await r.json(); } catch {}
         if (r.status === 403 || j?.error === "forbidden") {
-          throw new Error("forbidden: تحقق من مفتاح الإدارة");
+          throw new Error("forbidden: تحقق من تسجيل الدخول بدور إداري");
         }
         if (!r.ok || !j?.ok) throw new Error(j?.error || ("http_" + r.status));
         return j;
@@ -269,9 +256,6 @@
 
       async function bootstrap() {
         try {
-          if (!$("admin-secret").value.trim() && localStorage.getItem("adminSecret")) {
-            $("admin-secret").value = String(localStorage.getItem("adminSecret") || "");
-          }
           await loadFilters();
           await loadData();
           setMsg("تم تحميل بيانات الاستخدام بنجاح.", true);
@@ -281,10 +265,6 @@
       }
 
       $("refresh-btn").addEventListener("click", bootstrap);
-      $("save-secret-btn").addEventListener("click", saveAdminSecret);
-      $("admin-secret").addEventListener("change", () => {
-        if ($("admin-secret").value.trim()) localStorage.setItem("adminSecret", $("admin-secret").value.trim());
-      });
       $("subject-filter").addEventListener("change", loadData);
       $("model-filter").addEventListener("change", loadData);
       $("apply-date-btn").addEventListener("click", loadData);

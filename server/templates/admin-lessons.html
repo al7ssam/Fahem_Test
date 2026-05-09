@@ -100,10 +100,6 @@
       <p class="subtitle">إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong> — أنشئ أسئلة خاصة بالدرس ثم احفظ التسلسل.</p>
 
       <div class="topbar">
-        <div>
-          <label for="sec">مفتاح الإدارة</label>
-          <input id="sec" type="password" autocomplete="off" placeholder="X-Admin-Secret" />
-        </div>
         <button class="btn" id="load-all" type="button">تحميل</button>
         <div class="msg" id="msg" aria-live="polite"></div>
       </div>
@@ -358,15 +354,12 @@
     <script>
       (function () {
         const msg = document.getElementById("msg");
-        const secEl = document.getElementById("sec");
-        function secret() { return (secEl.value || "").trim(); }
         function setMsg(text, ok) {
           msg.textContent = text || "";
           msg.className = "msg " + (ok ? "ok" : "err");
         }
         function hdr() {
-          const s = secret();
-          return { "Content-Type": "application/json", "X-Admin-Secret": s };
+          return { "Content-Type": "application/json" };
         }
 
         /** عرض رقم مللي ثانية كثوانٍ في الحقول */
@@ -526,9 +519,7 @@
         }
 
         async function api(path, opts) {
-          const s = secret();
-          if (!s) { setMsg("أدخل مفتاح الإدارة.", false); throw new Error("no_secret"); }
-          const res = await fetch(path, { ...opts, headers: { ...hdr(), ...(opts && opts.headers) } });
+          const res = await fetch(path, { ...opts, credentials: "same-origin", headers: { ...hdr(), ...(opts && opts.headers) } });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.ok === false) {
             let errLine = data.message || data.error || "فشل الطلب";
@@ -688,7 +679,7 @@
           } catch (_) {
             if (myTok !== loadDetailToken) return;
             if (!msg.classList.contains("err")) {
-              setMsg("تعذّر تحميل تفاصيل الدرس (تحقق من الشبكة أو مفتاح الإدارة).", false);
+              setMsg("تعذّر تحميل تفاصيل الدرس (تحقق من الشبكة أو الجلسة وصلاحيات الإدارة).", false);
             }
           }
         }

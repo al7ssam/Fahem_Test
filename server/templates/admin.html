@@ -32,9 +32,7 @@
 
       <div class="top">
         <div>
-          <label class="muted" for="admin-secret">مفتاح الإدارة (X-Admin-Secret)</label>
           <div class="row" style="margin-top:6px">
-            <input id="admin-secret" type="password" autocomplete="off" placeholder="أدخل المفتاح مرة واحدة" />
             <button id="cache-bust" class="primary" type="button">تحديث الكاش/الإصدار</button>
           </div>
           <div id="msg" class="msg"></div>
@@ -104,20 +102,18 @@
     <script>
       (function () {
         var msg = document.getElementById("msg");
-        var secretInput = document.getElementById("admin-secret");
         var cacheBtn = document.getElementById("cache-bust");
         function setMsg(text, ok) {
           msg.textContent = text || "";
           msg.style.color = ok ? "#34d399" : "#f87171";
         }
         cacheBtn.addEventListener("click", async function () {
-          var secret = String(secretInput.value || "").trim();
-          if (!secret) return setMsg("أدخل مفتاح الإدارة أولاً.", false);
           cacheBtn.disabled = true;
           try {
             var r = await fetch("/api/admin/cache-bust", {
               method: "POST",
-              headers: { "X-Admin-Secret": secret },
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
             });
             var j = await r.json().catch(function () { return {}; });
             if (r.ok && j.ok) setMsg("تم تحديث الإصدار: " + String(j.releaseVersion || ""), true);

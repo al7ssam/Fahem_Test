@@ -48,10 +48,6 @@
       {{ADMIN_NAV}}
 
       <div class="topbar">
-        <div>
-          <label for="sec">مفتاح الإدارة</label>
-          <input id="sec" type="password" autocomplete="off" placeholder="X-Admin-Secret" />
-        </div>
         <button class="btn" id="load-btn" type="button">تحميل البيانات</button>
         <div class="msg" id="msg" aria-live="polite"></div>
       </div>
@@ -193,18 +189,17 @@
             b.disabled = !!on;
           });
         }
-        const sec = () => String($("sec").value || "").trim();
-        const hdr = () => ({ "X-Admin-Secret": sec(), "Content-Type": "application/json" });
+        const hdr = () => ({ "Content-Type": "application/json" });
         const esc = (s) => String(s || "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
         async function api(url, method = "GET", body) {
           pendingRequests += 1;
           setBusy(true);
           try {
-            const r = await fetch(url, { method, headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+            const r = await fetch(url, { method, credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
             const j = await r.json().catch(() => ({}));
             if (!r.ok || !j.ok) {
               const err = String(j.error || "request_failed");
-              if (err === "forbidden") throw new Error("صلاحية غير صحيحة (X-Admin-Secret).");
+              if (err === "forbidden") throw new Error("صلاحية غير كافية أو انتهت الجلسة؛ سجّل الدخول بحساب إداري.");
               if (err === "invalid_body") throw new Error("بيانات غير صالحة.");
               if (err === "not_found") throw new Error("العنصر غير موجود.");
               throw new Error(err);
@@ -293,7 +288,6 @@
           renderMains(); renderSubs();
         }
         async function reloadAll() {
-          if (!sec()) return msg("أدخل مفتاح الإدارة.", false);
           msg("جاري التحميل...", true);
           const parts = await Promise.allSettled([loadCategories(), loadCoverage()]);
           const failed = parts.filter((p) => p.status === "rejected").length;
@@ -494,7 +488,7 @@
         $("preview-open").addEventListener("click", async () => { if (!S.selectedSub) return msg("اختر فرعيًا أولًا.", false); S.preview = await buildPreview(); S.pidx = 0; $("preview-shell").hidden = false; renderPreview(); });
         $("pv-prev").addEventListener("click", () => { S.pidx--; renderPreview(); }); $("pv-next").addEventListener("click", () => { S.pidx++; renderPreview(); }); $("pv-close").addEventListener("click", () => ($("preview-shell").hidden = true));
         $("m-save").addEventListener("click", () => void saveModal()); $("m-close").addEventListener("click", closeModal); $("modal-bg").addEventListener("click", (e) => { if (e.target.id === "modal-bg") closeModal(); });
-        msg("أدخل مفتاح الإدارة ثم اضغط تحميل البيانات.", true);
+        msg("اضغط «تحميل البيانات» بعد التأكد أنك مسجّل الدخول بحساب إداري.", true);
       })();
     </script>
   </body>

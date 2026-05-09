@@ -9,7 +9,6 @@ const databaseUrl = process.env.DATABASE_URL;
 const clientOrigin =
   process.env.CLIENT_ORIGIN ||
   (nodeEnv === "development" ? "http://localhost:5173" : undefined);
-const adminSecret = process.env.ADMIN_SECRET?.trim() || "";
 const authJwtSecret = process.env.AUTH_JWT_SECRET?.trim() || "";
 const firebaseProjectId = process.env.FIREBASE_PROJECT_ID?.trim() || "";
 const firebaseClientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim() || "";
@@ -45,7 +44,6 @@ export const config = {
   databaseUrl,
   clientOrigin,
   isProduction: nodeEnv === "production",
-  adminSecret,
   authJwtSecret,
   firebaseProjectId,
   firebaseClientEmail,

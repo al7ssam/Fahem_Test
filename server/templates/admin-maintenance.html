@@ -22,7 +22,6 @@
 
       <div class="panel">
         <div class="row">
-          <input id="sec" type="password" placeholder="X-Admin-Secret" autocomplete="off" style="min-width:300px" />
           <button id="cache-bust">تحديث الكاش/الإصدار</button>
         </div>
         <div id="global-msg" class="msg"></div>
@@ -64,22 +63,20 @@
       (function () {
         function $(id){ return document.getElementById(id); }
         function msg(id,t,ok){ $(id).textContent=t||""; $(id).style.color=ok?"#34d399":"#f87171"; }
-        function sec(){ return String($("sec").value||"").trim(); }
-        function hdr(){ return {"X-Admin-Secret":sec(),"Content-Type":"application/json"}; }
-        async function api(url,method,body){ var r=await fetch(url,{method:method||"GET",headers:hdr(),body:body?JSON.stringify(body):undefined}); var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||"request_failed"); return j; }
-        function need(target){ if(!sec()){ msg(target,"أدخل مفتاح الإدارة.",false); return false; } return true; }
+        function hdr(){ return {"Content-Type":"application/json"}; }
+        async function api(url,method,body){ var r=await fetch(url,{method:method||"GET",credentials:"same-origin",headers:hdr(),body:body?JSON.stringify(body):undefined}); var j=await r.json().catch(function(){return{};}); if(!r.ok||!j.ok) throw new Error(j.error||"request_failed"); return j; }
 
-        async function loadCleanup(){ if(!need("cl-msg")) return; try{ var j=await api("/api/admin/cleanup-settings","GET"); $("cl-enabled").checked=!!j.autoDeleteEnabled; $("cl-days").value=j.deletionThresholdDays; $("cl-last").value=j.lastRunDate||"—"; msg("cl-msg","تم التحميل.",true);}catch{msg("cl-msg","تعذر التحميل.",false);} }
-        async function saveCleanup(){ if(!need("cl-msg")) return; try{ await api("/api/admin/cleanup-settings","PATCH",{autoDeleteEnabled:$("cl-enabled").checked,deletionThresholdDays:Number($("cl-days").value||30)}); msg("cl-msg","تم الحفظ.",true);}catch{msg("cl-msg","تعذر الحفظ.",false);} }
-        async function previewCleanup(){ if(!need("cl-msg")) return; try{ var j=await api("/api/admin/cleanup/preview","POST",{}); msg("cl-msg","المعاينة: سيُحذف "+j.expiredCount+" سؤال.",true);}catch{msg("cl-msg","تعذر المعاينة.",false);} }
-        async function runCleanup(){ if(!need("cl-msg")) return; if(!confirm("سيتم حذف الأسئلة المنتهية الآن. متابعة؟")) return; try{ var j=await api("/api/admin/cleanup/run","POST",{}); msg("cl-msg","تم الحذف: "+j.deletedCount+" سؤال.",true); await loadCleanup();}catch{msg("cl-msg","تعذر التنفيذ.",false);} }
+        async function loadCleanup(){ try{ var j=await api("/api/admin/cleanup-settings","GET"); $("cl-enabled").checked=!!j.autoDeleteEnabled; $("cl-days").value=j.deletionThresholdDays; $("cl-last").value=j.lastRunDate||"—"; msg("cl-msg","تم التحميل.",true);}catch{msg("cl-msg","تعذر التحميل.",false);} }
+        async function saveCleanup(){ try{ await api("/api/admin/cleanup-settings","PATCH",{autoDeleteEnabled:$("cl-enabled").checked,deletionThresholdDays:Number($("cl-days").value||30)}); msg("cl-msg","تم الحفظ.",true);}catch{msg("cl-msg","تعذر الحفظ.",false);} }
+        async function previewCleanup(){ try{ var j=await api("/api/admin/cleanup/preview","POST",{}); msg("cl-msg","المعاينة: سيُحذف "+j.expiredCount+" سؤال.",true);}catch{msg("cl-msg","تعذر المعاينة.",false);} }
+        async function runCleanup(){ if(!confirm("سيتم حذف الأسئلة المنتهية الآن. متابعة؟")) return; try{ var j=await api("/api/admin/cleanup/run","POST",{}); msg("cl-msg","تم الحذف: "+j.deletedCount+" سؤال.",true); await loadCleanup();}catch{msg("cl-msg","تعذر التنفيذ.",false);} }
 
-        async function loadAiLogs(){ if(!need("af-msg")) return; try{ var j=await api("/api/admin/ai-factory-logs-cleanup-settings","GET"); $("af-enabled").checked=!!j.autoDeleteEnabled; $("af-days").value=j.deletionThresholdDays; $("af-last").value=j.lastRunDate||"—"; msg("af-msg","تم التحميل.",true);}catch{msg("af-msg","تعذر التحميل.",false);} }
-        async function saveAiLogs(){ if(!need("af-msg")) return; try{ await api("/api/admin/ai-factory-logs-cleanup-settings","PATCH",{autoDeleteEnabled:$("af-enabled").checked,deletionThresholdDays:Number($("af-days").value||30)}); msg("af-msg","تم الحفظ.",true);}catch{msg("af-msg","تعذر الحفظ.",false);} }
-        async function previewAiLogs(){ if(!need("af-msg")) return; try{ var j=await api("/api/admin/ai-factory-logs-cleanup/preview","POST",{}); msg("af-msg","المعاينة: "+j.expiredCount+" سجل.",true);}catch{msg("af-msg","تعذر المعاينة.",false);} }
-        async function runAiLogs(){ if(!need("af-msg")) return; if(!confirm("سيتم حذف سجلات الذكاء الاصطناعي الآن. متابعة؟")) return; try{ var j=await api("/api/admin/ai-factory-logs-cleanup/run","POST",{}); msg("af-msg","تم الحذف: "+j.deletedCount+" سجل.",true); await loadAiLogs();}catch{msg("af-msg","تعذر التنفيذ.",false);} }
+        async function loadAiLogs(){ try{ var j=await api("/api/admin/ai-factory-logs-cleanup-settings","GET"); $("af-enabled").checked=!!j.autoDeleteEnabled; $("af-days").value=j.deletionThresholdDays; $("af-last").value=j.lastRunDate||"—"; msg("af-msg","تم التحميل.",true);}catch{msg("af-msg","تعذر التحميل.",false);} }
+        async function saveAiLogs(){ try{ await api("/api/admin/ai-factory-logs-cleanup-settings","PATCH",{autoDeleteEnabled:$("af-enabled").checked,deletionThresholdDays:Number($("af-days").value||30)}); msg("af-msg","تم الحفظ.",true);}catch{msg("af-msg","تعذر الحفظ.",false);} }
+        async function previewAiLogs(){ try{ var j=await api("/api/admin/ai-factory-logs-cleanup/preview","POST",{}); msg("af-msg","المعاينة: "+j.expiredCount+" سجل.",true);}catch{msg("af-msg","تعذر المعاينة.",false);} }
+        async function runAiLogs(){ if(!confirm("سيتم حذف سجلات الذكاء الاصطناعي الآن. متابعة؟")) return; try{ var j=await api("/api/admin/ai-factory-logs-cleanup/run","POST",{}); msg("af-msg","تم الحذف: "+j.deletedCount+" سجل.",true); await loadAiLogs();}catch{msg("af-msg","تعذر التنفيذ.",false);} }
 
-        $("cache-bust").addEventListener("click", async function(){ if(!need("global-msg")) return; try{ var j=await api("/api/admin/cache-bust","POST",{}); msg("global-msg","تم تحديث الإصدار: "+String(j.releaseVersion||""),true);}catch{msg("global-msg","تعذر تحديث الكاش.",false);} });
+        $("cache-bust").addEventListener("click", async function(){ try{ var j=await api("/api/admin/cache-bust","POST",{}); msg("global-msg","تم تحديث الإصدار: "+String(j.releaseVersion||""),true);}catch{msg("global-msg","تعذر تحديث الكاش.",false);} });
         $("cl-load").addEventListener("click",loadCleanup); $("cl-save").addEventListener("click",saveCleanup); $("cl-preview").addEventListener("click",previewCleanup); $("cl-run").addEventListener("click",runCleanup);
         $("af-load").addEventListener("click",loadAiLogs); $("af-save").addEventListener("click",saveAiLogs); $("af-preview").addEventListener("click",previewAiLogs); $("af-run").addEventListener("click",runAiLogs);
       })();

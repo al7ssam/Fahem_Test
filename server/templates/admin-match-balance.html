@@ -45,13 +45,6 @@
       {{ADMIN_NAV}}
       <div class="panel">
         <div class="row" style="align-items:flex-end">
-          <div class="field-block" style="max-width:380px;flex:1">
-            <div class="field-label">مفتاح الإدارة (X-Admin-Secret)</div>
-            <div class="field-row">
-              <input id="sec" type="password" placeholder="الصق المفتاح هنا" autocomplete="off" />
-              <button type="button" class="help-q" data-help-key="sec" aria-label="شرح مفتاح الإدارة">؟</button>
-            </div>
-          </div>
           <div class="field-block">
             <div class="field-label">تحميل مجمع</div>
             <div class="field-row" style="align-items:center">
@@ -248,10 +241,6 @@
     <script>
       (function () {
         var HELP = {
-          sec: {
-            title: "مفتاح الإدارة",
-            body: "كلمة سر ترسل مع طلبات واجهة الإدارة (رأس X-Admin-Secret). بدونها لا يقبل السيرفر التحميل أو الحفظ. احفظ المفتاح في مكان آمن ولا تشاركه.",
-          },
           loadAll: {
             title: "تحميل كل الإعدادات",
             body: "يجلب دفعة واحدة: نصوص نتيجة اللعبة، إعدادات الجولة والمباراة، واقتصاد المفاتيح والقدرات من السيرفر ويعبئ الحقول الحالية.",
@@ -282,7 +271,7 @@
           },
           rmActions: {
             title: "تحميل وحفظ نصوص النتيجة",
-            body: "«تحميل» يقرأ القيم الحالية من السيرفر. «حفظ» يرسل التعديلات التي كتبتها. يجب إدخال مفتاح الإدارة أولاً.",
+            body: "«تحميل» يقرأ القيم الحالية من السيرفر. «حفظ» يرسل التعديلات التي كتبتها.",
           },
           gsRounds: {
             title: "أقصى جولات المذاكرة",
@@ -440,17 +429,14 @@
         document.addEventListener("keydown", function (ev) {
           if (ev.key === "Escape" && helpBackdrop.classList.contains("open")) closeHelp();
         });
-        function sec() { return String($("sec").value || "").trim(); }
-        function hdr() { return { "X-Admin-Secret": sec(), "Content-Type": "application/json" }; }
+        function hdr() { return { "Content-Type": "application/json" }; }
         async function api(url, method, body) {
-          var r = await fetch(url, { method: method || "GET", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+          var r = await fetch(url, { method: method || "GET", credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
           var j = await r.json().catch(function () { return {}; });
           if (!r.ok || !j.ok) throw new Error(j.error || "request_failed");
           return j;
         }
-        function needSecret(targetMsg) { if (!sec()) { msg(targetMsg, "أدخل مفتاح الإدارة.", false); return false; } return true; }
         async function loadResult() {
-          if (!needSecret("rm-msg")) return;
           try {
             var j = await api("/api/admin/result-messages", "GET");
             $("rm-wt").value = j.winnerTitle || ""; $("rm-lt").value = j.loserTitle || ""; $("rm-tt").value = j.tieTitle || "";
@@ -459,7 +445,6 @@
           } catch { msg("rm-msg", "تعذر التحميل.", false); }
         }
         async function saveResult() {
-          if (!needSecret("rm-msg")) return;
           try {
             await api("/api/admin/result-messages", "PATCH", {
               winnerTitle: $("rm-wt").value.trim(), loserTitle: $("rm-lt").value.trim(), tieTitle: $("rm-tt").value.trim(),
@@ -469,7 +454,6 @@
           } catch { msg("rm-msg", "تعذر الحفظ.", false); }
         }
         async function loadGameSettings() {
-          if (!needSecret("gs-msg")) return;
           try {
             var j = await api("/api/admin/game-settings", "GET");
             $("gs-rounds").value = j.maxStudyRounds; $("gs-size").value = j.studyRoundQuestionCount;
@@ -480,7 +464,6 @@
           } catch { msg("gs-msg", "تعذر التحميل.", false); }
         }
         async function saveGameSettings() {
-          if (!needSecret("gs-msg")) return;
           try {
             await api("/api/admin/game-settings", "PATCH", {
               maxStudyRounds: Number($("gs-rounds").value || 3),
@@ -494,7 +477,6 @@
           } catch { msg("gs-msg", "تعذر الحفظ.", false); }
         }
         async function loadKeys() {
-          if (!needSecret("ks-msg")) return;
           try {
             var j = await api("/api/admin/keys-settings", "GET");
             $("ks-streak").value = j.keysStreakPerKey; $("ks-small").value = j.keysSmallStreakReward;
@@ -510,7 +492,6 @@
           } catch { msg("ks-msg", "تعذر التحميل.", false); }
         }
         async function saveKeys() {
-          if (!needSecret("ks-msg")) return;
           try {
             await api("/api/admin/keys-settings", "PATCH", {
               keysStreakPerKey: Number($("ks-streak").value || 5),
@@ -539,7 +520,6 @@
           } catch { msg("ks-msg", "تعذر الحفظ.", false); }
         }
         $("load-all").addEventListener("click", async function () {
-          if (!needSecret("global-msg")) return;
           msg("global-msg", "جاري التحميل...", true);
           await Promise.allSettled([loadResult(), loadGameSettings(), loadKeys()]);
           msg("global-msg", "اكتمل التحميل.", true);

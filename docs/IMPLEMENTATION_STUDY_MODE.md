@@ -28,7 +28,7 @@ export async function getRandomQuestionBlock(
 
 ## 2) [`server/config.ts`](../server/config.ts)
 
-بعد `adminSecret` أضف:
+إن لم تكن موجودة بعد، أضف ثوابت المرحلة (أو تأكد من تطابق الأسماء):
 
 ```ts
 const studyPhaseMs = Number(process.env.STUDY_PHASE_MS) || 60_000;
