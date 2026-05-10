@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { config } from "./config";
 import { registerAdminRoutes } from "./routes/admin";
 import { registerCustomLessonRoutes } from "./routes/customLessons";
+import { registerLessonAiPromptRoutes } from "./routes/lessonAiPrompt";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerProfileRoutes } from "./routes/profile";
 import { optionalAuth } from "./auth/middleware";
@@ -49,6 +50,7 @@ export function createApp() {
   registerAuthRoutes(app);
   registerProfileRoutes(app);
   registerCustomLessonRoutes(app);
+  registerLessonAiPromptRoutes(app);
   registerAdminRoutes(app);
 
   if (config.isProduction) {

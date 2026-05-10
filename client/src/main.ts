@@ -1,7 +1,13 @@
 import "./style.css";
 import type { Socket } from "socket.io-client";
 import { toDataURL as qrToDataURL } from "qrcode";
-import { buildCustomLessonAiPromptText, type LessonAiPromptParams } from "./lessonPromptBuilder";
+import {
+  buildCustomLessonAiPromptText,
+  DEFAULT_CUSTOM_LESSON_AUDIENCE_OPTIONS,
+  DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
+  type LessonAiPromptParams,
+  type LessonAiPromptRuntimeOptions,
+} from "./lessonPromptBuilder";
 import { normalizePastedJsonForParse } from "./jsonNormalize";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
@@ -221,15 +227,42 @@ let customLessonMsg = "";
 let customLessonClientId = "";
 /** يظهر لصق JSON وأزرار الأدوات الخارجية بعد نسخ البرومبت (أو استعادة مسودة) */
 let customLessonShowJsonPanel = false;
+/** إعداد برومبت الدرس من الخادم (يقع إلى القيم الافتراضية في الكود عند الفشل). */
+let lessonAiPromptRemote: {
+  defaults: LessonAiPromptParams;
+  audienceOptions: Array<{ v: string; t: string }>;
+  fragmentEnabled: LessonAiPromptRuntimeOptions["fragmentEnabled"];
+  fragmentOverrides: LessonAiPromptRuntimeOptions["fragmentOverrides"];
+} | null = null;
+
+async function fetchLessonAiPromptPublicConfig(): Promise<void> {
+  try {
+    const res = await fetch("/api/public/lesson-ai-prompt-config");
+    const data = (await res.json()) as {
+      ok?: boolean;
+      config?: {
+        defaults: LessonAiPromptParams;
+        audienceOptions: Array<{ v: string; t: string }>;
+        fragmentEnabled: LessonAiPromptRuntimeOptions["fragmentEnabled"];
+        fragmentOverrides: LessonAiPromptRuntimeOptions["fragmentOverrides"];
+      };
+    };
+    if (res.ok && data.ok && data.config) {
+      lessonAiPromptRemote = data.config;
+    }
+  } catch {
+    lessonAiPromptRemote = null;
+  }
+}
+
+void fetchLessonAiPromptPublicConfig().then(() => {
+  render();
+});
+
 const defaultCustomPromptParams = (): LessonAiPromptParams => ({
-  nSec: 3,
-  qSame: 5,
-  ansSec: 15,
-  studySec: 60,
+  ...DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
+  ...(lessonAiPromptRemote?.defaults ?? {}),
   topic: "",
-  audience: "",
-  minSentences: 1,
-  maxSentences: 6,
 });
 let customLessonPromptParams: LessonAiPromptParams = defaultCustomPromptParams();
 let lessonStudyQueue: Array<{ body: string; ms: number }> = [];
@@ -1017,34 +1050,37 @@ function render(): void {
           }
           if (b.dataset.flow === "custom_lesson") {
             err.textContent = "";
-            const d = loadCustomLessonDraft();
-            if (d) {
-              customLessonClientId = d.clientLessonId;
-              customLessonLearningIntent = d.learningIntent;
-              customLessonJsonText = d.jsonText;
-              customLessonPromptParams = {
-                ...defaultCustomPromptParams(),
-                ...d.promptParams,
-                topic: "",
-              };
-              customLessonSessionToken = d.lastSessionToken ?? null;
-              customLessonShowJsonPanel =
-                d.showJsonPanel === true ||
-                (String(d.jsonText ?? "").trim().length > 0 && d.showJsonPanel !== false);
-            } else {
-              customLessonClientId = "";
-              customLessonLearningIntent = "";
-              customLessonJsonText = "";
-              customLessonPromptParams = defaultCustomPromptParams();
-              customLessonSessionToken = null;
-              customLessonShowJsonPanel = false;
-            }
-            customLessonValidatedBody = null;
-            customLessonPreviewLesson = null;
-            customLessonErr = "";
-            customLessonMsg = "";
-            phase = "custom_lesson";
-            render();
+            void (async () => {
+              await fetchLessonAiPromptPublicConfig();
+              const d = loadCustomLessonDraft();
+              if (d) {
+                customLessonClientId = d.clientLessonId;
+                customLessonLearningIntent = d.learningIntent;
+                customLessonJsonText = d.jsonText;
+                customLessonPromptParams = {
+                  ...defaultCustomPromptParams(),
+                  ...d.promptParams,
+                  topic: "",
+                };
+                customLessonSessionToken = d.lastSessionToken ?? null;
+                customLessonShowJsonPanel =
+                  d.showJsonPanel === true ||
+                  (String(d.jsonText ?? "").trim().length > 0 && d.showJsonPanel !== false);
+              } else {
+                customLessonClientId = "";
+                customLessonLearningIntent = "";
+                customLessonJsonText = "";
+                customLessonPromptParams = defaultCustomPromptParams();
+                customLessonSessionToken = null;
+                customLessonShowJsonPanel = false;
+              }
+              customLessonValidatedBody = null;
+              customLessonPreviewLesson = null;
+              customLessonErr = "";
+              customLessonMsg = "";
+              phase = "custom_lesson";
+              render();
+            })();
             return;
           }
           selectedModeInName =
@@ -1276,14 +1312,10 @@ function render(): void {
         showJsonPanel: customLessonShowJsonPanel,
       });
     };
-    const audienceOptions: Array<{ v: string; t: string }> = [
-      { v: "", t: "— بدون تحديد —" },
-      { v: "أطفال", t: "أطفال" },
-      { v: "مبتدئ", t: "مبتدئ" },
-      { v: "ثانوي", t: "ثانوي" },
-      { v: "جامعي", t: "جامعي" },
-      { v: "متخصصون", t: "متخصصون" },
-    ];
+    const audienceOptions: Array<{ v: string; t: string }> =
+      lessonAiPromptRemote?.audienceOptions && lessonAiPromptRemote.audienceOptions.length > 0
+        ? lessonAiPromptRemote.audienceOptions
+        : [...DEFAULT_CUSTOM_LESSON_AUDIENCE_OPTIONS];
     app.append(
       el(`
         <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3 text-right">
@@ -1388,10 +1420,19 @@ function render(): void {
       readParamsFromDom();
       customLessonErr = "";
       customLessonMsg = "";
-      const text = buildCustomLessonAiPromptText({
-        ...customLessonPromptParams,
-        learningIntent: customLessonLearningIntent,
-      });
+      const runtimeOpts: LessonAiPromptRuntimeOptions | undefined = lessonAiPromptRemote
+        ? {
+            fragmentEnabled: lessonAiPromptRemote.fragmentEnabled,
+            fragmentOverrides: lessonAiPromptRemote.fragmentOverrides,
+          }
+        : undefined;
+      const text = buildCustomLessonAiPromptText(
+        {
+          ...customLessonPromptParams,
+          learningIntent: customLessonLearningIntent,
+        },
+        runtimeOpts,
+      );
       try {
         await navigator.clipboard.writeText(text);
         customLessonMsg = "تم نسخ البرومبت.";

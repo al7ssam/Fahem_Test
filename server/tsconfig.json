@@ -3,11 +3,11 @@
   "compilerOptions": {
     "module": "CommonJS",
     "moduleResolution": "node",
-    "rootDir": ".",
-    "outDir": "../dist/server",
+    "rootDir": "..",
+    "outDir": "../dist",
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["./**/*.ts"],
+  "include": ["./**/*.ts", "../shared/**/*.ts"],
   "exclude": ["./scripts/**"]
 }

@@ -22,6 +22,7 @@ const TABLES = [
   "lesson_items",
   "lesson_sections",
   "lessons",
+  "lesson_ai_prompt_versions",
   "ai_usage_logs",
   "simple_content_automation",
   "simple_content_model_presets",

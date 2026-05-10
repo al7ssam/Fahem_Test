@@ -201,6 +201,53 @@
         </div>
       </details>
 
+      <details class="card collapsible-details" style="margin-top:.55rem" id="lap-config-panel">
+        <summary class="collapsible-summary">
+          <strong>إدارة قالب برومبت الدرس (عام)</strong>
+          <span class="collapsible-caret" aria-hidden="true">▼</span>
+        </summary>
+        <div class="collapsible-panel-body">
+          <p class="muted" style="margin:0 0 .55rem;font-size:.82rem">
+            يُخزَّن في الخادم ويُطبَّق على «نسخ البرومبت» أعلاه وعلى وضع «درس مخصص» في التطبيق. المصدر البرمجي: <code class="muted">shared/lessonAiPrompt.ts</code>.
+          </p>
+          <div class="row" style="margin-bottom:.45rem">
+            <button type="button" class="btn" id="lap-load">تحميل الإعداد</button>
+            <button type="button" class="btn" id="lap-save">حفظ</button>
+            <button type="button" class="btn btn-secondary" id="lap-preview-both">معاينة (استيراد + مخصص)</button>
+          </div>
+          <label class="muted" style="display:block;margin:.35rem 0 .15rem;font-size:.82rem">ملاحظة عند الحفظ (تُسجَّل مع النسخة)</label>
+          <input type="text" id="lap-save-note" placeholder="اختياري" style="width:100%;max-width:36rem" />
+          <h4 class="muted" style="margin:.85rem 0 .35rem;font-size:.92rem">القيم الافتراضية للمستخدم</h4>
+          <div class="row" style="align-items:end;flex-wrap:wrap;gap:.45rem">
+            <div><label class="muted" style="display:block;font-size:.78rem">أقسام</label><input type="number" id="lap-d-nsec" min="1" max="20" style="width:5rem" /></div>
+            <div><label class="muted" style="display:block;font-size:.78rem">أسئلة/قسم</label><input type="number" id="lap-d-qsame" min="1" max="50" style="width:5rem" /></div>
+            <div><label class="muted" style="display:block;font-size:.78rem">ثواني إجابة</label><input type="number" id="lap-d-anssec" min="3" max="120" step="0.5" style="width:5rem" /></div>
+            <div><label class="muted" style="display:block;font-size:.78rem">ثواني مذاكرة قسم</label><input type="number" id="lap-d-studysec" min="2" max="300" step="0.5" style="width:6rem" /></div>
+            <div><label class="muted" style="display:block;font-size:.78rem">من جمل studyBody</label><input type="number" id="lap-d-minsent" min="1" max="20" style="width:5rem" /></div>
+            <div><label class="muted" style="display:block;font-size:.78rem">إلى جمل</label><input type="number" id="lap-d-maxsent" min="1" max="20" style="width:5rem" /></div>
+          </div>
+          <label class="muted" style="display:block;margin:.45rem 0 .15rem;font-size:.82rem">موضوع افتراضي (اختياري)</label>
+          <textarea id="lap-d-topic" rows="2" style="width:100%"></textarea>
+          <h4 class="muted" style="margin:.75rem 0 .35rem;font-size:.92rem">تفعيل أجزاء القالب</h4>
+          <div id="lap-frag-toggles" class="muted" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.35rem;font-size:.82rem"></div>
+          <h4 class="muted" style="margin:.75rem 0 .35rem;font-size:.92rem">استبدال نصوص الأجزاء (اختياري — اترك فارغاً للافتراضي)</h4>
+          <div id="lap-frag-overrides" style="display:grid;gap:.5rem"></div>
+          <h4 class="muted" style="margin:.75rem 0 .35rem;font-size:.92rem">معاينة سريعة</h4>
+          <p class="muted" style="margin:0 0 .25rem;font-size:.78rem">برومبت وضع الاستيراد (موضوع من الحقول أعلاه في «برومبت لإنشاء درس»):</p>
+          <textarea id="lap-preview-admin" readonly rows="6" style="width:100%;font-family:ui-monospace,monospace;font-size:.72rem"></textarea>
+          <p class="muted" style="margin:.45rem 0 .25rem;font-size:.78rem">برومبت وضع الدرس المخصص (نية تجريبية: «مثال: الكسور»):</p>
+          <textarea id="lap-preview-custom" readonly rows="6" style="width:100%;font-family:ui-monospace,monospace;font-size:.72rem"></textarea>
+          <h4 class="muted" style="margin:.75rem 0 .35rem;font-size:.92rem">اختبار JSON مقابل المخطط</h4>
+          <textarea id="lap-test-json" rows="5" style="width:100%;font-family:ui-monospace,monospace;font-size:.75rem" placeholder='الصق JSON { "lesson": {...}, "sections": [...] }'></textarea>
+          <div class="row" style="margin-top:.4rem">
+            <button type="button" class="btn btn-secondary" id="lap-test-json-btn">تحقق من البنية</button>
+            <span class="muted" id="lap-test-json-result" style="font-size:.82rem"></span>
+          </div>
+          <h4 class="muted" style="margin:.85rem 0 .35rem;font-size:.92rem">النسخ المحفوظة</h4>
+          <div class="list" id="lap-versions" style="max-height:200px"></div>
+        </div>
+      </details>
+
       <div class="split">
         <div class="card split-col-a">
           <strong>تصنيفات الدروس</strong>
@@ -1225,8 +1272,8 @@
           } catch (_) {}
         };
 
-        /* نص البرومبت: يُفضّل مزامنته مع client/src/lessonPromptBuilder.ts عند تغيير القواعد */
-        function buildAiLessonPrompt() {
+        /** يقرأ حقول «برومبت لإنشاء درس» ويولّد النص عبر الخادم (shared/lessonAiPrompt + إعداد قاعدة البيانات). */
+        async function buildAiLessonPromptFromApi() {
           var nSec = Math.min(20, Math.max(1, parseInt(document.getElementById("ai-sections").value, 10) || 3));
           var qSameEl = document.getElementById("ai-q-same").value.trim();
           var qSame = Math.min(50, Math.max(1, parseInt(qSameEl, 10) || 3));
@@ -1240,7 +1287,6 @@
           var topic = document.getElementById("ai-topic").value.trim();
           var audienceEl = document.getElementById("ai-audience");
           var audience = audienceEl && audienceEl.value ? String(audienceEl.value).trim() : "";
-
           var minSentences = 1;
           var maxSentences = 3;
           var minEl = document.getElementById("ai-study-min-sentences");
@@ -1258,123 +1304,23 @@
             minSentences = maxSentences;
             maxSentences = swap;
           }
-
-          var defaultAnswerMs = Math.round(ansSec * 1000);
-          var studyPhaseMsUnified = Math.round(studySec * 1000);
-
-          var sectionBlock =
-            "جميع الأقسام الـ " +
-            nSec +
-            ": لكل قسم items بعدد موحّد " +
-            qSame +
-            " سؤالاً، وstudyPhaseMs = " +
-            studyPhaseMsUnified +
-            " (مللي ثانية) لكل قسم.";
-
-          var topicBlock = "";
-          if (topic || audience) {
-            topicBlock = "\nسياق الموضوع والجمهور:\n";
-            if (topic) topicBlock += topic + "\n";
-            if (audience) topicBlock += "مستوى الجمهور المستهدف: " + audience + "\n";
-          }
-
-          var lengthStudyBodyLine = `— الطول: استخدم من ${minSentences} إلى ${maxSentences} جملة كحد أقصى، مركزة وغنية.\n`;
-          var strictJsonRules =
-            "قواعد JSON القياسية (RFC 8259) — إلزامي:\n" +
-            "— المخرجات = كائن جذر واحد فقط يحتوي المفتاحين lesson و sections بالضبط؛ لا مفاتيح إضافية في الجذر.\n" +
-            "— جميع مفاتيح الكائنات والسلاسل النصية بين علامتي تنصيص مزدوجة ASCII (\")؛ يُمنع استخدام علامات التنصيص المفردة (') كحدود لسلسلة JSON.\n" +
-            "— الأرقام (defaultAnswerMs، studyPhaseMs، correctIndex، sortOrder) يجب أن تكون أرقاماً JSON خامة بلا علامات اقتباس.\n" +
-            "— correctIndex: إن كان options بطول 2 فالمسموح 0 أو 1 فقط؛ إن كان بطول 4 فالمسموح 0 أو 1 أو 2 أو 3 فقط.\n" +
-            "— difficulty نص JSON فقط واحد من الثلاثة: \"easy\" أو \"medium\" أو \"hard\" (أحرف إنجليزية صغيرة).\n" +
-            "— لا تلف المخرجات داخل سياج Markdown ولا تسبقها أو تلحقها بأي نص؛ لا تعليقات // ولا /* */ داخل JSON.\n" +
-            "— لا فاصلة ختامية بعد آخر عنصر في {} أو []. لا تستخدم undefined أو NaN أو Infinity.\n" +
-            "— slug وdescription يمكن أن تكون null أو نصاً؛ sortOrder عدد صحيح (استخدم 0 إن لم يكن لديك تفضيل).\n\n";
-          var jsonShapeExample = JSON.stringify(
-            {
-              lesson: {
-                title: "عنوان الدرس",
-                slug: null,
-                description: null,
-                defaultAnswerMs: defaultAnswerMs,
-                sortOrder: 0,
+          var data = await api("/api/admin/lesson-ai-prompt/preview-text", {
+            method: "POST",
+            body: JSON.stringify({
+              kind: "admin_import",
+              params: {
+                nSec: nSec,
+                qSame: qSame,
+                ansSec: ansSec,
+                studySec: studySec,
+                topic: topic,
+                audience: audience,
+                minSentences: minSentences,
+                maxSentences: maxSentences,
               },
-              sections: [
-                {
-                  titleAr: "عنوان القسم",
-                  studyPhaseMs: studyPhaseMsUnified,
-                  items: [
-                    {
-                      prompt: "نص السؤال؟",
-                      options: ["خيار أ", "خيار ب", "خيار ج", "خيار د"],
-                      correctIndex: 0,
-                      difficulty: "medium",
-                      studyBody: "نص بطاقة المذاكرة.",
-                    },
-                  ],
-                },
-              ],
-            },
-            null,
-            2
-          );
-          var qualityBlock =
-            "\nجودة المحتوى (إلزامي اتباع الروح):\n" +
-            "— المشتتات: اجعل الخيارات الخاطئة من نفس المجال وتبدو معقولة لمن لم يقرأ بطاقة المذاكرة جيداً؛ تجنّب الخيارات السخيفة أو البديهية جداً.\n" +
-            "— تطابق المذاكرة والاختبار: يجب أن يوفّر studyBody المفهوم أو المهارة التي تمكّن الطالب من الإجابة الصحيحة، دون تلقين الحل المباشر ودون إعادة نفس أرقام السؤال أو معادلاته أو أمثلته؛ قدّم المعلومة اللازمة كشرح مفهومي أو قاعدة عامة يستنتج منها الطالب الحل. لا تطلب معلومة خارج ما علّمته البطاقة.\n" +
-            "— بناء المعرفة ومنع تسريب الحل (قاعدة صارمة): الهدف من البطاقة هو إكساب الطالب المهارة وليس حل المسألة له. يُحظر تماماً (Strictly Forbidden) استخدام نفس الأرقام، المعادلات، أو الأمثلة المذكورة في السؤال (Prompt) داخل بطاقة المذاكرة (studyBody).\n\nيجب اتباع الآتي:\n1. اشرح القاعدة العامة أو المفهوم.\n2. استخدم أمثلة موازية (أرقام مختلفة، متغيرات مختلفة، أو مواقف مشابهة ولكن ليست متطابقة).\n3. اجعل الطالب يستنتج الحل بنفسه بناءً على ما فهمه من البطاقة.\n" +
-            lengthStudyBodyLine +
-            "— جودة studyBody: لا تجعل البطاقة مجرد إجابة جافة؛ اجعلها غنية ومركزة. يُفضّل (إن أمكن) تعريف مبسط مع مثال قصير جداً يوضح الفكرة. ركز على جودة الشرح وسهولة الاستيعاب.\n";
-
-          return (
-            "دورك: أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية.\n\n" +
-            "المخرجات: JSON صالح فقط (سطر واحد أو متعدد)، بدون نص قبله أو بعده وبدون Markdown أو تعليقات.\n\n" +
-            "🚨 داخل القيم النصية (prompt، options، studyBody، العناوين): لا تُدرج علامة التنصيص المزدوجة U+0022 حرفياً داخل النص؛ استخدم « » أو اقتباساً مفرداً أو أقواساً أو أعد الصياغة. إن اضطررت تقنياً لعلامة مزدوجة داخل سلسلة JSON فاستخدم الهروب القياسي JSON (شرطة مائلة ثم علامة مزدوجة) داخل تلك السلسلة فقط؛ الأفضل تجنّب ذلك.\n\n" +
-            strictJsonRules +
-            "مثال شكل صالح (اتبع نفس الأسماء والتعشيش؛ وسّع المحتوى والأعداد حسب القيود أدناه وليس حسب حجم المثال):\n" +
-            jsonShapeExample +
-            "\n\nهيكل الجذر:\n" +
-            "— lesson: title (نص غير فارغ)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح بالمللي ثانية بين 3000 و120000)، sortOrder (عدد صحيح ≥0، يُفضّل 0).\n" +
-            "— sections: مصفوفة طولها بالضبط " +
-            nSec +
-            "؛ كل عنصر: titleAr (نص أو null)، studyPhaseMs (عدد صحيح بالمللي ثانية)، items (مصفوفة أسئلة).\n" +
-            "لا تُضمّن lessonCategoryId ولا أي حقل لتصنيف الدرس في JSON.\n\n" +
-            sectionBlock +
-            "\n\nكل سؤال داخل items يجب أن يحتوي:\n" +
-            "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (عدد صحيح حسب طول options أعلاه)، difficulty: easy أو medium أو hard، studyBody (نص غير فارغ)، answerMs اختياري (عدد أو null)، subcategoryKey اختياري (نص مثل general_default).\n" +
-            "قائمة تحقق قبل الإرسال: طول sections = " +
-            nSec +
-            "؛ طول items في كل قسم = " +
-            qSame +
-            "؛ defaultAnswerMs في lesson = " +
-            defaultAnswerMs +
-            "؛ studyPhaseMs في كل قسم = " +
-            studyPhaseMsUnified +
-            "؛ كل options إما 2 أو 4 عناصر؛ كل studyBody غير فارغ.\n" +
-            qualityBlock +
-            "\nقيود المعطيات لهذا الطلب:\n" +
-            "— عدد الأقسام: " +
-            nSec +
-            ".\n" +
-            "— عدد الأسئلة في كل قسم موحّد: " +
-            qSame +
-            " لكل من الأقسام الـ " +
-            nSec +
-            ".\n" +
-            "— defaultAnswerMs للدرس: " +
-            defaultAnswerMs +
-            " مللي ثانية (" +
-            ansSec +
-            " ثانية).\n" +
-            "— زمن مذاكرة كل قسم موحّد: studyPhaseMs = " +
-            studyPhaseMsUnified +
-            " مللي ثانية (" +
-            studySec +
-            " ثانية) لجميع الأقسام.\n" +
-            topicBlock +
-            "\nاملأ النصوص التعليمية بالعربية المناسبة للجمهور. تأكد أن كل قسم يطابق أعداد items وstudyPhaseMs أعلاه وأن الخيارات والإجابة الصحيحة متسقة.\n\n" +
-            "أخرج JSON الآن.\n\n" +
-            "(اختياري عند اللصق في أداة تفصل رسالة النظام عن المستخدم: ضع التعليمات أعلاه في رسالة المستخدم، وصفّ دور النموذج في رسالة النظام كمُنشئ JSON عربي لتطبيق تعليمي دون تعليق خارج JSON.)"
-          );
+            }),
+          });
+          return data.text;
         }
 
         function buildEmptyImportTemplate() {
@@ -1419,12 +1365,285 @@
           }
         }
 
-        document.getElementById("ai-copy-prompt").onclick = function () {
-          void copyTextToClipboard(buildAiLessonPrompt());
+        document.getElementById("ai-copy-prompt").onclick = async function () {
+          try {
+            var text = await buildAiLessonPromptFromApi();
+            await copyTextToClipboard(text);
+          } catch (_) {}
         };
 
         document.getElementById("ai-copy-template").onclick = function () {
           void copyTextToClipboard(buildEmptyImportTemplate());
+        };
+
+        var LAP_FRAG_META = [
+          ["head", "المقدمة والمخرجات"],
+          ["strictJsonRules", "قواعد JSON"],
+          ["midExample", "عنوان المثال"],
+          ["jsonExample", "كائن JSON المثالي"],
+          ["structureAndItems", "الهيكل والأقسام والتحقق"],
+          ["quality", "جودة المحتوى"],
+          ["paramsAndTopic", "قيود المعطيات والجمهور"],
+          ["closing", "الختام"],
+        ];
+
+        function lapRenderFragmentsUi() {
+          var tg = document.getElementById("lap-frag-toggles");
+          var ov = document.getElementById("lap-frag-overrides");
+          if (!tg || !ov) return;
+          tg.innerHTML = LAP_FRAG_META.map(function (pair) {
+            var k = pair[0];
+            var label = pair[1];
+            return (
+              '<label style="display:flex;gap:.35rem;align-items:center"><input type="checkbox" id="lap-en-' +
+              k +
+              '" checked data-lap-frag="' +
+              k +
+              '" /> ' +
+              label +
+              "</label>"
+            );
+          }).join("");
+          ov.innerHTML = LAP_FRAG_META.map(function (pair) {
+            var k = pair[0];
+            var label = pair[1];
+            return (
+              '<div><span class="muted" style="font-size:.78rem">' +
+              label +
+              " (" +
+              k +
+              ')</span><textarea id="lap-ov-' +
+              k +
+              '" rows="3" style="width:100%;font-family:ui-monospace,monospace;font-size:.72rem;margin-top:.15rem"></textarea></div>'
+            );
+          }).join("");
+        }
+
+        function lapApplyResolved(resolved) {
+          var d = resolved.defaults || {};
+          function nv(x, fb) {
+            var n = Number(x);
+            return Number.isFinite(n) ? n : fb;
+          }
+          document.getElementById("lap-d-nsec").value = nv(d.nSec, 3);
+          document.getElementById("lap-d-qsame").value = nv(d.qSame, 5);
+          document.getElementById("lap-d-anssec").value = nv(d.ansSec, 15);
+          document.getElementById("lap-d-studysec").value = nv(d.studySec, 60);
+          document.getElementById("lap-d-minsent").value = nv(d.minSentences, 1);
+          document.getElementById("lap-d-maxsent").value = nv(d.maxSentences, 6);
+          document.getElementById("lap-d-topic").value = d.topic != null ? String(d.topic) : "";
+          var fe = resolved.fragmentEnabled || {};
+          var fo = resolved.fragmentOverrides || {};
+          LAP_FRAG_META.forEach(function (pair) {
+            var k = pair[0];
+            var cb = document.getElementById("lap-en-" + k);
+            if (cb) cb.checked = fe[k] !== false;
+            var ta = document.getElementById("lap-ov-" + k);
+            if (ta) ta.value = fo[k] ? String(fo[k]) : "";
+          });
+        }
+
+        function lapGatherConfigFromForm() {
+          var fragmentEnabled = {};
+          LAP_FRAG_META.forEach(function (pair) {
+            var k = pair[0];
+            var cb = document.getElementById("lap-en-" + k);
+            if (cb && !cb.checked) fragmentEnabled[k] = false;
+          });
+          var fragmentOverrides = {};
+          LAP_FRAG_META.forEach(function (pair) {
+            var k = pair[0];
+            var ta = document.getElementById("lap-ov-" + k);
+            if (ta && String(ta.value).trim()) fragmentOverrides[k] = ta.value;
+          });
+          function nv(id, fb) {
+            var n = Number(document.getElementById(id).value);
+            return Number.isFinite(n) ? n : fb;
+          }
+          return {
+            version: 1,
+            defaults: {
+              nSec: nv("lap-d-nsec", 3),
+              qSame: nv("lap-d-qsame", 5),
+              ansSec: nv("lap-d-anssec", 15),
+              studySec: nv("lap-d-studysec", 60),
+              minSentences: nv("lap-d-minsent", 1),
+              maxSentences: nv("lap-d-maxsent", 6),
+              topic: document.getElementById("lap-d-topic").value.trim(),
+              audience: "",
+            },
+            fragmentEnabled: Object.keys(fragmentEnabled).length ? fragmentEnabled : undefined,
+            fragmentOverrides: Object.keys(fragmentOverrides).length ? fragmentOverrides : undefined,
+          };
+        }
+
+        async function lapRefreshVersions() {
+          var el = document.getElementById("lap-versions");
+          if (!el) return;
+          try {
+            var data = await api("/api/admin/lesson-ai-prompt-config/versions?limit=25");
+            el.innerHTML =
+              data.versions
+                .map(function (v) {
+                  return (
+                    '<div class="list-item" style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap"><span>#' +
+                    v.id +
+                    " — " +
+                    v.created_at +
+                    (v.note ? " — " + escapeHtml(v.note) : "") +
+                    '</span><button type="button" class="btn btn-xs btn-secondary" data-lap-restore="' +
+                    v.id +
+                    '">استعادة</button></div>'
+                  );
+                })
+                .join("") || '<div class="muted" style="padding:.4rem">لا نسخ بعد — احفظ لإنشاء أول نسخة.</div>';
+            el.querySelectorAll("[data-lap-restore]").forEach(function (b) {
+              b.addEventListener("click", async function () {
+                var id = Number(b.getAttribute("data-lap-restore"));
+                if (!window.confirm("استعادة الإصدار #" + id + "؟ سيُستبدل الإعداد الحالي.")) return;
+                try {
+                  await api("/api/admin/lesson-ai-prompt-config/restore", {
+                    method: "POST",
+                    body: JSON.stringify({ versionId: id }),
+                  });
+                  var fresh = await api("/api/admin/lesson-ai-prompt-config");
+                  lapApplyResolved(fresh.resolved);
+                  await lapRefreshVersions();
+                  setMsg("تمت استعادة النسخة #" + id + ".", true);
+                } catch (_) {}
+              });
+            });
+          } catch (_) {
+            el.innerHTML = '<div class="muted" style="padding:.4rem">تعذر تحميل النسخ.</div>';
+          }
+        }
+
+        async function lapPreviewBoth() {
+          try {
+            var nSec = Math.min(20, Math.max(1, parseInt(document.getElementById("ai-sections").value, 10) || 3));
+            var qSameEl = document.getElementById("ai-q-same").value.trim();
+            var qSame = Math.min(50, Math.max(1, parseInt(qSameEl, 10) || 3));
+            var ansSec = parseFloat(document.getElementById("ai-answer-sec").value);
+            if (!Number.isFinite(ansSec)) ansSec = 15;
+            ansSec = Math.min(120, Math.max(3, ansSec));
+            var studySec = parseFloat(document.getElementById("ai-study-sec").value);
+            if (!Number.isFinite(studySec)) studySec = 60;
+            studySec = Math.min(300, Math.max(2, studySec));
+            var topic = document.getElementById("ai-topic").value.trim();
+            var audienceEl = document.getElementById("ai-audience");
+            var audience = audienceEl && audienceEl.value ? String(audienceEl.value).trim() : "";
+            var minSentences = 1;
+            var maxSentences = 3;
+            var minEl = document.getElementById("ai-study-min-sentences");
+            var maxEl = document.getElementById("ai-study-max-sentences");
+            if (minEl) {
+              var mi = parseInt(String(minEl.value).trim(), 10);
+              if (Number.isFinite(mi)) minSentences = Math.min(20, Math.max(1, mi));
+            }
+            if (maxEl) {
+              var ma = parseInt(String(maxEl.value).trim(), 10);
+              if (Number.isFinite(ma)) maxSentences = Math.min(20, Math.max(1, ma));
+            }
+            if (maxSentences < minSentences) {
+              var sw = minSentences;
+              minSentences = maxSentences;
+              maxSentences = sw;
+            }
+            var adm = await api("/api/admin/lesson-ai-prompt/preview-text", {
+              method: "POST",
+              body: JSON.stringify({
+                kind: "admin_import",
+                params: {
+                  nSec: nSec,
+                  qSame: qSame,
+                  ansSec: ansSec,
+                  studySec: studySec,
+                  topic: topic,
+                  audience: audience,
+                  minSentences: minSentences,
+                  maxSentences: maxSentences,
+                },
+              }),
+            });
+            document.getElementById("lap-preview-admin").value = adm.text;
+            var fd = lapGatherConfigFromForm().defaults;
+            var cust = await api("/api/admin/lesson-ai-prompt/preview-text", {
+              method: "POST",
+              body: JSON.stringify({
+                kind: "custom_lesson",
+                learningIntent: "مثال: الكسور",
+                params: {
+                  nSec: fd.nSec,
+                  qSame: fd.qSame,
+                  ansSec: fd.ansSec,
+                  studySec: fd.studySec,
+                  topic: fd.topic,
+                  audience: fd.audience,
+                  minSentences: fd.minSentences,
+                  maxSentences: fd.maxSentences,
+                },
+              }),
+            });
+            document.getElementById("lap-preview-custom").value = cust.text;
+            setMsg("تم تحديث المعاينة.", true);
+          } catch (_) {}
+        }
+
+        lapRenderFragmentsUi();
+        void (async function lapBootstrap() {
+          try {
+            var data = await api("/api/admin/lesson-ai-prompt-config");
+            lapApplyResolved(data.resolved);
+            await lapRefreshVersions();
+          } catch (_) {}
+        })();
+
+        document.getElementById("lap-load").onclick = async function () {
+          try {
+            var data = await api("/api/admin/lesson-ai-prompt-config");
+            lapApplyResolved(data.resolved);
+            await lapRefreshVersions();
+            setMsg("تم تحميل الإعداد من الخادم.", true);
+          } catch (_) {}
+        };
+
+        document.getElementById("lap-save").onclick = async function () {
+          try {
+            var cfg = lapGatherConfigFromForm();
+            var note = document.getElementById("lap-save-note").value.trim();
+            await api("/api/admin/lesson-ai-prompt-config", {
+              method: "PUT",
+              body: JSON.stringify({ config: cfg, note: note || null }),
+            });
+            await lapRefreshVersions();
+            setMsg("تم حفظ إعداد برومبت الدرس.", true);
+          } catch (_) {}
+        };
+
+        document.getElementById("lap-preview-both").onclick = function () {
+          void lapPreviewBoth();
+        };
+
+        document.getElementById("lap-test-json-btn").onclick = async function () {
+          var out = document.getElementById("lap-test-json-result");
+          out.textContent = "";
+          var raw = document.getElementById("lap-test-json").value.trim();
+          if (!raw) {
+            out.textContent = "الصق JSON أولاً.";
+            return;
+          }
+          try {
+            var body = JSON.parse(raw);
+            var data = await api("/api/admin/lesson-ai-prompt/test-json", {
+              method: "POST",
+              body: JSON.stringify(body),
+            });
+            out.textContent = "صالح — " + data.steps + " خطوة — «" + (data.lessonTitle || "") + "»";
+            out.className = "muted ok";
+          } catch (e) {
+            out.textContent = e && e.message ? String(e.message) : "فشل التحقق.";
+            out.className = "muted err";
+          }
         };
 
         document.getElementById("load-all").onclick = () => void loadAll();
