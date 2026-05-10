@@ -364,6 +364,7 @@
           }
           return {
             kind: "custom_lesson",
+            promptTemplate: document.getElementById("clp-prompt-template").value,
             learningIntent: document.getElementById("clp-learning-intent").value,
             params: {
               nSec: nv("clp-d-nsec", 3),

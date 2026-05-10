@@ -38,10 +38,15 @@ const lessonParamsBodySchema = z.object({
   maxSentences: z.number().optional(),
 });
 
+/** يطابق حد التخزين في lessonAiPromptConfig */
+const PREVIEW_PROMPT_TEMPLATE_MAX_CHARS = 200_000;
+
 const previewBodySchema = z.object({
   kind: z.enum(["admin_import", "custom_lesson"]),
   params: lessonParamsBodySchema,
   learningIntent: z.string().optional(),
+  /** إن وُجد وغير فارغ بعد التقليم يُستخدم بدل القالب المحلّل من التخزين (معاينة الإدارة = المحرّر). */
+  promptTemplate: z.string().max(PREVIEW_PROMPT_TEMPLATE_MAX_CHARS).optional(),
 });
 
 export function registerLessonAiPromptRoutes(app: Express): void {
@@ -119,7 +124,11 @@ export function registerLessonAiPromptRoutes(app: Express): void {
         maxSentences: parsed.data.params.maxSentences ?? resolved.defaults.maxSentences,
       };
       const base = clampLessonPromptParams(mergedIn);
-      const opts = { promptTemplate: resolved.promptTemplate };
+      const editorTpl =
+        typeof parsed.data.promptTemplate === "string" ? parsed.data.promptTemplate.trim() : "";
+      const opts = {
+        promptTemplate: editorTpl.length > 0 ? editorTpl : resolved.promptTemplate,
+      };
       let text: string;
       if (parsed.data.kind === "custom_lesson") {
         text = buildCustomLessonAiPromptText(
