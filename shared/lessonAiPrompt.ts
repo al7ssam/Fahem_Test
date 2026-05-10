@@ -1,6 +1,7 @@
 /**
  * مصدر واحد لمولّد برومبت إنشاء درس JSON (عميل + خادم + لوحة الإدارة).
- * التوليد: قالب نصي واحد + استبدال {{متغيرات}}.
+ * التوليد: قالب نصي واحد + استبدال {{متغيرات}} — بدون «بلوكات» تُبنى في الخلفية.
+ * النصوص الطويلة تكون في القالب (الافتراضي أو المخزَّن) وليس في دوال مخفية.
  */
 
 export type LessonAiPromptParams = {
@@ -18,10 +19,9 @@ export type LessonAiPromptParams = {
 
 export type ClampedLessonAiPromptParams = ReturnType<typeof clampLessonPromptParams>;
 
-/** متغيرات موثّقة للقالب (بالإضافة إلى مشتقات مثل jsonExample). */
+/** متغيرات مدعومة رسمياً — كلها قيم مباشرة أو {{jsonExample}} المُولَّد من شكل JSON فقط. */
 export const LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS = [
   "learningIntent",
-  "learningIntentSection",
   "topic",
   "audience",
   "nSec",
@@ -33,6 +33,13 @@ export const LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS = [
   "defaultAnswerMs",
   "studyPhaseMs",
   "jsonExample",
+] as const;
+
+export type LessonAiPromptTemplateKey = (typeof LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS)[number];
+
+/** أسماء placeholders القديمة (بلوكات مخفية) — إن وُجدت في قالب مخزَّن يُنصح بالرجوع للقالب الافتراضي الجديد عند الدمج. */
+export const LESSON_AI_PROMPT_LEGACY_PLACEHOLDER_NAMES = [
+  "learningIntentSection",
   "topicBlock",
   "qualityBlock",
   "sectionBlock",
@@ -41,7 +48,11 @@ export const LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS = [
   "strictJsonRules",
 ] as const;
 
-export type LessonAiPromptTemplateKey = (typeof LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS)[number];
+export function lessonAiPromptTemplateContainsLegacyPlaceholders(template: string): boolean {
+  return LESSON_AI_PROMPT_LEGACY_PLACEHOLDER_NAMES.some((name) =>
+    new RegExp(`\\{\\{\\s*${escapeRegExp(name)}\\s*\\}\\}`).test(template),
+  );
+}
 
 export function clampLessonPromptParams(p: LessonAiPromptParams): LessonAiPromptParams {
   let minS = Math.min(20, Math.max(1, Math.trunc(p.minSentences) || 1));
@@ -59,21 +70,8 @@ export function clampLessonPromptParams(p: LessonAiPromptParams): LessonAiPrompt
   };
 }
 
-function buildStrictJsonRulesFragment(): string {
-  return (
-    "قواعد JSON القياسية (RFC 8259) — إلزامي:\n" +
-    "— المخرجات = كائن جذر واحد فقط يحتوي المفتاحين lesson و sections بالضبط؛ لا مفاتيح إضافية في الجذر.\n" +
-    "— جميع مفاتيح الكائنات والسلاسل النصية بين علامتي تنصيص مزدوجة ASCII (\")؛ يُمنع استخدام علامات التنصيص المفردة (') كحدود لسلسلة JSON.\n" +
-    "— الأرقام (defaultAnswerMs، studyPhaseMs، correctIndex، sortOrder) يجب أن تكون أرقاماً JSON خامة بلا علامات اقتباس.\n" +
-    "— correctIndex: إن كان options بطول 2 فالمسموح 0 أو 1 فقط؛ إن كان بطول 4 فالمسموح 0 أو 1 أو 2 أو 3 فقط.\n" +
-    "— difficulty نص JSON فقط واحد من الثلاثة: \"easy\" أو \"medium\" أو \"hard\" (أحرف إنجليزية صغيرة).\n" +
-    "— لا تلف المخرجات داخل سياج Markdown ولا تسبقها أو تلحقها بأي نص؛ لا تعليقات // ولا /* */ داخل JSON.\n" +
-    "— لا فاصلة ختامية بعد آخر عنصر في {} أو []. لا تستخدم undefined أو NaN أو Infinity.\n" +
-    "— slug وdescription يمكن أن تكون null أو نصاً؛ sortOrder عدد صحيح (استخدم 0 إن لم يكن لديك تفضيل).\n\n"
-  );
-}
-
-function buildJsonShapeExampleString(p: ClampedLessonAiPromptParams): string {
+/** مثال JSON بالأشكال والأرقام المشتقة من المعاملات — المعنى الوحيد للـ «تجميع» غير النص الصريح في القالب. */
+export function buildLessonAiPromptJsonExample(p: ClampedLessonAiPromptParams): string {
   const defaultAnswerMs = Math.round(p.ansSec * 1000);
   const studyPhaseMsUnified = Math.round(p.studySec * 1000);
   return JSON.stringify(
@@ -106,72 +104,9 @@ function buildJsonShapeExampleString(p: ClampedLessonAiPromptParams): string {
   );
 }
 
-function buildTopicBlock(p: ClampedLessonAiPromptParams): string {
-  let topicBlock = "";
-  if (p.topic || p.audience) {
-    topicBlock = "\nسياق الموضوع والجمهور:\n";
-    if (p.topic) topicBlock += `${p.topic}\n`;
-    if (p.audience) topicBlock += `مستوى الجمهور المستهدف: ${p.audience}\n`;
-  }
-  return topicBlock;
-}
-
-function buildQualityBlock(p: ClampedLessonAiPromptParams): string {
-  const lengthStudyBodyLine = `— الطول: استخدم من ${p.minSentences} إلى ${p.maxSentences} جملة كحد أقصى، مركزة وغنية.\n`;
-  return (
-    "\nجودة المحتوى (إلزامي اتباع الروح):\n" +
-    "— المشتتات: اجعل الخيارات الخاطئة من نفس المجال وتبدو معقولة لمن لم يقرأ بطاقة المذاكرة جيداً؛ تجنّب الخيارات السخيفة أو البديهية جداً.\n" +
-    "— تطابق المذاكرة والاختبار: يجب أن يوفّر studyBody المفهوم أو المهارة التي تمكّن الطالب من الإجابة الصحيحة، دون تلقين الحل المباشر ودون إعادة نفس أرقام السؤال أو معادلاته أو أمثلته؛ قدّم المعلومة اللازمة كشرح مفهومي أو قاعدة عامة يستنتج منها الطالب الحل. لا تطلب معلومة خارج ما علّمته البطاقة.\n" +
-    "— بناء المعرفة ومنع تسريب الحل (قاعدة صارمة): الهدف من البطاقة هو إكساب الطالب المهارة وليس حل المسألة له. يُحظر تماماً (Strictly Forbidden) استخدام نفس الأرقام، المعادلات، أو الأمثلة المذكورة في السؤال (Prompt) داخل بطاقة المذاكرة (studyBody).\n\nيجب اتباع الآتي:\n1. اشرح القاعدة العامة أو المفهوم.\n2. استخدم أمثلة موازية (أرقام مختلفة، متغيرات مختلفة، أو مواقف مشابهة ولكن ليست متطابقة).\n3. اجعل الطالب يستنتج الحل بنفسه بناءً على ما فهمه من البطاقة.\n" +
-    lengthStudyBodyLine +
-    "— جودة studyBody: لا تجعل البطاقة مجرد إجابة جافة؛ اجعلها غنية ومركزة. يُفضّل (إن أمكن) تعريف مبسط مع مثال قصير جداً يوضح الفكرة. ركز على جودة الشرح وسهولة الاستيعاب.\n"
-  );
-}
-
-function buildSectionBlock(p: ClampedLessonAiPromptParams): string {
-  const studyPhaseMsUnified = Math.round(p.studySec * 1000);
-  return `جميع الأقسام الـ ${p.nSec}: لكل قسم items بعدد موحّد ${p.qSame} سؤالاً، وstudyPhaseMs = ${studyPhaseMsUnified} (مللي ثانية) لكل قسم.`;
-}
-
-function buildStructureAndItemsFragment(p: ClampedLessonAiPromptParams): string {
-  const defaultAnswerMs = Math.round(p.ansSec * 1000);
-  const studyPhaseMsUnified = Math.round(p.studySec * 1000);
-  const sectionBlock = buildSectionBlock(p);
-  return (
-    "\n\nهيكل الجذر:\n" +
-    "— lesson: title (نص غير فارغ)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح بالمللي ثانية بين 3000 و120000)، sortOrder (عدد صحيح ≥0، يُفضّل 0).\n" +
-    `— sections: مصفوفة طولها بالضبط ${p.nSec}؛ كل عنصر: titleAr (نص أو null)، studyPhaseMs (عدد صحيح بالمللي ثانية)، items (مصفوفة أسئلة).\n` +
-    "لا تُضمّن lessonCategoryId ولا أي حقل لتصنيف الدرس في JSON.\n\n" +
-    sectionBlock +
-    "\n\nكل سؤال داخل items يجب أن يحتوي:\n" +
-    "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (عدد صحيح حسب طول options أعلاه)، difficulty: easy أو medium أو hard، studyBody (نص غير فارغ)، answerMs اختياري (عدد أو null)، subcategoryKey اختياري (نص مثل general_default).\n" +
-    `قائمة تحقق قبل الإرسال: طول sections = ${p.nSec}؛ طول items في كل قسم = ${p.qSame}؛ defaultAnswerMs في lesson = ${defaultAnswerMs}؛ studyPhaseMs في كل قسم = ${studyPhaseMsUnified}؛ كل options إما 2 أو 4 عناصر؛ كل studyBody غير فارغ.\n`
-  );
-}
-
-function buildParamsAndTopicFragment(p: ClampedLessonAiPromptParams): string {
-  const defaultAnswerMs = Math.round(p.ansSec * 1000);
-  const studyPhaseMsUnified = Math.round(p.studySec * 1000);
-  const topicBlock = buildTopicBlock(p);
-  return (
-    "\nقيود المعطيات لهذا الطلب:\n" +
-    `— عدد الأقسام: ${p.nSec}.\n` +
-    `— عدد الأسئلة في كل قسم موحّد: ${p.qSame} لكل من الأقسام الـ ${p.nSec}.\n` +
-    `— defaultAnswerMs للدرس: ${defaultAnswerMs} مللي ثانية (${p.ansSec} ثانية).\n` +
-    `— زمن مذاكرة كل قسم موحّد: studyPhaseMs = ${studyPhaseMsUnified} مللي ثانية (${p.studySec} ثانية) لجميع الأقسام.\n` +
-    topicBlock +
-    "\nاملأ النصوص التعليمية بالعربية المناسبة للجمهور. تأكد أن كل قسم يطابق أعداد items وstudyPhaseMs أعلاه وأن الخيارات والإجابة الصحيحة متسقة.\n\n"
-  );
-}
-
-function learningIntentSectionFromIntent(learningIntent: string): string {
-  const intent = String(learningIntent ?? "").trim();
-  if (!intent) return "\n\n";
-  return `\n\nما يريد المستخدم تعلّمه (دمج إلزامي في الدرس والأسئلة والبطاقات):\n${intent}\n\n`;
-}
-
 /**
- * خريطة استبدال {{المفتاح}} — القيم الفارغة أصلاً للنصوص تكون "".
+ * خريطة استبدال {{المفتاح}} — القيم الفارغة للنصوص تكون "".
+ * لا توجد حقول «بلوك» ضخمة؛ كل شيء آخر يجب أن يظهر في نص القالب نفسه.
  */
 export function buildLessonAiPromptVariableMap(
   p: ClampedLessonAiPromptParams,
@@ -182,7 +117,6 @@ export function buildLessonAiPromptVariableMap(
   const learningIntent = String(extras.learningIntent ?? "").trim();
   return {
     learningIntent,
-    learningIntentSection: learningIntentSectionFromIntent(learningIntent),
     topic: p.topic,
     audience: p.audience,
     nSec: String(p.nSec),
@@ -193,13 +127,7 @@ export function buildLessonAiPromptVariableMap(
     maxSentences: String(p.maxSentences),
     defaultAnswerMs: String(defaultAnswerMs),
     studyPhaseMs: String(studyPhaseMsUnified),
-    jsonExample: buildJsonShapeExampleString(p),
-    topicBlock: buildTopicBlock(p),
-    qualityBlock: buildQualityBlock(p),
-    sectionBlock: buildSectionBlock(p),
-    structureAndItems: buildStructureAndItemsFragment(p),
-    paramsAndTopic: buildParamsAndTopicFragment(p),
-    strictJsonRules: buildStrictJsonRulesFragment(),
+    jsonExample: buildLessonAiPromptJsonExample(p),
   };
 }
 
@@ -223,20 +151,49 @@ function escapeRegExp(s: string): string {
 }
 
 /**
- * القالب الافتراضي المطابق للسلوك السابق (قبل التخزين المخصص).
- * يستخدم {{strictJsonRules}} {{jsonExample}} {{qualityBlock}} {{structureAndItems}} {{paramsAndTopic}} إلخ.
+ * القالب الافتراضي كامل النص — لا توجد أجزاء تُولَّد خارج هذا النص سوى استبدال المتغيرات أعلاه و{{jsonExample}}.
  */
 export const DEFAULT_LESSON_AI_PROMPT_TEMPLATE =
-  "دورك: أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية." +
-  "{{learningIntentSection}}" +
+  "دورك: أنت تُنشئ محتوى درس لتطبيق تعليمي بالعربية.\n\n" +
+  "ما يريد المستخدم تعلّمه — ادمجه إلزامياً في الدرس والأسئلة وبطاقات المذاكرة إن كان النص التالي غير فارغ:\n" +
+  "{{learningIntent}}\n\n" +
   "المخرجات: JSON صالح فقط (سطر واحد أو متعدد)، بدون نص قبله أو بعده وبدون Markdown أو تعليقات.\n\n" +
   "🚨 داخل القيم النصية (prompt، options، studyBody، العناوين): لا تُدرج علامة التنصيص المزدوجة U+0022 حرفياً داخل النص؛ استخدم « » أو اقتباساً مفرداً أو أقواساً أو أعد الصياغة. إن اضطررت تقنياً لعلامة مزدوجة داخل سلسلة JSON فاستخدم الهروب القياسي JSON (شرطة مائلة ثم علامة مزدوجة) داخل تلك السلسلة فقط؛ الأفضل تجنّب ذلك.\n\n" +
-  "{{strictJsonRules}}" +
+  "قواعد JSON القياسية (RFC 8259) — إلزامي:\n" +
+  "— المخرجات = كائن جذر واحد فقط يحتوي المفتاحين lesson و sections بالضبط؛ لا مفاتيح إضافية في الجذر.\n" +
+  "— جميع مفاتيح الكائنات والسلاسل النصية بين علامتي تنصيص مزدوجة ASCII (\")؛ يُمنع استخدام علامات التنصيص المفردة (') كحدود لسلسلة JSON.\n" +
+  "— الأرقام (defaultAnswerMs، studyPhaseMs، correctIndex، sortOrder) يجب أن تكون أرقاماً JSON خامة بلا علامات اقتباس.\n" +
+  "— correctIndex: إن كان options بطول 2 فالمسموح 0 أو 1 فقط؛ إن كان بطول 4 فالمسموح 0 أو 1 أو 2 أو 3 فقط.\n" +
+  "— difficulty نص JSON فقط واحد من الثلاثة: \"easy\" أو \"medium\" أو \"hard\" (أحرف إنجليزية صغيرة).\n" +
+  "— لا تلف المخرجات داخل سياج Markdown ولا تسبقها أو تلحقها بأي نص؛ لا تعليقات // ولا /* */ داخل JSON.\n" +
+  "— لا فاصلة ختامية بعد آخر عنصر في {} أو []. لا تستخدم undefined أو NaN أو Infinity.\n" +
+  "— slug وdescription يمكن أن تكون null أو نصاً؛ sortOrder عدد صحيح (استخدم 0 إن لم يكن لديك تفضيل).\n\n" +
   "مثال شكل صالح (اتبع نفس الأسماء والتعشيش؛ وسّع المحتوى والأعداد حسب القيود أدناه وليس حسب حجم المثال):\n" +
-  "{{jsonExample}}" +
-  "{{structureAndItems}}" +
-  "{{qualityBlock}}" +
-  "{{paramsAndTopic}}" +
+  "{{jsonExample}}\n\n" +
+  "هيكل الجذر:\n" +
+  "— lesson: title (نص غير فارغ)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح بالمللي ثانية بين 3000 و120000)، sortOrder (عدد صحيح ≥0، يُفضّل 0).\n" +
+  "— sections: مصفوفة طولها بالضبط {{nSec}}؛ كل عنصر: titleAr (نص أو null)، studyPhaseMs (عدد صحيح بالمللي ثانية)، items (مصفوفة أسئلة).\n" +
+  "لا تُضمّن lessonCategoryId ولا أي حقل لتصنيف الدرس في JSON.\n\n" +
+  "جميع الأقسام الـ {{nSec}}: لكل قسم items بعدد موحّد {{qSame}} سؤالاً، وstudyPhaseMs = {{studyPhaseMs}} (مللي ثانية) لكل قسم.\n\n" +
+  "كل سؤال داخل items يجب أن يحتوي:\n" +
+  "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (عدد صحيح حسب طول options أعلاه)، difficulty: easy أو medium أو hard، studyBody (نص غير فارغ)، answerMs اختياري (عدد أو null)، subcategoryKey اختياري (نص مثل general_default).\n" +
+  "قائمة تحقق قبل الإرسال: طول sections = {{nSec}}؛ طول items في كل قسم = {{qSame}}؛ defaultAnswerMs في lesson = {{defaultAnswerMs}}؛ studyPhaseMs في كل قسم = {{studyPhaseMs}}؛ كل options إما 2 أو 4 عناصر؛ كل studyBody غير فارغ.\n\n" +
+  "جودة المحتوى (إلزامي اتباع الروح):\n" +
+  "— المشتتات: اجعل الخيارات الخاطئة من نفس المجال وتبدو معقولة لمن لم يقرأ بطاقة المذاكرة جيداً؛ تجنّب الخيارات السخيفة أو البديهية جداً.\n" +
+  "— تطابق المذاكرة والاختبار: يجب أن يوفّر studyBody المفهوم أو المهارة التي تمكّن الطالب من الإجابة الصحيحة، دون تلقين الحل المباشر ودون إعادة نفس أرقام السؤال أو معادلاته أو أمثلته؛ قدّم المعلومة اللازمة كشرح مفهومي أو قاعدة عامة يستنتج منها الطالب الحل. لا تطلب معلومة خارج ما علّمته البطاقة.\n" +
+  "— بناء المعرفة ومنع تسريب الحل (قاعدة صارمة): الهدف من البطاقة هو إكساب الطالب المهارة وليس حل المسألة له. يُحظر تماماً (Strictly Forbidden) استخدام نفس الأرقام، المعادلات، أو الأمثلة المذكورة في السؤال (Prompt) داخل بطاقة المذاكرة (studyBody).\n\nيجب اتباع الآتي:\n1. اشرح القاعدة العامة أو المفهوم.\n2. استخدم أمثلة موازية (أرقام مختلفة، متغيرات مختلفة، أو مواقف مشابهة ولكن ليست متطابقة).\n3. اجعل الطالب يستنتج الحل بنفسه بناءً على ما فهمه من البطاقة.\n" +
+  "— الطول: استخدم من {{minSentences}} إلى {{maxSentences}} جملة كحد أقصى، مركزة وغنية.\n" +
+  "— جودة studyBody: لا تجعل البطاقة مجرد إجابة جافة؛ اجعلها غنية ومركزة. يُفضّل (إن أمكن) تعريف مبسط مع مثال قصير جداً يوضح الفكرة. ركز على جودة الشرح وسهولة الاستيعاب.\n\n" +
+  "قيود المعطيات لهذا الطلب:\n" +
+  "— عدد الأقسام: {{nSec}}.\n" +
+  "— عدد الأسئلة في كل قسم موحّد: {{qSame}} لكل من الأقسام الـ {{nSec}}.\n" +
+  "— defaultAnswerMs للدرس: {{defaultAnswerMs}} مللي ثانية ({{ansSec}} ثانية).\n" +
+  "— زمن مذاكرة كل قسم موحّد: studyPhaseMs = {{studyPhaseMs}} مللي ثانية ({{studySec}} ثانية) لجميع الأقسام.\n\n" +
+  "سياق الموضوع والجمهور (استخدم ما يلي إن كان غير فارغ):\n" +
+  "{{topic}}\n" +
+  "مستوى الجمهور المستهدف (إن وُجد):\n" +
+  "{{audience}}\n\n" +
+  "املأ النصوص التعليمية بالعربية المناسبة للجمهور. تأكد أن كل قسم يطابق أعداد items وstudyPhaseMs أعلاه وأن الخيارات والإجابة الصحيحة متسقة.\n\n" +
   "أخرج JSON الآن.\n\n" +
   "(اختياري عند اللصق في أداة تفصل رسالة النظام عن المستخدم: ضع التعليمات أعلاه في رسالة المستخدم، وصفّ دور النموذج في رسالة النظام كمُنشئ JSON عربي لتطبيق تعليمي دون تعليق خارج JSON.)";
 

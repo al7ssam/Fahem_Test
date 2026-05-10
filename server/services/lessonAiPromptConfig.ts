@@ -5,6 +5,7 @@ import {
   DEFAULT_CUSTOM_LESSON_AUDIENCE_OPTIONS,
   DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
   DEFAULT_LESSON_AI_PROMPT_TEMPLATE,
+  lessonAiPromptTemplateContainsLegacyPlaceholders,
 } from "../../shared/lessonAiPrompt";
 
 export const LESSON_AI_PROMPT_SETTINGS_KEY = "lesson_ai_prompt_config_v1";
@@ -84,7 +85,12 @@ export function mergeLessonAiPromptStored(stored: LessonAiPromptStoredUnion | nu
   let promptTemplate = DEFAULT_LESSON_AI_PROMPT_TEMPLATE;
   if (stored?.version === 2 && typeof stored.promptTemplate === "string") {
     const t = stored.promptTemplate.trim();
-    if (t.length > 0) promptTemplate = stored.promptTemplate;
+    if (t.length > 0) {
+      /** قوالب v2 القديمة التي ما زالت تستخدم placeholders المحذوفة — لا نعرض {{qualityBlock}} إلخ حرفياً */
+      promptTemplate = lessonAiPromptTemplateContainsLegacyPlaceholders(stored.promptTemplate)
+        ? DEFAULT_LESSON_AI_PROMPT_TEMPLATE
+        : stored.promptTemplate;
+    }
   }
 
   return {
