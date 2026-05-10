@@ -507,6 +507,10 @@ function adminCustomLessonPromptTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-custom-lesson-prompt.html");
 }
 
+function adminUserSavedLessonsPolicyTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-user-saved-lessons-policy.html");
+}
+
 function adminQuestionBankTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-question-bank.html");
 }
@@ -543,6 +547,7 @@ type AdminNavPageId =
   | "matchBalance"
   | "lessons"
   | "customLessonPrompt"
+  | "userSavedLessonsPolicy"
   | "simpleContent"
   | "usageAnalytics"
   | "maintenance";
@@ -573,6 +578,12 @@ const ADMIN_NAV_LINK_ROWS: AdminNavLinkRow[] = [
     id: "customLessonPrompt",
     href: "/admin/custom-lesson-prompt",
     labelAr: "برومبت الدرس المخصص",
+    groupKey: "lessons",
+  },
+  {
+    id: "userSavedLessonsPolicy",
+    href: "/admin/user-saved-lessons-policy",
+    labelAr: "مكتبة الدروس المحفوظة",
     groupKey: "lessons",
   },
   { id: "simpleContent", href: "/admin/simple-content", labelAr: "المسار البسيط", groupKey: "ai" },
@@ -693,6 +704,13 @@ function readAdminCustomLessonPromptHtml(questionCount: number | null): string {
   return applyAdminTemplate(fs.readFileSync(adminCustomLessonPromptTemplatePath(), "utf8"), {
     questionCount,
     nav: "customLessonPrompt",
+  });
+}
+
+function readAdminUserSavedLessonsPolicyHtml(questionCount: number | null): string {
+  return applyAdminTemplate(fs.readFileSync(adminUserSavedLessonsPolicyTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "userSavedLessonsPolicy",
   });
 }
 
@@ -1227,6 +1245,16 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminCustomLessonPromptHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة برومبت الدرس المخصص.");
+    }
+  });
+
+  app.get("/admin/user-saved-lessons-policy", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminUserSavedLessonsPolicyHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة سياسة مكتبة الدروس المحفوظة.");
     }
   });
 

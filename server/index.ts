@@ -9,10 +9,12 @@ import {
   maybeRunStartupCleanup,
   maybeRunStartupSimpleContentPricingAuditCleanup,
   maybeRunStartupSimpleContentRunsCleanup,
+  maybeRunStartupUserSavedLessonsCleanup,
   performAiUsageLogsCleanup,
   performCleanup,
   performSimpleContentPricingAuditCleanup,
   performSimpleContentRunsCleanup,
+  performUserSavedLessonsExpiredCleanup,
 } from "./services/cleanup";
 import { startSimpleContentScheduler, stopSimpleContentScheduler } from "./services/simpleContent/scheduler";
 import { setReleaseVersionListener } from "./releaseVersionBus";
@@ -42,6 +44,11 @@ function scheduleCleanupCron(): void {
     }
     try {
       await performAiUsageLogsCleanup({ source: "cron" });
+    } catch {
+      // detailed log is emitted inside cleanup service
+    }
+    try {
+      await performUserSavedLessonsExpiredCleanup({ source: "cron" });
     } catch {
       // detailed log is emitted inside cleanup service
     }
@@ -87,6 +94,11 @@ async function startServer(): Promise<void> {
   }
   try {
     await maybeRunStartupAiUsageLogsCleanup();
+  } catch {
+    // detailed log is emitted inside cleanup service
+  }
+  try {
+    await maybeRunStartupUserSavedLessonsCleanup();
   } catch {
     // detailed log is emitted inside cleanup service
   }

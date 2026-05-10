@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>سياسة مكتبة الدروس المحفوظة | فاهم</title>
+    {{ADMIN_DESIGN_SYSTEM}}
+    <style>
+      :root {
+        --card: var(--admin-card-glass);
+        --border: var(--admin-border-warm);
+        --text: #f8f4ea;
+        --muted: #b7ac90;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(to bottom, var(--bg-from), var(--bg-mid), var(--bg-to));
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 40rem;
+        margin: 0 auto;
+        padding: 1.1rem 1rem 2.5rem;
+      }
+      h1 {
+        margin: 0;
+        color: var(--amber);
+        font-size: 1.5rem;
+      }
+      .subtitle {
+        color: var(--muted);
+        margin: 0.35rem 0 1rem;
+        font-size: 0.9rem;
+        line-height: 1.55;
+      }
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        padding: 0.65rem 0.75rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 0.9rem;
+        margin-bottom: 0.85rem;
+      }
+      .card {
+        padding: 0.9rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 0.9rem;
+      }
+      label {
+        display: block;
+        font-size: 0.85rem;
+        margin-bottom: 0.25rem;
+        color: var(--muted);
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        background: rgba(0, 0, 0, 0.25);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 0.55rem;
+        padding: 0.45rem 0.55rem;
+        font-family: inherit;
+        margin-bottom: 0.75rem;
+      }
+      .btn {
+        border: none;
+        border-radius: 0.55rem;
+        padding: 0.55rem 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        font-family: inherit;
+        background: linear-gradient(to left, #e8be66, #a8792f);
+        color: #120b02;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .msg {
+        min-height: 1.2rem;
+        font-size: 0.88rem;
+        margin-top: 0.5rem;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .err {
+        color: #fca5a5;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="topbar">
+        <span style="font-size: 0.85rem; color: var(--muted)">أسئلة في القاعدة: {{QUESTION_COUNT}}</span>
+      </div>
+      {{ADMIN_NAV}}
+      <h1>مكتبة الدروس المحفوظة للمستخدم</h1>
+      <p class="subtitle">
+        يحدّد الحد الأقصى لعدد الدروس غير المنتهية لكل مستخدم، ومدة الاحتفاظ (بالأيام). عند كل حفظ أو تعديل يُمدَّد
+        تاريخ انتهاء الصلاحية بناءً على «مدة الاحتفاظ».
+      </p>
+      <div class="card">
+        <label for="retentionDays">مدة الاحتفاظ (أيام)</label>
+        <input id="retentionDays" type="number" min="1" max="3650" step="1" />
+        <label for="maxLessonsPerUser">الحد الأقصى للدروس النشطة لكل مستخدم</label>
+        <input id="maxLessonsPerUser" type="number" min="1" max="500" step="1" />
+        <button type="button" class="btn" id="saveBtn">حفظ السياسة</button>
+        <p class="msg" id="msg"></p>
+      </div>
+    </div>
+    <script src="/assets/adminSessionFetch.js"></script>
+    <script>
+      (function () {
+        var msgEl = document.getElementById("msg");
+        var retentionEl = document.getElementById("retentionDays");
+        var maxEl = document.getElementById("maxLessonsPerUser");
+        var saveBtn = document.getElementById("saveBtn");
+
+        function msg(text, ok) {
+          msgEl.textContent = text || "";
+          msgEl.className = "msg " + (ok ? "ok" : "err");
+        }
+
+        async function api(path, opts) {
+          var res = await fahemAdminFetch(path, Object.assign({ credentials: "same-origin" }, opts || {}));
+          var data = await res.json().catch(function () {
+            return {};
+          });
+          return { res: res, data: data };
+        }
+
+        async function load() {
+          msg("", true);
+          try {
+            var out = await api("/api/admin/user-saved-lessons-policy", { method: "GET" });
+            if (!out.res.ok || out.data.ok === false) {
+              msg(out.data.error || "تعذر التحميل.", false);
+              return;
+            }
+            var r = out.data.resolved || out.data.stored;
+            if (r) {
+              retentionEl.value = String(r.retentionDays);
+              maxEl.value = String(r.maxLessonsPerUser);
+            }
+          } catch (e) {
+            msg("تعذر التحميل.", false);
+          }
+        }
+
+        saveBtn.addEventListener("click", async function () {
+          msg("", true);
+          saveBtn.disabled = true;
+          try {
+            var retentionDays = parseInt(retentionEl.value, 10);
+            var maxLessonsPerUser = parseInt(maxEl.value, 10);
+            var body = {
+              version: 1,
+              retentionDays: retentionDays,
+              maxLessonsPerUser: maxLessonsPerUser,
+            };
+            var out = await api("/api/admin/user-saved-lessons-policy", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            if (!out.res.ok || out.data.ok === false) {
+              msg(out.data.error || "رفض الحفظ.", false);
+              return;
+            }
+            msg("تم الحفظ.", true);
+            await load();
+          } catch (e) {
+            msg("تعذر الحفظ.", false);
+          } finally {
+            saveBtn.disabled = false;
+          }
+        });
+
+        load();
+      })();
+    </script>
+  </body>
+</html>

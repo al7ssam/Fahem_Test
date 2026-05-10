@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import { getPool } from "../db/pool";
+import { deleteExpiredUserSavedLessonsGlobal } from "../userSavedLessons/repository";
 
 type CleanupSource = "manual" | "startup" | "cron";
 
@@ -808,6 +809,21 @@ async function readCleanupStatsForTable(client: PoolClient, tableName: string): 
     oldestCreatedAt: row?.oldest_created_at ?? null,
     newestCreatedAt: row?.newest_created_at ?? null,
   };
+}
+
+export async function performUserSavedLessonsExpiredCleanup(input: {
+  source: CleanupSource;
+}): Promise<{ deletedCount: number }> {
+  const pool = getPool();
+  const deletedCount = await deleteExpiredUserSavedLessonsGlobal(pool);
+  if (deletedCount > 0) {
+    console.log(`[user_saved_lessons_cleanup] deleted=${deletedCount} source=${input.source}`);
+  }
+  return { deletedCount };
+}
+
+export async function maybeRunStartupUserSavedLessonsCleanup(): Promise<{ deletedCount: number } | null> {
+  return performUserSavedLessonsExpiredCleanup({ source: "startup" });
 }
 
 export async function getAiCleanupTableStats(): Promise<CleanupTableStatsRow[]> {
