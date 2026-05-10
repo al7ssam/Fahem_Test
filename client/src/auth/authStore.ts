@@ -57,7 +57,6 @@ export function commitAuthOperation(operationId: number, next: Partial<AuthState
 
 export function subscribeAuthState(listener: Listener): () => void {
   listeners.add(listener);
-  listener(state);
   return () => {
     listeners.delete(listener);
   };

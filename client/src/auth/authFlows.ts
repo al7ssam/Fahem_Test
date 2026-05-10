@@ -398,7 +398,7 @@ export async function logoutFlow(): Promise<void> {
 export function getAuthReadableStatus(): string {
   const s = getAuthState().status;
   if (s === "authenticated") return "مسجل الدخول";
-  if (s === "loading") return "جاري التحقق";
+  if (s === "idle" || s === "loading") return "جاري التحقق";
   if (s === "error") return "خطأ مصادقة";
   return "غير مسجل";
 }
@@ -406,9 +406,9 @@ export function getAuthReadableStatus(): string {
 /** سطر ترحيب للواجهة: أهلاً مع الاسم الفعّال (يمرَّر مسودة الاسم من الشاشة الرئيسية إن وُجدت). */
 export function getAuthWelcomeLine(playerNameDraft = ""): string {
   const s = getAuthState().status;
-  if (s === "loading") return "جاري التحقق…";
+  if (s === "idle" || s === "loading") return "جاري التحقق…";
   if (s === "error") return "خطأ مصادقة";
-  if (s !== "authenticated") return "يمكنك تسجيل الدخول أو المتابعة كضيف";
+  if (s === "unauthenticated") return "يمكنك تسجيل الدخول أو المتابعة كضيف";
   return `أهلاً، ${getWelcomeDisplayName(playerNameDraft)}`;
 }
 

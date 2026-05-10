@@ -858,7 +858,7 @@ function render(): void {
       .join("");
     const authUi = getAuthState();
     const guestNameFieldsHtml =
-      authUi.status !== "authenticated"
+      authUi.status === "unauthenticated"
         ? `<label class="block text-right text-sm text-slate-400">اسمك في اللعبة (اختياري)</label>
               <input id="name-input" maxlength="32" type="text" placeholder="اتركه فارغاً لاستخدام «مجهول» دون اسم محفوظ" class="app-input w-full px-4 py-3 text-right text-lg" />
               <p class="text-xs text-slate-500 text-right m-0">إن لم يُعرَض لك حقلاً للاسم، سيُستخدم «مجهول» في التحدي حتى يتوفر اسم من الملف أو الحساب.</p>`
@@ -873,8 +873,16 @@ function render(): void {
               ${guestNameFieldsHtml}
               <div class="auth-entry-inline">
                 <span class="auth-entry-status">${escapeHtml(getAuthWelcomeLine(playerNameDraft))}</span>
-                <button id="auth-open-btn" type="button" class="ui-btn ui-btn--ghost px-3 py-2 text-sm">
-                  ${authUi.status === "authenticated" ? "الحساب والملف الشخصي" : "تسجيل الدخول"}
+                <button id="auth-open-btn" type="button" class="ui-btn ui-btn--ghost px-3 py-2 text-sm"${
+                  authUi.status === "idle" || authUi.status === "loading" ? ' disabled aria-busy="true"' : ""
+                }>
+                  ${
+                    authUi.status === "authenticated"
+                      ? "الحساب والملف الشخصي"
+                      : authUi.status === "idle" || authUi.status === "loading"
+                        ? "جاري التحقق…"
+                        : "تسجيل الدخول"
+                  }
                 </button>
               </div>
               <p class="text-sm text-slate-400 text-right m-0">${
