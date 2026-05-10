@@ -136,7 +136,7 @@ export function registerLessonAiPromptRoutes(app: Express): void {
             ...base,
             learningIntent: parsed.data.learningIntent ?? "",
           },
-          opts,
+          { ...opts, applyCustomLessonFlowCaps: false },
         );
       } else {
         text = buildLessonAiPromptText(base, opts);

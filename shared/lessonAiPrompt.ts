@@ -72,6 +72,26 @@ export function clampLessonPromptParams(p: LessonAiPromptParams): LessonAiPrompt
   };
 }
 
+/** حدود مسار «درس مخصص» في التطبيق فقط (لا تنطبق على توليد الإدارة). */
+export const CUSTOM_LESSON_FLOW_MAX_NSEC = 3;
+export const CUSTOM_LESSON_FLOW_MAX_QSAME = 8;
+
+/** يطبّق clampLessonPromptParams ثم يحدّ أقسام/أسئلة لمسار المستخدم. */
+export function clampCustomLessonFlowParams(p: LessonAiPromptParams): LessonAiPromptParams {
+  const base = clampLessonPromptParams(p);
+  return {
+    ...base,
+    nSec: Math.min(
+      CUSTOM_LESSON_FLOW_MAX_NSEC,
+      Math.max(1, Math.trunc(base.nSec) || 3),
+    ),
+    qSame: Math.min(
+      CUSTOM_LESSON_FLOW_MAX_QSAME,
+      Math.max(1, Math.trunc(base.qSame) || 3),
+    ),
+  };
+}
+
 /** مثال JSON بالأشكال والأرقام المشتقة من المعاملات — المعنى الوحيد للـ «تجميع» غير النص الصريح في القالب. */
 export function buildLessonAiPromptJsonExample(p: ClampedLessonAiPromptParams): string {
   const defaultAnswerMs = Math.round(p.ansSec * 1000);
@@ -194,6 +214,11 @@ export const DEFAULT_LESSON_AI_PROMPT_TEMPLATE =
 export type BuildLessonAiPromptOptions = {
   /** إن وُجد وغير فارغ بعد التقليم يُستخدم؛ وإلا القالب الافتراضي. */
   promptTemplate?: string | null;
+  /**
+   * لـ `buildCustomLessonAiPromptText` فقط: افتراضياً true — يطبّق حد مسار المستخدم (أقسام ≤3، أسئلة/قسم ≤8).
+   * عطّله في معاينة الإدارة لاختبار قيم أعلى من النموذج.
+   */
+  applyCustomLessonFlowCaps?: boolean;
 };
 
 export function buildLessonAiPromptText(raw: LessonAiPromptParams, options?: BuildLessonAiPromptOptions | null): string {
@@ -208,7 +233,8 @@ export function buildCustomLessonAiPromptText(
   raw: LessonAiPromptParams & { learningIntent: string },
   options?: BuildLessonAiPromptOptions | null,
 ): string {
-  const p = clampLessonPromptParams(raw);
+  const useFlowCaps = options?.applyCustomLessonFlowCaps !== false;
+  const p = useFlowCaps ? clampCustomLessonFlowParams(raw) : clampLessonPromptParams(raw);
   const vars = buildLessonAiPromptVariableMap(p, { learningIntent: raw.learningIntent });
   const tpl = pickTemplate(options?.promptTemplate);
   return applyLessonAiPromptTemplate(tpl, vars);
@@ -235,7 +261,7 @@ export const DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS: LessonAiPromptParams = {
   ansSec: 15,
   studySec: 60,
   topic: "",
-  audience: "",
+  audience: "ثانوي",
   minSentences: 1,
   maxSentences: 6,
 };

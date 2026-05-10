@@ -3,6 +3,9 @@ import type { Socket } from "socket.io-client";
 import { toDataURL as qrToDataURL } from "qrcode";
 import {
   buildCustomLessonAiPromptText,
+  clampCustomLessonFlowParams,
+  CUSTOM_LESSON_FLOW_MAX_NSEC,
+  CUSTOM_LESSON_FLOW_MAX_QSAME,
   DEFAULT_CUSTOM_LESSON_AUDIENCE_OPTIONS,
   DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
   type LessonAiPromptParams,
@@ -247,21 +250,28 @@ async function fetchLessonAiPromptPublicConfig(): Promise<void> {
     };
     if (res.ok && data.ok && data.config) {
       lessonAiPromptRemote = data.config;
+      /** مزامنة مع إعدادات الإدارة (`mergeLessonAiPromptStored`) عند عدم تحرير شاشة الدرس المخصص */
+      if (phase !== "custom_lesson") {
+        customLessonPromptParams = defaultCustomPromptParams();
+      }
     }
   } catch {
     lessonAiPromptRemote = null;
   }
 }
 
+function defaultCustomPromptParams(): LessonAiPromptParams {
+  return clampCustomLessonFlowParams({
+    ...DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
+    ...(lessonAiPromptRemote?.defaults ?? {}),
+    topic: "",
+  });
+}
+
 void fetchLessonAiPromptPublicConfig().then(() => {
   render();
 });
 
-const defaultCustomPromptParams = (): LessonAiPromptParams => ({
-  ...DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
-  ...(lessonAiPromptRemote?.defaults ?? {}),
-  topic: "",
-});
 let customLessonPromptParams: LessonAiPromptParams = defaultCustomPromptParams();
 let lessonStudyQueue: Array<{ body: string; ms: number }> = [];
 let lessonStudyIdx = 0;
@@ -1055,11 +1065,11 @@ function render(): void {
                 customLessonClientId = d.clientLessonId;
                 customLessonLearningIntent = d.learningIntent;
                 customLessonJsonText = d.jsonText;
-                customLessonPromptParams = {
+                customLessonPromptParams = clampCustomLessonFlowParams({
                   ...defaultCustomPromptParams(),
                   ...d.promptParams,
                   topic: "",
-                };
+                });
                 customLessonSessionToken = d.lastSessionToken ?? null;
                 customLessonShowJsonPanel =
                   d.showJsonPanel === true ||
@@ -1329,11 +1339,11 @@ function render(): void {
             <div class="grid grid-cols-2 gap-2 pt-2">
               <div class="flex flex-col gap-0.5 min-w-0">
                 <span class="text-[10px] text-slate-500 leading-tight">عدد الأقسام</span>
-                <input id="cl-nsec" type="number" min="1" max="20" class="app-input px-2 py-1 text-sm w-full" value="${p.nSec}" title="عدد أقسام الدرس (1–20)" aria-label="عدد أقسام الدرس" placeholder="1–20" />
+                <input id="cl-nsec" type="number" min="1" max="${CUSTOM_LESSON_FLOW_MAX_NSEC}" class="app-input px-2 py-1 text-sm w-full" value="${p.nSec}" title="عدد أقسام الدرس (1–${CUSTOM_LESSON_FLOW_MAX_NSEC})" aria-label="عدد أقسام الدرس" placeholder="1–${CUSTOM_LESSON_FLOW_MAX_NSEC}" />
               </div>
               <div class="flex flex-col gap-0.5 min-w-0">
                 <span class="text-[10px] text-slate-500 leading-tight">أسئلة لكل قسم</span>
-                <input id="cl-qsame" type="number" min="1" max="50" class="app-input px-2 py-1 text-sm w-full" value="${p.qSame}" title="عدد أسئلة الاختيار من متعدد في كل قسم" aria-label="عدد الأسئلة لكل قسم" placeholder="1–50" />
+                <input id="cl-qsame" type="number" min="1" max="${CUSTOM_LESSON_FLOW_MAX_QSAME}" class="app-input px-2 py-1 text-sm w-full" value="${p.qSame}" title="عدد أسئلة الاختيار من متعدد في كل قسم" aria-label="عدد الأسئلة لكل قسم" placeholder="1–${CUSTOM_LESSON_FLOW_MAX_QSAME}" />
               </div>
               <div class="flex flex-col gap-0.5 min-w-0">
                 <span class="text-[10px] text-slate-500 leading-tight">زمن الإجابة (ثانية)</span>
@@ -1389,8 +1399,8 @@ function render(): void {
         if (!Number.isFinite(v)) return def;
         return Math.min(max, Math.max(min, v));
       };
-      const n = num("#cl-nsec", 3, 1, 20);
-      const q = num("#cl-qsame", 5, 1, 50);
+      const n = num("#cl-nsec", 3, 1, CUSTOM_LESSON_FLOW_MAX_NSEC);
+      const q = num("#cl-qsame", 5, 1, CUSTOM_LESSON_FLOW_MAX_QSAME);
       const mi = Math.min(20, Math.max(1, Math.trunc(num("#cl-minsent", 1, 1, 20))));
       const ma = Math.min(20, Math.max(1, Math.trunc(num("#cl-maxsent", 6, 1, 20))));
       customLessonPromptParams = {
