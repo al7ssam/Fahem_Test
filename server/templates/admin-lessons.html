@@ -217,21 +217,39 @@
           </div>
           <label class="muted" style="display:block;margin:.35rem 0 .15rem;font-size:.82rem">ملاحظة عند الحفظ (تُسجَّل مع النسخة)</label>
           <input type="text" id="lap-save-note" placeholder="اختياري" style="width:100%;max-width:36rem" />
-          <h4 class="muted" style="margin:.85rem 0 .35rem;font-size:.92rem">القيم الافتراضية للمستخدم</h4>
-          <div class="row" style="align-items:end;flex-wrap:wrap;gap:.45rem">
-            <div><label class="muted" style="display:block;font-size:.78rem">أقسام</label><input type="number" id="lap-d-nsec" min="1" max="20" style="width:5rem" /></div>
-            <div><label class="muted" style="display:block;font-size:.78rem">أسئلة/قسم</label><input type="number" id="lap-d-qsame" min="1" max="50" style="width:5rem" /></div>
-            <div><label class="muted" style="display:block;font-size:.78rem">ثواني إجابة</label><input type="number" id="lap-d-anssec" min="3" max="120" step="0.5" style="width:5rem" /></div>
-            <div><label class="muted" style="display:block;font-size:.78rem">ثواني مذاكرة قسم</label><input type="number" id="lap-d-studysec" min="2" max="300" step="0.5" style="width:6rem" /></div>
-            <div><label class="muted" style="display:block;font-size:.78rem">من جمل studyBody</label><input type="number" id="lap-d-minsent" min="1" max="20" style="width:5rem" /></div>
-            <div><label class="muted" style="display:block;font-size:.78rem">إلى جمل</label><input type="number" id="lap-d-maxsent" min="1" max="20" style="width:5rem" /></div>
-          </div>
-          <label class="muted" style="display:block;margin:.45rem 0 .15rem;font-size:.82rem">موضوع افتراضي (اختياري)</label>
-          <textarea id="lap-d-topic" rows="2" style="width:100%"></textarea>
-          <h4 class="muted" style="margin:.75rem 0 .35rem;font-size:.92rem">تفعيل أجزاء القالب</h4>
-          <div id="lap-frag-toggles" class="muted" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.35rem;font-size:.82rem"></div>
-          <h4 class="muted" style="margin:.75rem 0 .35rem;font-size:.92rem">استبدال نصوص الأجزاء (اختياري — اترك فارغاً للافتراضي)</h4>
-          <div id="lap-frag-overrides" style="display:grid;gap:.5rem"></div>
+          <details class="collapsible-details" style="margin-top:.65rem">
+            <summary class="collapsible-summary">
+              <strong>القيم الافتراضية للمستخدم</strong> <span class="muted" style="font-weight:normal">(اختياري — تُستخدم في التطبيق عند التحميل)</span>
+              <span class="collapsible-caret" aria-hidden="true">▼</span>
+            </summary>
+            <div class="collapsible-panel-body">
+              <div class="row" style="align-items:end;flex-wrap:wrap;gap:.45rem">
+                <div><label class="muted" style="display:block;font-size:.78rem">أقسام</label><input type="number" id="lap-d-nsec" min="1" max="20" style="width:5rem" /></div>
+                <div><label class="muted" style="display:block;font-size:.78rem">أسئلة/قسم</label><input type="number" id="lap-d-qsame" min="1" max="50" style="width:5rem" /></div>
+                <div><label class="muted" style="display:block;font-size:.78rem">ثواني إجابة</label><input type="number" id="lap-d-anssec" min="3" max="120" step="0.5" style="width:5rem" /></div>
+                <div><label class="muted" style="display:block;font-size:.78rem">ثواني مذاكرة قسم</label><input type="number" id="lap-d-studysec" min="2" max="300" step="0.5" style="width:6rem" /></div>
+                <div><label class="muted" style="display:block;font-size:.78rem">من جمل studyBody</label><input type="number" id="lap-d-minsent" min="1" max="20" style="width:5rem" /></div>
+                <div><label class="muted" style="display:block;font-size:.78rem">إلى جمل</label><input type="number" id="lap-d-maxsent" min="1" max="20" style="width:5rem" /></div>
+              </div>
+              <label class="muted" style="display:block;margin:.45rem 0 .15rem;font-size:.82rem">موضوع افتراضي (اختياري)</label>
+              <textarea id="lap-d-topic" rows="2" style="width:100%"></textarea>
+            </div>
+          </details>
+          <h4 class="muted" style="margin:.85rem 0 .35rem;font-size:.92rem">قالب البرومبت</h4>
+          <p class="muted" style="margin:0 0 .35rem;font-size:.78rem">
+            نص واحد يُستبدل فيه <code>{{المتغير}}</code> بالقيم أثناء التوليد. المتغيرات غير المعروفة تُستبدل بفراغ. المصدر البرمجي للقالب الافتراضي:
+            <code class="muted">DEFAULT_LESSON_AI_PROMPT_TEMPLATE</code> في <code class="muted">shared/lessonAiPrompt.ts</code>.
+          </p>
+          <textarea id="lap-prompt-template" rows="20" style="width:100%;font-family:ui-monospace,monospace;font-size:.72rem;line-height:1.35" spellcheck="false"></textarea>
+          <p class="muted" style="margin:.4rem 0 0;font-size:.72rem;line-height:1.45">
+            <strong style="font-weight:600">متغيرات مدعومة:</strong>
+            <code>{{learningIntent}}</code> <code>{{learningIntentSection}}</code> <code>{{topic}}</code> <code>{{audience}}</code>
+            <code>{{nSec}}</code> <code>{{qSame}}</code> <code>{{ansSec}}</code> <code>{{studySec}}</code>
+            <code>{{minSentences}}</code> <code>{{maxSentences}}</code>
+            <code>{{defaultAnswerMs}}</code> <code>{{studyPhaseMs}}</code> <code>{{jsonExample}}</code>
+            <code>{{topicBlock}}</code> <code>{{qualityBlock}}</code> <code>{{sectionBlock}}</code>
+            <code>{{structureAndItems}}</code> <code>{{paramsAndTopic}}</code> <code>{{strictJsonRules}}</code>
+          </p>
           <h4 class="muted" style="margin:.75rem 0 .35rem;font-size:.92rem">معاينة سريعة</h4>
           <p class="muted" style="margin:0 0 .25rem;font-size:.78rem">برومبت وضع الاستيراد (موضوع من الحقول أعلاه في «برومبت لإنشاء درس»):</p>
           <textarea id="lap-preview-admin" readonly rows="6" style="width:100%;font-family:ui-monospace,monospace;font-size:.72rem"></textarea>
@@ -1376,48 +1394,8 @@
           void copyTextToClipboard(buildEmptyImportTemplate());
         };
 
-        var LAP_FRAG_META = [
-          ["head", "المقدمة والمخرجات"],
-          ["strictJsonRules", "قواعد JSON"],
-          ["midExample", "عنوان المثال"],
-          ["jsonExample", "كائن JSON المثالي"],
-          ["structureAndItems", "الهيكل والأقسام والتحقق"],
-          ["quality", "جودة المحتوى"],
-          ["paramsAndTopic", "قيود المعطيات والجمهور"],
-          ["closing", "الختام"],
-        ];
-
-        function lapRenderFragmentsUi() {
-          var tg = document.getElementById("lap-frag-toggles");
-          var ov = document.getElementById("lap-frag-overrides");
-          if (!tg || !ov) return;
-          tg.innerHTML = LAP_FRAG_META.map(function (pair) {
-            var k = pair[0];
-            var label = pair[1];
-            return (
-              '<label style="display:flex;gap:.35rem;align-items:center"><input type="checkbox" id="lap-en-' +
-              k +
-              '" checked data-lap-frag="' +
-              k +
-              '" /> ' +
-              label +
-              "</label>"
-            );
-          }).join("");
-          ov.innerHTML = LAP_FRAG_META.map(function (pair) {
-            var k = pair[0];
-            var label = pair[1];
-            return (
-              '<div><span class="muted" style="font-size:.78rem">' +
-              label +
-              " (" +
-              k +
-              ')</span><textarea id="lap-ov-' +
-              k +
-              '" rows="3" style="width:100%;font-family:ui-monospace,monospace;font-size:.72rem;margin-top:.15rem"></textarea></div>'
-            );
-          }).join("");
-        }
+        /** يُحافظ على audienceOptions المخزَّنة عند الحفظ إن لم تُعرَض في النموذج */
+        var lapAudienceOptionsBackup = null;
 
         function lapApplyResolved(resolved) {
           var d = resolved.defaults || {};
@@ -1432,36 +1410,18 @@
           document.getElementById("lap-d-minsent").value = nv(d.minSentences, 1);
           document.getElementById("lap-d-maxsent").value = nv(d.maxSentences, 6);
           document.getElementById("lap-d-topic").value = d.topic != null ? String(d.topic) : "";
-          var fe = resolved.fragmentEnabled || {};
-          var fo = resolved.fragmentOverrides || {};
-          LAP_FRAG_META.forEach(function (pair) {
-            var k = pair[0];
-            var cb = document.getElementById("lap-en-" + k);
-            if (cb) cb.checked = fe[k] !== false;
-            var ta = document.getElementById("lap-ov-" + k);
-            if (ta) ta.value = fo[k] ? String(fo[k]) : "";
-          });
+          var pt = document.getElementById("lap-prompt-template");
+          if (pt) pt.value = resolved.promptTemplate != null ? String(resolved.promptTemplate) : "";
         }
 
         function lapGatherConfigFromForm() {
-          var fragmentEnabled = {};
-          LAP_FRAG_META.forEach(function (pair) {
-            var k = pair[0];
-            var cb = document.getElementById("lap-en-" + k);
-            if (cb && !cb.checked) fragmentEnabled[k] = false;
-          });
-          var fragmentOverrides = {};
-          LAP_FRAG_META.forEach(function (pair) {
-            var k = pair[0];
-            var ta = document.getElementById("lap-ov-" + k);
-            if (ta && String(ta.value).trim()) fragmentOverrides[k] = ta.value;
-          });
           function nv(id, fb) {
             var n = Number(document.getElementById(id).value);
             return Number.isFinite(n) ? n : fb;
           }
-          return {
-            version: 1,
+          var cfg = {
+            version: 2,
+            promptTemplate: document.getElementById("lap-prompt-template").value,
             defaults: {
               nSec: nv("lap-d-nsec", 3),
               qSame: nv("lap-d-qsame", 5),
@@ -1472,9 +1432,11 @@
               topic: document.getElementById("lap-d-topic").value.trim(),
               audience: "",
             },
-            fragmentEnabled: Object.keys(fragmentEnabled).length ? fragmentEnabled : undefined,
-            fragmentOverrides: Object.keys(fragmentOverrides).length ? fragmentOverrides : undefined,
           };
+          if (lapAudienceOptionsBackup && lapAudienceOptionsBackup.length) {
+            cfg.audienceOptions = lapAudienceOptionsBackup;
+          }
+          return cfg;
         }
 
         async function lapRefreshVersions() {
@@ -1507,6 +1469,11 @@
                     body: JSON.stringify({ versionId: id }),
                   });
                   var fresh = await api("/api/admin/lesson-ai-prompt-config");
+                  if (fresh.stored && fresh.stored.audienceOptions && fresh.stored.audienceOptions.length) {
+                    lapAudienceOptionsBackup = fresh.stored.audienceOptions;
+                  } else {
+                    lapAudienceOptionsBackup = null;
+                  }
                   lapApplyResolved(fresh.resolved);
                   await lapRefreshVersions();
                   setMsg("تمت استعادة النسخة #" + id + ".", true);
@@ -1589,10 +1556,14 @@
           } catch (_) {}
         }
 
-        lapRenderFragmentsUi();
         void (async function lapBootstrap() {
           try {
             var data = await api("/api/admin/lesson-ai-prompt-config");
+            if (data.stored && data.stored.audienceOptions && data.stored.audienceOptions.length) {
+              lapAudienceOptionsBackup = data.stored.audienceOptions;
+            } else {
+              lapAudienceOptionsBackup = null;
+            }
             lapApplyResolved(data.resolved);
             await lapRefreshVersions();
           } catch (_) {}
@@ -1601,6 +1572,11 @@
         document.getElementById("lap-load").onclick = async function () {
           try {
             var data = await api("/api/admin/lesson-ai-prompt-config");
+            if (data.stored && data.stored.audienceOptions && data.stored.audienceOptions.length) {
+              lapAudienceOptionsBackup = data.stored.audienceOptions;
+            } else {
+              lapAudienceOptionsBackup = null;
+            }
             lapApplyResolved(data.resolved);
             await lapRefreshVersions();
             setMsg("تم تحميل الإعداد من الخادم.", true);
@@ -1611,10 +1587,13 @@
           try {
             var cfg = lapGatherConfigFromForm();
             var note = document.getElementById("lap-save-note").value.trim();
-            await api("/api/admin/lesson-ai-prompt-config", {
+            var res = await api("/api/admin/lesson-ai-prompt-config", {
               method: "PUT",
               body: JSON.stringify({ config: cfg, note: note || null }),
             });
+            if (res.stored && res.stored.audienceOptions && res.stored.audienceOptions.length) {
+              lapAudienceOptionsBackup = res.stored.audienceOptions;
+            }
             await lapRefreshVersions();
             setMsg("تم حفظ إعداد برومبت الدرس.", true);
           } catch (_) {}

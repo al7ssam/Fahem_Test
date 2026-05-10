@@ -57,8 +57,7 @@ export function registerLessonAiPromptRoutes(app: Express): void {
         config: {
           defaults: merged.defaults,
           audienceOptions: merged.audienceOptions,
-          fragmentEnabled: merged.fragmentEnabled,
-          fragmentOverrides: merged.fragmentOverrides,
+          promptTemplate: merged.promptTemplate,
         },
       });
     } catch {
@@ -74,7 +73,7 @@ export function registerLessonAiPromptRoutes(app: Express): void {
       const merged = mergeLessonAiPromptStored(stored);
       res.json({
         ok: true,
-        stored: stored ?? { version: 1 as const },
+        stored,
         resolved: merged,
       });
     } catch {
@@ -144,7 +143,6 @@ export function registerLessonAiPromptRoutes(app: Express): void {
       const pool = getPool();
       const stored = await getLessonAiPromptStored(pool);
       const resolved = mergeLessonAiPromptStored(stored);
-      const { runtimeOptions } = resolved;
       const mergedIn: LessonAiPromptParams = {
         ...resolved.defaults,
         nSec: parsed.data.params.nSec ?? resolved.defaults.nSec,
@@ -157,6 +155,7 @@ export function registerLessonAiPromptRoutes(app: Express): void {
         maxSentences: parsed.data.params.maxSentences ?? resolved.defaults.maxSentences,
       };
       const base = clampLessonPromptParams(mergedIn);
+      const opts = { promptTemplate: resolved.promptTemplate };
       let text: string;
       if (parsed.data.kind === "custom_lesson") {
         text = buildCustomLessonAiPromptText(
@@ -164,10 +163,10 @@ export function registerLessonAiPromptRoutes(app: Express): void {
             ...base,
             learningIntent: parsed.data.learningIntent ?? "",
           },
-          runtimeOptions,
+          opts,
         );
       } else {
-        text = buildLessonAiPromptText(base, runtimeOptions);
+        text = buildLessonAiPromptText(base, opts);
       }
       res.json({ ok: true, text });
     } catch {

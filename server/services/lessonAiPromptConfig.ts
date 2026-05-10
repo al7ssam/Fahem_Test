@@ -1,13 +1,10 @@
 import type { Pool } from "pg";
 import { z } from "zod";
-import type {
-  LessonAiPromptFragmentKey,
-  LessonAiPromptParams,
-  LessonAiPromptRuntimeOptions,
-} from "../../shared/lessonAiPrompt";
+import type { LessonAiPromptParams } from "../../shared/lessonAiPrompt";
 import {
   DEFAULT_CUSTOM_LESSON_AUDIENCE_OPTIONS,
   DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
+  DEFAULT_LESSON_AI_PROMPT_TEMPLATE,
 } from "../../shared/lessonAiPrompt";
 
 export const LESSON_AI_PROMPT_SETTINGS_KEY = "lesson_ai_prompt_config_v1";
@@ -34,6 +31,7 @@ const lessonParamsPartialSchema = z.object({
   maxSentences: z.number().optional(),
 });
 
+/** Legacy — قراءة فقط من النسخ القديمة */
 export const lessonAiPromptStoredConfigV1Schema = z
   .object({
     version: z.literal(1),
@@ -46,41 +44,65 @@ export const lessonAiPromptStoredConfigV1Schema = z
 
 export type LessonAiPromptStoredConfigV1 = z.infer<typeof lessonAiPromptStoredConfigV1Schema>;
 
+const MAX_PROMPT_TEMPLATE_CHARS = 200_000;
+
+export const lessonAiPromptStoredConfigV2Schema = z
+  .object({
+    version: z.literal(2),
+    promptTemplate: z.string().max(MAX_PROMPT_TEMPLATE_CHARS),
+    defaults: lessonParamsPartialSchema.optional(),
+    audienceOptions: z.array(z.object({ v: z.string(), t: z.string() })).optional(),
+  })
+  .strict();
+
+export type LessonAiPromptStoredConfigV2 = z.infer<typeof lessonAiPromptStoredConfigV2Schema>;
+
+export type LessonAiPromptStoredUnion = LessonAiPromptStoredConfigV1 | LessonAiPromptStoredConfigV2;
+
 export type ResolvedLessonAiPromptPublicConfig = {
   defaults: LessonAiPromptParams;
   audienceOptions: Array<{ v: string; t: string }>;
-  fragmentEnabled: Partial<Record<LessonAiPromptFragmentKey, boolean>>;
-  fragmentOverrides: Partial<Record<LessonAiPromptFragmentKey, string>>;
-  runtimeOptions: LessonAiPromptRuntimeOptions;
+  /** القالب الفعلي للتوليد (من DB أو الافتراضي من الكود). */
+  promptTemplate: string;
 };
 
-export function mergeLessonAiPromptStored(
-  stored: LessonAiPromptStoredConfigV1 | null,
-): ResolvedLessonAiPromptPublicConfig {
+export function mergeLessonAiPromptStored(stored: LessonAiPromptStoredUnion | null): ResolvedLessonAiPromptPublicConfig {
+  const partial =
+    stored && (stored.version === 1 || stored.version === 2) && stored.defaults ? stored.defaults : {};
   const defaults: LessonAiPromptParams = {
     ...DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
-    ...stored?.defaults,
+    ...partial,
   };
   const audienceOptions =
-    stored?.audienceOptions && stored.audienceOptions.length > 0
+    stored &&
+    "audienceOptions" in stored &&
+    stored.audienceOptions &&
+    stored.audienceOptions.length > 0
       ? [...stored.audienceOptions]
       : [...DEFAULT_CUSTOM_LESSON_AUDIENCE_OPTIONS];
-  const fragmentEnabled = { ...(stored?.fragmentEnabled ?? {}) };
-  const fragmentOverrides = { ...(stored?.fragmentOverrides ?? {}) };
-  const runtimeOptions: LessonAiPromptRuntimeOptions = {
-    fragmentEnabled,
-    fragmentOverrides,
-  };
+
+  let promptTemplate = DEFAULT_LESSON_AI_PROMPT_TEMPLATE;
+  if (stored?.version === 2 && typeof stored.promptTemplate === "string") {
+    const t = stored.promptTemplate.trim();
+    if (t.length > 0) promptTemplate = stored.promptTemplate;
+  }
+
   return {
     defaults,
     audienceOptions,
-    fragmentEnabled,
-    fragmentOverrides,
-    runtimeOptions,
+    promptTemplate,
   };
 }
 
-export async function getLessonAiPromptStored(pool: Pool): Promise<LessonAiPromptStoredConfigV1 | null> {
+function parseStoredJson(raw: unknown): LessonAiPromptStoredUnion | null {
+  const v2 = lessonAiPromptStoredConfigV2Schema.safeParse(raw);
+  if (v2.success) return v2.data;
+  const v1 = lessonAiPromptStoredConfigV1Schema.safeParse(raw);
+  if (v1.success) return v1.data;
+  return null;
+}
+
+export async function getLessonAiPromptStored(pool: Pool): Promise<LessonAiPromptStoredUnion | null> {
   const r = await pool.query<{ value: string }>(
     `SELECT value FROM public.app_settings WHERE key = $1 LIMIT 1`,
     [LESSON_AI_PROMPT_SETTINGS_KEY],
@@ -89,8 +111,7 @@ export async function getLessonAiPromptStored(pool: Pool): Promise<LessonAiPromp
   if (raw == null || raw === "") return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
-    const s = lessonAiPromptStoredConfigV1Schema.safeParse(parsed);
-    return s.success ? s.data : null;
+    return parseStoredJson(parsed);
   } catch {
     return null;
   }
@@ -101,7 +122,7 @@ export async function saveLessonAiPromptStored(
   body: unknown,
   note: string | null,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const parsed = lessonAiPromptStoredConfigV1Schema.safeParse(body);
+  const parsed = lessonAiPromptStoredConfigV2Schema.safeParse(body);
   if (!parsed.success) {
     return { ok: false, error: "invalid_body" };
   }
@@ -121,7 +142,7 @@ export async function saveLessonAiPromptStored(
 export type LessonAiPromptVersionRow = {
   id: number;
   created_at: string;
-  payload: LessonAiPromptStoredConfigV1;
+  payload: LessonAiPromptStoredUnion;
   note: string | null;
 };
 
@@ -136,12 +157,12 @@ export async function listLessonAiPromptVersions(pool: Pool, limit = 30): Promis
   );
   const out: LessonAiPromptVersionRow[] = [];
   for (const row of r.rows) {
-    const p = lessonAiPromptStoredConfigV1Schema.safeParse(row.payload);
-    if (!p.success) continue;
+    const p = parseStoredJson(row.payload);
+    if (!p) continue;
     out.push({
       id: Number(row.id),
       created_at: row.created_at.toISOString(),
-      payload: p.data,
+      payload: p,
       note: row.note,
     });
   }
@@ -155,9 +176,9 @@ export async function restoreLessonAiPromptVersion(pool: Pool, versionId: number
   );
   const payload = r.rows[0]?.payload;
   if (payload == null) return false;
-  const parsed = lessonAiPromptStoredConfigV1Schema.safeParse(payload);
-  if (!parsed.success) return false;
-  const json = JSON.stringify(parsed.data);
+  const parsed = parseStoredJson(payload);
+  if (!parsed) return false;
+  const json = JSON.stringify(parsed);
   await pool.query(
     `INSERT INTO public.app_settings (key, value) VALUES ($1, $2)
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,

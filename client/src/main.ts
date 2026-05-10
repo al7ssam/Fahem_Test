@@ -6,7 +6,7 @@ import {
   DEFAULT_CUSTOM_LESSON_AUDIENCE_OPTIONS,
   DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
   type LessonAiPromptParams,
-  type LessonAiPromptRuntimeOptions,
+  type BuildLessonAiPromptOptions,
 } from "./lessonPromptBuilder";
 import { normalizePastedJsonForParse } from "./jsonNormalize";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
@@ -231,8 +231,7 @@ let customLessonShowJsonPanel = false;
 let lessonAiPromptRemote: {
   defaults: LessonAiPromptParams;
   audienceOptions: Array<{ v: string; t: string }>;
-  fragmentEnabled: LessonAiPromptRuntimeOptions["fragmentEnabled"];
-  fragmentOverrides: LessonAiPromptRuntimeOptions["fragmentOverrides"];
+  promptTemplate: string;
 } | null = null;
 
 async function fetchLessonAiPromptPublicConfig(): Promise<void> {
@@ -243,8 +242,7 @@ async function fetchLessonAiPromptPublicConfig(): Promise<void> {
       config?: {
         defaults: LessonAiPromptParams;
         audienceOptions: Array<{ v: string; t: string }>;
-        fragmentEnabled: LessonAiPromptRuntimeOptions["fragmentEnabled"];
-        fragmentOverrides: LessonAiPromptRuntimeOptions["fragmentOverrides"];
+        promptTemplate: string;
       };
     };
     if (res.ok && data.ok && data.config) {
@@ -1420,18 +1418,15 @@ function render(): void {
       readParamsFromDom();
       customLessonErr = "";
       customLessonMsg = "";
-      const runtimeOpts: LessonAiPromptRuntimeOptions | undefined = lessonAiPromptRemote
-        ? {
-            fragmentEnabled: lessonAiPromptRemote.fragmentEnabled,
-            fragmentOverrides: lessonAiPromptRemote.fragmentOverrides,
-          }
+      const promptOpts: BuildLessonAiPromptOptions | undefined = lessonAiPromptRemote
+        ? { promptTemplate: lessonAiPromptRemote.promptTemplate }
         : undefined;
       const text = buildCustomLessonAiPromptText(
         {
           ...customLessonPromptParams,
           learningIntent: customLessonLearningIntent,
         },
-        runtimeOpts,
+        promptOpts,
       );
       try {
         await navigator.clipboard.writeText(text);
