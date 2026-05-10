@@ -77,7 +77,7 @@ export function buildLessonAiPromptJsonExample(p: ClampedLessonAiPromptParams): 
   return JSON.stringify(
     {
       lesson: {
-        title: "عنوان الدرس",
+        title: "درس",
         slug: null,
         description: null,
         defaultAnswerMs,
@@ -85,14 +85,14 @@ export function buildLessonAiPromptJsonExample(p: ClampedLessonAiPromptParams): 
       },
       sections: [
         {
-          titleAr: "عنوان القسم",
+          titleAr: "قسم",
           studyPhaseMs: studyPhaseMsUnified,
           items: [
             {
-              prompt: "نص السؤال؟",
-              options: ["خيار أ", "خيار ب", "خيار ج", "خيار د"],
+              prompt: "سؤال؟",
+              options: ["أ", "ب"],
               correctIndex: 0,
-              studyBody: "نص بطاقة المذاكرة.",
+              studyBody: "شرح",
             },
           ],
         },
