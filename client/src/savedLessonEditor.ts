@@ -18,26 +18,74 @@ function readInt(el: HTMLInputElement | null, fallback: number, min: number, max
   return Math.min(max, Math.max(min, v));
 }
 
+/** نسخ عميقة آمنة لتعديل الأقسام/الأسئلة */
+function clonePayloadForEdit(payload: Record<string, unknown>): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+}
+
+export function removeSectionFromPayload(
+  payload: Record<string, unknown>,
+  sectionIndex: number,
+): { ok: true; payload: Record<string, unknown> } | { ok: false; error: string } {
+  const copy = clonePayloadForEdit(payload);
+  const sections = Array.isArray(copy.sections) ? copy.sections : [];
+  if (sectionIndex < 0 || sectionIndex >= sections.length) {
+    return { ok: false, error: "قسم غير صالح." };
+  }
+  if (sections.length <= 1) {
+    return { ok: false, error: "لا يمكن حذف آخر قسم — يجب أن يبقى قسم واحد على الأقل." };
+  }
+  copy.sections = sections.filter((_, i) => i !== sectionIndex);
+  return { ok: true, payload: copy };
+}
+
+export function removeQuestionFromPayload(
+  payload: Record<string, unknown>,
+  sectionIndex: number,
+  itemIndex: number,
+): { ok: true; payload: Record<string, unknown> } | { ok: false; error: string } {
+  const copy = clonePayloadForEdit(payload);
+  const sections = Array.isArray(copy.sections) ? [...copy.sections] : [];
+  if (sectionIndex < 0 || sectionIndex >= sections.length) {
+    return { ok: false, error: "قسم غير صالح." };
+  }
+  const sec = { ...(sections[sectionIndex] as Record<string, unknown>) };
+  const items = Array.isArray(sec.items) ? [...sec.items] : [];
+  if (itemIndex < 0 || itemIndex >= items.length) {
+    return { ok: false, error: "سؤال غير صالح." };
+  }
+  if (items.length <= 1) {
+    return {
+      ok: false,
+      error: "لا يمكن حذف آخر سؤال في القسم — احذف القسم كاملاً من شريط «حذف القسم».",
+    };
+  }
+  sec.items = items.filter((_, i) => i !== itemIndex);
+  sections[sectionIndex] = sec;
+  copy.sections = sections;
+  return { ok: true, payload: copy };
+}
+
 /** واجهة مبسطة للجوال: حقول تطابق بنية الاستيراد للدرس المخصص */
 export function renderSavedLessonEditorMarkup(payload: Record<string, unknown>): string {
   const lesson = (payload.lesson ?? {}) as Record<string, unknown>;
   const sections = Array.isArray(payload.sections) ? payload.sections : [];
   const title = String(lesson.title ?? "");
   const defaultAnswerMs = Number(lesson.defaultAnswerMs ?? 15000);
-  const slugVal = lesson.slug != null ? String(lesson.slug) : "";
+  const slugStored =
+    lesson.slug != null && String(lesson.slug).trim() !== "" ? String(lesson.slug).trim() : "";
   const descVal = lesson.description != null ? String(lesson.description) : "";
 
   const lessonFields = `
     <div class="space-y-2 border border-slate-600/50 rounded-lg p-3">
       <span class="text-amber-200 text-sm font-bold">الدرس</span>
+      <input type="hidden" id="sle-lesson-slug-preserve" value="${escapeEditorHtml(slugStored)}" />
       <label class="block text-xs text-slate-400">العنوان</label>
-      <input type="text" id="sle-lesson-title" class="app-input w-full px-2 py-2 text-sm" value="${escapeEditorHtml(title)}" maxlength="300" />
+      <input type="text" id="sle-lesson-title" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" value="${escapeEditorHtml(title)}" maxlength="300" />
       <label class="block text-xs text-slate-400">الوصف (اختياري)</label>
       <textarea id="sle-lesson-desc" rows="2" class="app-input w-full px-2 py-2 text-xs">${escapeEditorHtml(descVal)}</textarea>
-      <label class="block text-xs text-slate-400">المعرّف slug (اختياري)</label>
-      <input type="text" id="sle-lesson-slug" class="app-input w-full px-2 py-1 text-xs font-mono" value="${escapeEditorHtml(slugVal)}" maxlength="160" />
       <label class="block text-xs text-slate-400">زمن الإجابة الافتراضي (مللي)</label>
-      <input type="number" id="sle-lesson-def-ms" class="app-input w-full px-2 py-1 text-sm" min="3000" max="120000" step="500" value="${Number.isFinite(defaultAnswerMs) ? defaultAnswerMs : 15000}" />
+      <input type="number" id="sle-lesson-def-ms" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" min="3000" max="120000" step="500" value="${Number.isFinite(defaultAnswerMs) ? defaultAnswerMs : 15000}" />
     </div>
   `;
 
@@ -70,7 +118,10 @@ export function renderSavedLessonEditorMarkup(payload: Record<string, unknown>):
 
       return `
         <div class="border border-slate-600/40 rounded-md p-2 space-y-1.5 bg-slate-900/40" data-sle-item="${si}-${ii}">
-          <span class="text-[11px] text-slate-500">سؤال ${ii + 1}</span>
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <span class="text-[11px] text-slate-500 font-medium">سؤال ${ii + 1}</span>
+            <button type="button" class="sle-del-q touch-manipulation min-h-[40px] px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-500/35 text-red-300 bg-red-950/25 active:bg-red-950/45" data-section-index="${si}" data-item-index="${ii}" aria-label="حذف السؤال ${ii + 1}">حذف السؤال</button>
+          </div>
           <label class="block text-[11px] text-slate-400">النص</label>
           <textarea id="sle-s${si}-i${ii}-prompt" rows="2" class="app-input w-full px-2 py-1 text-sm">${escapeEditorHtml(prompt)}</textarea>
           <div class="grid grid-cols-2 gap-1">
@@ -94,13 +145,19 @@ export function renderSavedLessonEditorMarkup(payload: Record<string, unknown>):
 
     return `
       <details class="border border-amber-900/40 rounded-lg p-2 open" open>
-        <summary class="cursor-pointer text-amber-200 text-sm font-bold py-1">قسم ${si + 1}</summary>
-        <div class="space-y-2 pt-2">
+        <summary class="cursor-pointer text-amber-200 text-sm font-bold py-2 min-h-[44px] flex items-center list-none [&::-webkit-details-marker]:hidden">
+          <span class="flex-1 text-right">قسم ${si + 1}</span>
+          <span class="text-slate-500 text-xs mr-2" aria-hidden="true">▼</span>
+        </summary>
+        <div class="space-y-2 pt-1 border-t border-amber-900/20">
+          <div class="flex justify-stretch sm:justify-end pt-1">
+            <button type="button" class="sle-del-sec touch-manipulation w-full sm:w-auto min-h-[44px] px-3 py-2 text-sm font-semibold rounded-lg border border-red-500/35 text-red-300 bg-red-950/25 active:bg-red-950/45" data-section-index="${si}" aria-label="حذف القسم ${si + 1}">حذف القسم بالكامل</button>
+          </div>
           <label class="block text-xs text-slate-400">عنوان القسم</label>
-          <input type="text" id="sle-sec-${si}-title" class="app-input w-full px-2 py-1 text-sm" value="${escapeEditorHtml(titleAr)}" maxlength="500" />
+          <input type="text" id="sle-sec-${si}-title" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" value="${escapeEditorHtml(titleAr)}" maxlength="500" />
           <label class="block text-xs text-slate-400">زمن طور المذاكرة للقسم (مللي)</label>
-          <input type="number" id="sle-sec-${si}-study-ms" class="app-input w-full px-2 py-1 text-sm" min="2000" max="300000" step="500" value="${studyMs === "" ? "" : studyMs}" />
-          <div class="space-y-2">${itemBlocks.join("")}</div>
+          <input type="number" id="sle-sec-${si}-study-ms" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" min="2000" max="300000" step="500" value="${studyMs === "" ? "" : studyMs}" />
+          <div class="space-y-3">${itemBlocks.join("")}</div>
         </div>
       </details>
     `;
@@ -123,7 +180,7 @@ export function collectSavedLessonPayloadFromEditor(root: HTMLElement): {
   if (!title) return { ok: false, error: "عنوان الدرس مطلوب." };
 
   const desc = (root.querySelector<HTMLTextAreaElement>("#sle-lesson-desc")?.value ?? "").trim();
-  const slugRaw = (root.querySelector<HTMLInputElement>("#sle-lesson-slug")?.value ?? "").trim();
+  const slugRaw = (root.querySelector<HTMLInputElement>("#sle-lesson-slug-preserve")?.value ?? "").trim();
   const slug = slugRaw === "" ? null : slugRaw;
   const defMs = readNum(root.querySelector("#sle-lesson-def-ms"), 15000, 3000, 120000);
 

@@ -34,7 +34,12 @@ import {
   patchSavedLesson,
   postSavedLesson,
 } from "./savedLessonsApi";
-import { collectSavedLessonPayloadFromEditor, renderSavedLessonEditorMarkup } from "./savedLessonEditor";
+import {
+  collectSavedLessonPayloadFromEditor,
+  removeQuestionFromPayload,
+  removeSectionFromPayload,
+  renderSavedLessonEditorMarkup,
+} from "./savedLessonEditor";
 import {
   getEffectivePlayerName,
   getStoredPlayerName,
@@ -1652,14 +1657,14 @@ function render(): void {
     const rows = savedLessonsRows
       .map(
         (row) => `
-        <div class="app-card p-3 space-y-2 text-right">
-          <div class="font-bold text-amber-200">${escapeHtml(row.title)}</div>
-          <p class="text-slate-400 text-xs m-0">ينتهي: ${escapeHtml(new Date(row.expiresAt).toLocaleDateString("ar-SA"))}</p>
-          <div class="flex flex-col gap-2">
-            <button type="button" class="ui-btn ui-btn--primary w-full py-2 ssl-play" data-id="${escapeHtml(row.id)}">تشغيل</button>
-            <button type="button" class="ui-btn ui-btn--ghost w-full py-2 ssl-edit" data-id="${escapeHtml(row.id)}">تعديل</button>
-            <button type="button" class="ui-btn ui-btn--ghost w-full py-2 ssl-private" data-id="${escapeHtml(row.id)}">غرفة خاصة</button>
-            <button type="button" class="ui-btn ui-btn--ghost w-full py-2 text-red-300 ssl-del" data-id="${escapeHtml(row.id)}">حذف</button>
+        <div class="app-card p-2.5 space-y-1.5 text-right">
+          <div class="font-bold text-amber-200 text-sm leading-snug">${escapeHtml(row.title)}</div>
+          <p class="text-slate-400 text-[11px] leading-snug m-0">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</p>
+          <div class="flex flex-col gap-1.5 pt-0.5">
+            <button type="button" class="ui-btn ui-btn--primary w-full py-1.5 px-2 text-xs min-h-[36px] ssl-play" data-id="${escapeHtml(row.id)}">التعلم الفردي</button>
+            <button type="button" class="ui-btn ui-btn--ghost w-full py-1.5 px-2 text-xs min-h-[36px] ssl-private" data-id="${escapeHtml(row.id)}">غرفة خاصة</button>
+            <button type="button" class="ui-btn ui-btn--ghost w-full py-1.5 px-2 text-xs min-h-[36px] ssl-edit" data-id="${escapeHtml(row.id)}">تعديل</button>
+            <button type="button" class="ui-btn ui-btn--ghost w-full py-1.5 px-2 text-xs min-h-[36px] text-red-300 ssl-del" data-id="${escapeHtml(row.id)}">حذف</button>
           </div>
         </div>`,
       )
@@ -1824,6 +1829,49 @@ function render(): void {
         </div>
       `),
     );
+    app.querySelectorAll<HTMLButtonElement>(".sle-del-sec").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        if (!savedLessonEditorPayload) return;
+        const si = Number(btn.dataset.sectionIndex);
+        if (!Number.isFinite(si)) return;
+        if (!window.confirm("حذف هذا القسم وجميع أسئلته؟ يمكنك التراجع قبل الضغط على «حفظ التعديلات».")) {
+          return;
+        }
+        const res = removeSectionFromPayload(savedLessonEditorPayload, si);
+        if (!res.ok) {
+          savedLessonEditorErr = res.error;
+          savedLessonEditorMsg = "";
+          render();
+          return;
+        }
+        savedLessonEditorPayload = res.payload;
+        savedLessonEditorErr = "";
+        savedLessonEditorMsg = "";
+        render();
+      });
+    });
+    app.querySelectorAll<HTMLButtonElement>(".sle-del-q").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        if (!savedLessonEditorPayload) return;
+        const si = Number(btn.dataset.sectionIndex);
+        const qi = Number(btn.dataset.itemIndex);
+        if (!Number.isFinite(si) || !Number.isFinite(qi)) return;
+        if (!window.confirm("حذف هذا السؤال؟")) return;
+        const res = removeQuestionFromPayload(savedLessonEditorPayload, si, qi);
+        if (!res.ok) {
+          savedLessonEditorErr = res.error;
+          savedLessonEditorMsg = "";
+          render();
+          return;
+        }
+        savedLessonEditorPayload = res.payload;
+        savedLessonEditorErr = "";
+        savedLessonEditorMsg = "";
+        render();
+      });
+    });
     app.querySelector("#sle-back-lib")?.addEventListener("click", () => {
       phase = "saved_lessons_library";
       savedLessonEditingId = null;
@@ -3295,6 +3343,20 @@ function startLessonQuizTimer(): void {
     const sec = Math.max(0, Math.floor((showMs + 250) / 1000));
     clock.textContent = `${sec}s`;
   }, 200);
+}
+
+/** تقدير تقريبي لعدد الأيام المتبقية قبل انتهاء صلاحية الدرس المحفوظ */
+function savedLessonWholeDaysRemaining(expiresAtIso: string): number {
+  const end = new Date(expiresAtIso).getTime();
+  return Math.max(0, Math.ceil((end - Date.now()) / 86_400_000));
+}
+
+function savedLessonExpiryCaption(expiresAtIso: string): string {
+  const n = savedLessonWholeDaysRemaining(expiresAtIso);
+  if (n <= 0) return "سيتم حذفه قريباً.";
+  if (n === 1) return "سيتم حذفه بعد يوم واحد.";
+  if (n === 2) return "سيتم حذفه بعد يومين.";
+  return `سيتم حذفه بعد ${n} أيام.`;
 }
 
 function escapeHtml(s: string): string {
