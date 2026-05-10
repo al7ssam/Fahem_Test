@@ -98,6 +98,7 @@
       </div>
     </div>
 
+    <script src="/assets/adminSessionFetch.js"></script>
     <script>
       (function () {
         var msg = document.getElementById("msg");
@@ -109,7 +110,7 @@
         cacheBtn.addEventListener("click", async function () {
           cacheBtn.disabled = true;
           try {
-            var r = await fetch("/api/admin/cache-bust", {
+            var r = await fahemAdminFetch("/api/admin/cache-bust", {
               method: "POST",
               credentials: "same-origin",
               headers: { "Content-Type": "application/json" },

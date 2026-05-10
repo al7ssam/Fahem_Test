@@ -63,6 +63,11 @@ export function createApp() {
     res.type("application/javascript");
     res.sendFile(lessonPasteJsonPath);
   });
+  const adminSessionFetchPath = path.join(process.cwd(), "server", "static", "adminSessionFetch.js");
+  app.get("/assets/adminSessionFetch.js", (_req, res) => {
+    res.type("application/javascript");
+    res.sendFile(adminSessionFetchPath);
+  });
   app.use(optionalAuth);
   registerAuthRoutes(app);
   registerProfileRoutes(app);

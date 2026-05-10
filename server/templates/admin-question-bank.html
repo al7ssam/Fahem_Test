@@ -67,6 +67,7 @@
       </div>
     </div>
 
+    <script src="/assets/adminSessionFetch.js"></script>
     <script>
       (function () {
         var state = { offset: 0, limit: 20, total: 0, rows: [], selected: {} };
@@ -74,7 +75,7 @@
         function msg(t, ok) { $("msg").textContent = t || ""; $("msg").style.color = ok ? "#34d399" : "#f87171"; }
         function hdr() { return { "Content-Type": "application/json" }; }
         async function api(url, method, body) {
-          var r = await fetch(url, { method: method || "GET", credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+          var r = await fahemAdminFetch(url, { method: method || "GET", credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
           var j = await r.json().catch(function () { return {}; });
           if (!r.ok || !j.ok) throw new Error(j.error || "request_failed");
           return j;

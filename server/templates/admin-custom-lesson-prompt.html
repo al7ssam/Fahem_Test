@@ -236,6 +236,7 @@
 
     <script src="/vendor/jsonrepair.min.js"></script>
     <script src="/assets/lessonPasteJson.js"></script>
+    <script src="/assets/adminSessionFetch.js"></script>
     <script>
       (function () {
         var msg = document.getElementById("clp-msg");
@@ -264,7 +265,7 @@
           return String(first);
         }
         async function api(path, opts) {
-          var res = await fetch(path, {
+          var res = await fahemAdminFetch(path, {
             ...opts,
             credentials: "same-origin",
             headers: { ...hdr(), ...(opts && opts.headers) },

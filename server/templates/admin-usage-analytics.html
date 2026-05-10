@@ -116,6 +116,7 @@
         </div>
       </div>
     </div>
+    <script src="/assets/adminSessionFetch.js"></script>
     <script>
       const $ = (id) => document.getElementById(id);
       const fmtInt = (n) => Number(n || 0).toLocaleString("en-US");
@@ -123,7 +124,7 @@
       const setMsg = (t, ok = false) => { const el = $("page-msg"); el.textContent = t || ""; el.style.color = ok ? "#35d07f" : "#ff8e8e"; };
 
       async function api(path) {
-        const r = await fetch(path, { credentials: "same-origin" });
+        const r = await fahemAdminFetch(path, { credentials: "same-origin" });
         let j = null; try { j = await r.json(); } catch {}
         if (r.status === 403 || j?.error === "forbidden") {
           throw new Error("forbidden: تحقق من تسجيل الدخول بدور إداري");

@@ -177,6 +177,7 @@
       </div>
     </div>
 
+    <script src="/assets/adminSessionFetch.js"></script>
     <script>
       (() => {
         const S = { categories: [], cov: {}, selectedMain: null, selectedSub: null, selectedSubIds: {}, multiMode: false, questions: [], total: 0, offset: 0, limit: 20, preview: [], pidx: 0, modal: null };
@@ -195,7 +196,7 @@
           pendingRequests += 1;
           setBusy(true);
           try {
-            const r = await fetch(url, { method, credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+            const r = await fahemAdminFetch(url, { method, credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
             const j = await r.json().catch(() => ({}));
             if (!r.ok || !j.ok) {
               const err = String(j.error || "request_failed");

@@ -238,6 +238,7 @@
       </div>
     </div>
 
+    <script src="/assets/adminSessionFetch.js"></script>
     <script>
       (function () {
         var HELP = {
@@ -431,7 +432,7 @@
         });
         function hdr() { return { "Content-Type": "application/json" }; }
         async function api(url, method, body) {
-          var r = await fetch(url, { method: method || "GET", credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
+          var r = await fahemAdminFetch(url, { method: method || "GET", credentials: "same-origin", headers: hdr(), body: body ? JSON.stringify(body) : undefined });
           var j = await r.json().catch(function () { return {}; });
           if (!r.ok || !j.ok) throw new Error(j.error || "request_failed");
           return j;

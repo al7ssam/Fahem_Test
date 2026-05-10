@@ -367,6 +367,7 @@
 
     <script src="/vendor/jsonrepair.min.js"></script>
     <script src="/assets/lessonPasteJson.js"></script>
+    <script src="/assets/adminSessionFetch.js"></script>
     <script>
       (function () {
         const msg = document.getElementById("msg");
@@ -535,7 +536,7 @@
         }
 
         async function api(path, opts) {
-          const res = await fetch(path, { ...opts, credentials: "same-origin", headers: { ...hdr(), ...(opts && opts.headers) } });
+          const res = await fahemAdminFetch(path, { ...opts, credentials: "same-origin", headers: { ...hdr(), ...(opts && opts.headers) } });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || data.ok === false) {
             let errLine = data.message || data.error || "فشل الطلب";

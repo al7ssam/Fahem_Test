@@ -761,6 +761,7 @@
         </details>
       </div>
     </div>
+    <script src="/assets/adminSessionFetch.js"></script>
     <script>
       (function () {
         var categories = [];
@@ -909,7 +910,7 @@
           var el = document.getElementById("sc-usage-summary");
           if (!el || !subKey) return;
           var enc = encodeURIComponent(subKey);
-          var res = await fetch("/api/admin/simple-content/runs/summary?subcategoryKey=" + enc, hdr());
+          var res = await fahemAdminFetch("/api/admin/simple-content/runs/summary?subcategoryKey=" + enc, hdr());
           var data = await res.json();
           if (!res.ok || !data.ok || !data.summary) {
             el.textContent = "تعذر تحميل ملخص الرموز والتكلفة.";
@@ -940,7 +941,7 @@
         async function loadSchedulerStatsLine() {
           var el = document.getElementById("sc-scheduler-stats-line");
           if (!el) return;
-          var res = await fetch("/api/admin/simple-content/scheduler-stats", hdr());
+          var res = await fahemAdminFetch("/api/admin/simple-content/scheduler-stats", hdr());
           var data = await res.json();
           if (res.ok && data.ok && typeof data.skippedTicksBusy === "number") {
             el.textContent =
@@ -980,7 +981,7 @@
           if (tk === "manual" || tk === "scheduled") q += "&triggerKind=" + encodeURIComponent(tk);
           if (st) q += "&status=" + encodeURIComponent(st);
           if (modelId) q += "&modelId=" + encodeURIComponent(modelId);
-          var rr = await fetch("/api/admin/simple-content/runs?" + q, hdr());
+          var rr = await fahemAdminFetch("/api/admin/simple-content/runs?" + q, hdr());
           var rj = await rr.json();
           if (rr.ok && rj.ok) renderRuns(rj.items || []);
         }
@@ -1063,7 +1064,7 @@
         document.getElementById("sc-load-templates").addEventListener("click", async function () {
           setSectionBusy("templates", true, "جاري التحميل…");
           try {
-            var res = await fetch("/api/admin/simple-content/prompt-templates", hdr());
+            var res = await fahemAdminFetch("/api/admin/simple-content/prompt-templates", hdr());
             var data = await res.json();
             if (!res.ok || !data.ok) throw new Error("tpl");
             var t = data.templates || {};
@@ -1082,7 +1083,7 @@
         document.getElementById("sc-load-cats").addEventListener("click", async function () {
           msg("جاري التحميل…", true);
           try {
-            var res = await fetch("/api/categories", { cache: "no-store" });
+            var res = await fahemAdminFetch("/api/categories", { cache: "no-store" });
             var data = await res.json();
             if (!res.ok || !data.ok) throw new Error("categories_failed");
             categories = data.categories || [];
@@ -1146,7 +1147,7 @@
 
         async function loadDraftTemplateFromApi(silent) {
           try {
-            var res = await fetch("/api/admin/simple-content/draft-template", hdr());
+            var res = await fahemAdminFetch("/api/admin/simple-content/draft-template", hdr());
             var data = await res.json();
             if (!res.ok || !data.ok) throw new Error("draft_tpl");
             document.getElementById("sc-draft-template-sys").value = data.system || "";
@@ -1316,7 +1317,7 @@
         async function loadRunDetail(id) {
           if (!id) return;
           setSectionStatus("sc-sec-review-status", "جاري تحميل التشغيل…", true);
-          var res = await fetch("/api/admin/simple-content/runs/" + id, hdr());
+          var res = await fahemAdminFetch("/api/admin/simple-content/runs/" + id, hdr());
           var data = await res.json();
           if (!res.ok || !data.ok || !data.run) {
             msg("تعذر تحميل التشغيل.", false);
@@ -1407,12 +1408,12 @@
           try {
             var enc = encodeURIComponent(subKey);
             var [ctxRes, prRes, presetsRes, autoRes, runsRes, cleanupSettingsRes] = await Promise.all([
-              fetch("/api/admin/simple-content/context/" + enc, hdr()),
-              fetch("/api/admin/simple-content/prompt/" + enc, hdr()),
-              fetch("/api/admin/simple-content/presets", hdr()),
-              fetch("/api/admin/simple-content/automation/" + enc, hdr()),
-              fetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr()),
-              fetch("/api/admin/simple-content/runs-cleanup-settings", hdr()),
+              fahemAdminFetch("/api/admin/simple-content/context/" + enc, hdr()),
+              fahemAdminFetch("/api/admin/simple-content/prompt/" + enc, hdr()),
+              fahemAdminFetch("/api/admin/simple-content/presets", hdr()),
+              fahemAdminFetch("/api/admin/simple-content/automation/" + enc, hdr()),
+              fahemAdminFetch("/api/admin/simple-content/runs?subcategoryKey=" + enc + "&limit=20", hdr()),
+              fahemAdminFetch("/api/admin/simple-content/runs-cleanup-settings", hdr()),
             ]);
             var ctx = await ctxRes.json();
             var pr = await prRes.json();
@@ -1563,7 +1564,7 @@
               difficultyMode: document.getElementById("sc-diff").value,
               presetId: Number(document.getElementById("sc-preset").value) || 0,
             };
-            var res = await fetch("/api/admin/simple-content/prompt/final", {
+            var res = await fahemAdminFetch("/api/admin/simple-content/prompt/final", {
               method: "POST",
               credentials: "same-origin", headers: hdr().headers,
               body: JSON.stringify(payload),
@@ -1588,7 +1589,7 @@
         });
 
         async function putPresetDefaults(body) {
-          var res = await fetch("/api/admin/simple-content/preset-defaults", {
+          var res = await fahemAdminFetch("/api/admin/simple-content/preset-defaults", {
             method: "PUT",
             credentials: "same-origin", headers: hdr().headers,
             body: JSON.stringify(body),
@@ -1638,7 +1639,7 @@
           try {
             var enc = encodeURIComponent(selectedSubKey);
             var body = JSON.stringify({ promptBody: document.getElementById("sc-prompt").value });
-            var res = await fetch("/api/admin/simple-content/prompt/" + enc, { method: "PUT", credentials: "same-origin", headers: hdr().headers, body: body });
+            var res = await fahemAdminFetch("/api/admin/simple-content/prompt/" + enc, { method: "PUT", credentials: "same-origin", headers: hdr().headers, body: body });
             var data = await res.json();
             var okSave = res.ok && data.ok;
             msg(okSave ? "تم حفظ البرومبت." : "فشل الحفظ.", okSave);
@@ -1669,7 +1670,7 @@
           try {
             var body = { subcategoryKey: selectedSubKey };
             if (Number.isFinite(draftPid) && draftPid > 0) body.presetId = draftPid;
-            var res = await fetch("/api/admin/simple-content/prompt/generate-draft", {
+            var res = await fahemAdminFetch("/api/admin/simple-content/prompt/generate-draft", {
               method: "POST",
               credentials: "same-origin", headers: hdr().headers,
               body: JSON.stringify(body),
@@ -1718,7 +1719,7 @@
             });
             var res;
             try {
-              res = await fetch("/api/admin/simple-content/generate-preview", {
+              res = await fahemAdminFetch("/api/admin/simple-content/generate-preview", {
                 method: "POST",
                 credentials: "same-origin", headers: hdr().headers,
                 body: body,
@@ -1776,7 +1777,7 @@
           msg("جاري تعميد الإدراج…", true);
           setSectionBusy("generate", true, "جاري التعميد…");
           try {
-            var res = await fetch("/api/admin/simple-content/runs/" + rid + "/commit", {
+            var res = await fahemAdminFetch("/api/admin/simple-content/runs/" + rid + "/commit", {
               method: "POST",
               credentials: "same-origin", headers: hdr().headers,
               body: "{}",
@@ -1809,7 +1810,7 @@
               intervalMinutes: Number(document.getElementById("sc-auto-min").value) || 60,
               modelPresetId: Number.isFinite(pid) ? pid : null,
             });
-            var res = await fetch("/api/admin/simple-content/automation/" + enc, {
+            var res = await fahemAdminFetch("/api/admin/simple-content/automation/" + enc, {
               method: "PUT",
               credentials: "same-origin", headers: hdr().headers,
               body: body,
@@ -1818,7 +1819,7 @@
             msg(res.ok && data.ok ? "تم حفظ الجدولة." : "فشل حفظ الجدولة.", res.ok && data.ok);
             setSectionStatus("sc-sec-auto-status", res.ok && data.ok ? "تم" : "فشل", false);
             if (res.ok && data.ok) {
-              var ar = await fetch("/api/admin/simple-content/automation/" + enc, hdr());
+              var ar = await fahemAdminFetch("/api/admin/simple-content/automation/" + enc, hdr());
               var aj = await ar.json();
               if (ar.ok && aj.ok && aj.automation) updateAutomationDates(aj.automation);
               else updateAutomationDates(null);
@@ -1874,7 +1875,7 @@
             var ids = Array.from(selectedRunIds.values()).sort(function (a, b) { return b - a; });
             var detailPairs = await Promise.all(
               ids.map(async function (id) {
-                var r = await fetch("/api/admin/simple-content/runs/" + id, hdr());
+                var r = await fahemAdminFetch("/api/admin/simple-content/runs/" + id, hdr());
                 var j = await r.json().catch(function () {
                   return {};
                 });
@@ -1946,7 +1947,7 @@
         }
         document.getElementById("sc-pricing-load").addEventListener("click", async function () {
           try {
-            var res = await fetch("/api/admin/pricing/models", hdr());
+            var res = await fahemAdminFetch("/api/admin/pricing/models", hdr());
             var j = await res.json();
             if (res.ok && j.ok) {
               document.getElementById("sc-pricing-openai").value = JSON.stringify(j.openai || {}, null, 2);
@@ -1963,7 +1964,7 @@
           try {
             var openai = JSON.parse(document.getElementById("sc-pricing-openai").value || "{}");
             var google = JSON.parse(document.getElementById("sc-pricing-google").value || "{}");
-            var res = await fetch("/api/admin/pricing/models", {
+            var res = await fahemAdminFetch("/api/admin/pricing/models", {
               method: "PUT",
               credentials: "same-origin",
               headers: hdr().headers,
@@ -1988,7 +1989,7 @@
           }
           setSectionBusy("runsCleanup", true, "جاري الحفظ…");
           try {
-            var res = await fetch("/api/admin/simple-content/runs-cleanup-settings", {
+            var res = await fahemAdminFetch("/api/admin/simple-content/runs-cleanup-settings", {
               method: "PATCH",
               credentials: "same-origin", headers: hdr().headers,
               body: JSON.stringify({
@@ -2013,7 +2014,7 @@
         document.getElementById("sc-runs-cleanup-preview").addEventListener("click", async function () {
           setSectionBusy("runsCleanup", true, "جاري العدّ…");
           try {
-            var res = await fetch("/api/admin/simple-content/runs-cleanup/preview", { method: "POST", credentials: "same-origin", headers: hdr().headers });
+            var res = await fahemAdminFetch("/api/admin/simple-content/runs-cleanup/preview", { method: "POST", credentials: "same-origin", headers: hdr().headers });
             var data = await res.json();
             if (res.ok && data.ok) {
               msg(
@@ -2034,7 +2035,7 @@
           if (!confirm("سيتم حذف سجلات التشغيل الأقدم من عدد الأيام المحدد في الإعدادات (كل الفروع). متابعة؟")) return;
           setSectionBusy("runsCleanup", true, "جاري الحذف…");
           try {
-            var res = await fetch("/api/admin/simple-content/runs-cleanup/run", { method: "POST", credentials: "same-origin", headers: hdr().headers });
+            var res = await fahemAdminFetch("/api/admin/simple-content/runs-cleanup/run", { method: "POST", credentials: "same-origin", headers: hdr().headers });
             var data = await res.json();
             if (res.ok && data.ok) {
               applyRunsCleanupSettings({
@@ -2071,7 +2072,7 @@
             var body = JSON.stringify({
               system: document.getElementById("sc-draft-template-sys").value,
             });
-            var res = await fetch("/api/admin/simple-content/draft-template", {
+            var res = await fahemAdminFetch("/api/admin/simple-content/draft-template", {
               method: "PUT",
               credentials: "same-origin", headers: hdr().headers,
               body: body,
