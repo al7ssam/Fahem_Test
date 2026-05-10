@@ -70,10 +70,6 @@
         color: var(--text);
         border: 1px solid var(--border);
       }
-      .btn.btn-xs {
-        padding: 0.22rem 0.42rem;
-        font-size: 0.72rem;
-      }
       .btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
@@ -106,16 +102,6 @@
       .muted {
         color: var(--muted);
         font-size: 0.82rem;
-      }
-      .list {
-        border: 1px solid var(--border);
-        border-radius: 0.75rem;
-        max-height: 220px;
-        overflow: auto;
-      }
-      .list-item {
-        padding: 0.45rem 0.55rem;
-        border-bottom: 1px solid rgba(223, 187, 106, 0.1);
       }
       .collapsible-details {
         margin: 0.65rem 0;
@@ -175,9 +161,6 @@
         <p class="muted" style="margin: 0 0 0.65rem; font-size: 0.84rem; line-height: 1.55">
           اكتب القالب كاملاً واستخدم <code>{{...}}</code> للمتغيرات. المعاينة أدناه تستخدم نفس مسار الخادم الذي ينفّذه التطبيق عند النسخ (<code class="muted">custom_lesson</code>) — لا يوجد هنا مسار استيراد الدروس.
         </p>
-        <label class="muted" style="display: block; margin-bottom: 0.2rem; font-size: 0.82rem">ملاحظة عند الحفظ (تُسجَّل مع النسخة في السجل)</label>
-        <input type="text" id="clp-save-note" placeholder="اختياري — مثال: ضبط جودة البطاقات" style="width: 100%; max-width: 36rem" />
-
         <details class="collapsible-details" style="margin-top: 0.75rem">
           <summary class="collapsible-summary">
             <strong>القيم الافتراضية في التطبيق</strong>
@@ -250,12 +233,6 @@
           <button type="button" class="btn btn-secondary" id="clp-test-json-btn">تحقق من البنية</button>
           <span class="muted" id="clp-test-json-result" style="font-size: 0.82rem"></span>
         </div>
-      </div>
-
-      <div class="card">
-        <h4 class="muted" style="margin: 0 0 0.35rem; font-size: 0.92rem">النسخ المحفوظة</h4>
-        <p class="muted" style="margin: 0 0 0.45rem; font-size: 0.78rem">كل حفظ يُنشئ نسخة يمكن استعادتها.</p>
-        <div class="list" id="clp-versions" style="max-height: 200px"></div>
       </div>
     </div>
 
@@ -420,53 +397,6 @@
           }, PREVIEW_DEBOUNCE_MS);
         }
 
-        async function clpRefreshVersions() {
-          var el = document.getElementById("clp-versions");
-          if (!el) return;
-          try {
-            var data = await api("/api/admin/lesson-ai-prompt-config/versions?limit=25");
-            el.innerHTML =
-              data.versions
-                .map(function (v) {
-                  return (
-                    '<div class="list-item" style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap"><span>#' +
-                    v.id +
-                    " — " +
-                    v.created_at +
-                    (v.note ? " — " + escapeHtml(v.note) : "") +
-                    '</span><button type="button" class="btn btn-xs btn-secondary" data-clp-restore="' +
-                    v.id +
-                    '">استعادة</button></div>'
-                  );
-                })
-                .join("") || '<div class="muted" style="padding:.4rem">لا نسخ بعد — احفظ لإنشاء أول نسخة.</div>';
-            el.querySelectorAll("[data-clp-restore]").forEach(function (b) {
-              b.addEventListener("click", async function () {
-                var id = Number(b.getAttribute("data-clp-restore"));
-                if (!window.confirm("استعادة الإصدار #" + id + "؟ سيُستبدل الإعداد الحالي.")) return;
-                try {
-                  await api("/api/admin/lesson-ai-prompt-config/restore", {
-                    method: "POST",
-                    body: JSON.stringify({ versionId: id }),
-                  });
-                  var fresh = await api("/api/admin/lesson-ai-prompt-config");
-                  if (fresh.stored && fresh.stored.audienceOptions && fresh.stored.audienceOptions.length) {
-                    clpAudienceOptionsBackup = fresh.stored.audienceOptions;
-                  } else {
-                    clpAudienceOptionsBackup = null;
-                  }
-                  clpApplyResolved(fresh.resolved);
-                  await clpRefreshVersions();
-                  void clpRunPreview();
-                  setMsg("تمت استعادة النسخة #" + id + ".", true);
-                } catch (_) {}
-              });
-            });
-          } catch (_) {
-            el.innerHTML = '<div class="muted" style="padding:.4rem">تعذر تحميل النسخ.</div>';
-          }
-        }
-
         function clpWatchPreviewInputs() {
           var ids = [
             "clp-learning-intent",
@@ -497,7 +427,6 @@
               clpAudienceOptionsBackup = null;
             }
             clpApplyResolved(data.resolved);
-            await clpRefreshVersions();
             void clpRunPreview();
             setMsg("تم تحميل الإعداد من الخادم.", true);
           } catch (_) {}
@@ -506,15 +435,13 @@
         document.getElementById("clp-save").onclick = async function () {
           try {
             var cfg = clpGatherConfigFromForm();
-            var note = document.getElementById("clp-save-note").value.trim();
             var res = await api("/api/admin/lesson-ai-prompt-config", {
               method: "PUT",
-              body: JSON.stringify({ config: cfg, note: note || null }),
+              body: JSON.stringify({ config: cfg }),
             });
             if (res.stored && res.stored.audienceOptions && res.stored.audienceOptions.length) {
               clpAudienceOptionsBackup = res.stored.audienceOptions;
             }
-            await clpRefreshVersions();
             void clpRunPreview();
             setMsg("تم حفظ إعداد البرومبت.", true);
           } catch (_) {}
@@ -571,7 +498,6 @@
               clpAudienceOptionsBackup = null;
             }
             clpApplyResolved(data.resolved);
-            await clpRefreshVersions();
             void clpRunPreview();
           } catch (_) {
             setMsg("تعذر تحميل الإعداد. تأكد من صلاحيات الأدمن.", false);

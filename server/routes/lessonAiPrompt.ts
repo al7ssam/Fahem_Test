@@ -13,8 +13,6 @@ import {
   getLessonAiPromptStored,
   mergeLessonAiPromptStored,
   saveLessonAiPromptStored,
-  listLessonAiPromptVersions,
-  restoreLessonAiPromptVersion,
 } from "../services/lessonAiPromptConfig";
 
 function verifyAdmin(req: Request, res: Response): boolean {
@@ -83,11 +81,10 @@ export function registerLessonAiPromptRoutes(app: Express): void {
 
   app.put("/api/admin/lesson-ai-prompt-config", async (req: Request, res: Response) => {
     if (!verifyAdmin(req, res)) return;
-    const note = typeof req.body?.note === "string" ? req.body.note : null;
     const payload = req.body?.config ?? req.body;
     try {
       const pool = getPool();
-      const result = await saveLessonAiPromptStored(pool, payload, note);
+      const result = await saveLessonAiPromptStored(pool, payload);
       if (!result.ok) {
         res.status(400).json({ ok: false, error: result.error });
         return;
@@ -96,39 +93,6 @@ export function registerLessonAiPromptRoutes(app: Express): void {
       res.json({ ok: true, stored });
     } catch {
       res.status(500).json({ ok: false, error: "config_save_failed" });
-    }
-  });
-
-  app.get("/api/admin/lesson-ai-prompt-config/versions", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    try {
-      const pool = getPool();
-      const limit = Number(req.query.limit);
-      const rows = await listLessonAiPromptVersions(pool, Number.isFinite(limit) ? limit : 30);
-      res.json({ ok: true, versions: rows });
-    } catch {
-      res.status(500).json({ ok: false, error: "versions_failed" });
-    }
-  });
-
-  app.post("/api/admin/lesson-ai-prompt-config/restore", async (req: Request, res: Response) => {
-    if (!verifyAdmin(req, res)) return;
-    const parsed = z.object({ versionId: z.number().int().positive() }).safeParse(req.body ?? {});
-    if (!parsed.success) {
-      res.status(400).json({ ok: false, error: "invalid_body" });
-      return;
-    }
-    try {
-      const pool = getPool();
-      const ok = await restoreLessonAiPromptVersion(pool, parsed.data.versionId);
-      if (!ok) {
-        res.status(404).json({ ok: false, error: "version_not_found" });
-        return;
-      }
-      const stored = await getLessonAiPromptStored(pool);
-      res.json({ ok: true, stored });
-    } catch {
-      res.status(500).json({ ok: false, error: "restore_failed" });
     }
   });
 
