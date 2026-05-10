@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>برومبت الدرس المخصص — مسار المستخدم | فاهم</title>
+    {{ADMIN_DESIGN_SYSTEM}}
+    <style>
+      :root {
+        --card: var(--admin-card-glass);
+        --border: var(--admin-border-warm);
+        --text: #f8f4ea;
+        --muted: #b7ac90;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(to bottom, var(--bg-from), var(--bg-mid), var(--bg-to));
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 52rem;
+        margin: 0 auto;
+        padding: 1.1rem 1rem 2.5rem;
+      }
+      .subtitle {
+        color: var(--muted);
+        margin: 0.2rem 0 0.85rem;
+        font-size: 0.92rem;
+        line-height: 1.55;
+      }
+      h1 {
+        margin: 0;
+        color: var(--amber);
+        font-size: 1.55rem;
+      }
+      .topbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.55rem;
+        align-items: center;
+        padding: 0.65rem 0.75rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 0.9rem;
+        margin-bottom: 0.85rem;
+      }
+      input,
+      select,
+      textarea {
+        background: rgba(0, 0, 0, 0.25);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 0.55rem;
+        padding: 0.45rem 0.55rem;
+        font-family: inherit;
+      }
+      .btn {
+        border: none;
+        border-radius: 0.55rem;
+        padding: 0.5rem 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+        font-family: inherit;
+        background: linear-gradient(to left, #e8be66, #a8792f);
+        color: #120b02;
+      }
+      .btn-secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn.btn-xs {
+        padding: 0.22rem 0.42rem;
+        font-size: 0.72rem;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .msg {
+        min-height: 1.2rem;
+        flex: 1;
+        flex-basis: 100%;
+        font-size: 0.88rem;
+      }
+      .ok {
+        color: var(--ok);
+      }
+      .err {
+        color: #fca5a5;
+      }
+      .card {
+        margin-top: 0.65rem;
+        padding: 0.85rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 0.9rem;
+      }
+      .row {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 0.82rem;
+      }
+      .list {
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        max-height: 220px;
+        overflow: auto;
+      }
+      .list-item {
+        padding: 0.45rem 0.55rem;
+        border-bottom: 1px solid rgba(223, 187, 106, 0.1);
+      }
+      .collapsible-details {
+        margin: 0.65rem 0;
+      }
+      .collapsible-details > summary {
+        list-style: none;
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        padding: 0.2rem 0 0.45rem;
+      }
+      .collapsible-details > summary::-webkit-details-marker {
+        display: none;
+      }
+      .collapsible-caret {
+        flex-shrink: 0;
+        font-size: 0.75rem;
+        color: var(--muted);
+        transition: transform 0.2s ease;
+      }
+      .collapsible-details[open] .collapsible-caret {
+        transform: rotate(-180deg);
+      }
+      .collapsible-panel-body {
+        padding-top: 0.35rem;
+      }
+      .intent-label {
+        font-weight: 700;
+        color: var(--amber);
+        font-size: 0.95rem;
+        margin-bottom: 0.25rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>برومبت مسار «ماذا تريد أن تتعلّم؟»</h1>
+      {{ADMIN_NAV}}
+      <p class="subtitle">
+        صفحة لضبط النص الذي يصل إلى أداة الذكاء عندما يختار المستخدم <strong>درساً مخصّصاً</strong> ويضغط «نسخ البرومبت». التعديل يُخزَّن للتطبيق بالكامل — مصدر واحد مع
+        <code class="muted">shared/lessonAiPrompt.ts</code>.
+      </p>
+      <p class="subtitle" style="margin-top: -0.35rem">
+        إجمالي الأسئلة في النظام: <strong>{{QUESTION_COUNT}}</strong>
+      </p>
+
+      <div class="topbar">
+        <button type="button" class="btn" id="clp-load">تحميل الإعداد</button>
+        <button type="button" class="btn" id="clp-save">حفظ</button>
+        <div class="msg" id="clp-msg" aria-live="polite"></div>
+      </div>
+
+      <div class="card">
+        <p class="muted" style="margin: 0 0 0.65rem; font-size: 0.84rem; line-height: 1.55">
+          اكتب القالب كاملاً واستخدم <code>{{...}}</code> للمتغيرات. المعاينة أدناه تستخدم نفس مسار الخادم الذي ينفّذه التطبيق عند النسخ (<code class="muted">custom_lesson</code>) — لا يوجد هنا مسار استيراد الدروس.
+        </p>
+        <label class="muted" style="display: block; margin-bottom: 0.2rem; font-size: 0.82rem">ملاحظة عند الحفظ (تُسجَّل مع النسخة في السجل)</label>
+        <input type="text" id="clp-save-note" placeholder="اختياري — مثال: ضبط جودة البطاقات" style="width: 100%; max-width: 36rem" />
+
+        <details class="collapsible-details" style="margin-top: 0.75rem">
+          <summary class="collapsible-summary">
+            <strong>القيم الافتراضية في التطبيق</strong>
+            <span class="muted" style="font-weight: normal">(أقسام، أزمنة، جودة النص…)</span>
+            <span class="collapsible-caret" aria-hidden="true">▼</span>
+          </summary>
+          <div class="collapsible-panel-body">
+            <div class="row" style="align-items: end; flex-wrap: wrap; gap: 0.45rem">
+              <div>
+                <label class="muted" style="display: block; font-size: 0.78rem">أقسام</label>
+                <input type="number" id="clp-d-nsec" min="1" max="20" style="width: 5rem" />
+              </div>
+              <div>
+                <label class="muted" style="display: block; font-size: 0.78rem">أسئلة/قسم</label>
+                <input type="number" id="clp-d-qsame" min="1" max="50" style="width: 5rem" />
+              </div>
+              <div>
+                <label class="muted" style="display: block; font-size: 0.78rem">ثواني إجابة</label>
+                <input type="number" id="clp-d-anssec" min="3" max="120" step="0.5" style="width: 5rem" />
+              </div>
+              <div>
+                <label class="muted" style="display: block; font-size: 0.78rem">ثواني مذاكرة قسم</label>
+                <input type="number" id="clp-d-studysec" min="2" max="300" step="0.5" style="width: 6rem" />
+              </div>
+              <div>
+                <label class="muted" style="display: block; font-size: 0.78rem">من جمل studyBody</label>
+                <input type="number" id="clp-d-minsent" min="1" max="20" style="width: 5rem" />
+              </div>
+              <div>
+                <label class="muted" style="display: block; font-size: 0.78rem">إلى جمل</label>
+                <input type="number" id="clp-d-maxsent" min="1" max="20" style="width: 5rem" />
+              </div>
+            </div>
+            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">موضوع افتراضي (اختياري — يُمرَّر إلى <code>{{topic}}</code>)</label>
+            <textarea id="clp-d-topic" rows="2" style="width: 100%"></textarea>
+            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">الجمهور (يُمرَّر إلى <code>{{audience}}</code>)</label>
+            <select id="clp-audience" style="width: 100%; max-width: 22rem"></select>
+          </div>
+        </details>
+
+        <p class="intent-label" style="margin-top: 0.85rem">نية التعلّم التجريبية (لمحاكاة السؤال: ماذا تريد أن تتعلّم؟)</p>
+        <textarea id="clp-learning-intent" rows="3" style="width: 100%; font-size: 0.9rem" spellcheck="true">تعلّم الكسور للمبتدئين</textarea>
+
+        <h4 class="muted" style="margin: 0.85rem 0 0.35rem; font-size: 0.92rem">قالب البرومبت</h4>
+        <textarea id="clp-prompt-template" rows="18" style="width: 100%; font-family: ui-monospace, monospace; font-size: 0.72rem; line-height: 1.35" spellcheck="false"></textarea>
+        <p class="muted" style="margin: 0.4rem 0 0; font-size: 0.72rem; line-height: 1.45">
+          <strong style="font-weight: 600">متغيرات مدعومة:</strong>
+          <code>{{learningIntent}}</code> <code>{{learningIntentSection}}</code> <code>{{topic}}</code> <code>{{audience}}</code>
+          <code>{{nSec}}</code> <code>{{qSame}}</code> <code>{{ansSec}}</code> <code>{{studySec}}</code>
+          <code>{{minSentences}}</code> <code>{{maxSentences}}</code>
+          <code>{{defaultAnswerMs}}</code> <code>{{studyPhaseMs}}</code> <code>{{jsonExample}}</code>
+          <code>{{topicBlock}}</code> <code>{{qualityBlock}}</code> <code>{{sectionBlock}}</code>
+          <code>{{structureAndItems}}</code> <code>{{paramsAndTopic}}</code> <code>{{strictJsonRules}}</code>
+        </p>
+      </div>
+
+      <div class="card">
+        <h4 class="muted" style="margin: 0 0 0.35rem; font-size: 0.95rem">معاينة البرومبت النهائي للمستخدم</h4>
+        <p class="muted" style="margin: 0 0 0.45rem; font-size: 0.8rem">
+          النص بعد استبدال المتغيرات — مطابق لما يُنسَخ من التطبيق عند الضغط على «نسخ البرومبت» مع نفس القيم أعلاه. تُحدَّث تلقائياً بعد توقف الكتابة قليلاً، أو اضغط الزر.
+        </p>
+        <div class="row" style="margin-bottom: 0.45rem">
+          <button type="button" class="btn btn-secondary" id="clp-preview-btn">تحديث المعاينة الآن</button>
+          <button type="button" class="btn" id="clp-copy-preview">نسخ البرومبت</button>
+        </div>
+        <textarea id="clp-preview-user" readonly rows="14" style="width: 100%; font-family: ui-monospace, monospace; font-size: 0.72rem"></textarea>
+      </div>
+
+      <div class="card">
+        <h4 class="muted" style="margin: 0 0 0.35rem; font-size: 0.92rem">التحقق من JSON بعد توليد الذكاء</h4>
+        <p class="muted" style="margin: 0 0 0.45rem; font-size: 0.78rem">الصق مخرجات النموذج هنا للتأكد أنها تطابق مخطط الدرس في التطبيق.</p>
+        <textarea id="clp-test-json" rows="5" style="width: 100%; font-family: ui-monospace, monospace; font-size: 0.75rem" placeholder='{ "lesson": {...}, "sections": [...] }'></textarea>
+        <div class="row" style="margin-top: 0.4rem">
+          <button type="button" class="btn btn-secondary" id="clp-test-json-btn">تحقق من البنية</button>
+          <span class="muted" id="clp-test-json-result" style="font-size: 0.82rem"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h4 class="muted" style="margin: 0 0 0.35rem; font-size: 0.92rem">النسخ المحفوظة</h4>
+        <p class="muted" style="margin: 0 0 0.45rem; font-size: 0.78rem">كل حفظ يُنشئ نسخة يمكن استعادتها.</p>
+        <div class="list" id="clp-versions" style="max-height: 200px"></div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var msg = document.getElementById("clp-msg");
+        function setMsg(text, ok) {
+          msg.textContent = text || "";
+          msg.className = "msg " + (ok ? "ok" : "err");
+        }
+        function hdr() {
+          return { "Content-Type": "application/json" };
+        }
+        function escapeHtml(s) {
+          return String(s ?? "").replace(/[&<>"']/g, function (ch) {
+            return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch];
+          });
+        }
+        function formatApiIssues(data) {
+          var issues = data && data.issues;
+          if (!Array.isArray(issues) || issues.length === 0) return "";
+          var first = issues[0];
+          if (typeof first === "string") return first;
+          if (first && typeof first === "object") {
+            var p = first.path != null ? (Array.isArray(first.path) ? first.path.join(".") : String(first.path)) : "";
+            var m = first.message ? String(first.message) : "";
+            return [p, m].filter(Boolean).join(": ") || m;
+          }
+          return String(first);
+        }
+        async function api(path, opts) {
+          var res = await fetch(path, {
+            ...opts,
+            credentials: "same-origin",
+            headers: { ...hdr(), ...(opts && opts.headers) },
+          });
+          var data = await res.json().catch(function () {
+            return {};
+          });
+          if (!res.ok || data.ok === false) {
+            var errLine = data.message || data.error || "فشل الطلب";
+            var issText = formatApiIssues(data);
+            if (issText) errLine = errLine + " — " + issText;
+            setMsg(errLine, false);
+            throw new Error(data.error || "api");
+          }
+          return data;
+        }
+
+        var clpAudienceOptionsBackup = null;
+        var clpPreviewTimer = null;
+        var PREVIEW_DEBOUNCE_MS = 350;
+
+        function clpPopulateAudienceSelect(audienceOptions, selectedValue) {
+          var sel = document.getElementById("clp-audience");
+          if (!sel) return;
+          var opts = Array.isArray(audienceOptions) ? audienceOptions : [];
+          sel.innerHTML = opts
+            .map(function (o) {
+              var v = o.v != null ? String(o.v) : "";
+              var t = o.t != null ? String(o.t) : v;
+              return (
+                '<option value="' +
+                escapeHtml(v) +
+                '">' +
+                escapeHtml(t) +
+                "</option>"
+              );
+            })
+            .join("");
+          var want = selectedValue != null ? String(selectedValue) : "";
+          var found = false;
+          for (var i = 0; i < sel.options.length; i++) {
+            if (sel.options[i].value === want) {
+              found = true;
+              break;
+            }
+          }
+          sel.value = found ? want : sel.options[0] ? sel.options[0].value : "";
+        }
+
+        function clpApplyResolved(resolved) {
+          var d = resolved.defaults || {};
+          function nv(x, fb) {
+            var n = Number(x);
+            return Number.isFinite(n) ? n : fb;
+          }
+          document.getElementById("clp-d-nsec").value = nv(d.nSec, 3);
+          document.getElementById("clp-d-qsame").value = nv(d.qSame, 5);
+          document.getElementById("clp-d-anssec").value = nv(d.ansSec, 15);
+          document.getElementById("clp-d-studysec").value = nv(d.studySec, 60);
+          document.getElementById("clp-d-minsent").value = nv(d.minSentences, 1);
+          document.getElementById("clp-d-maxsent").value = nv(d.maxSentences, 6);
+          document.getElementById("clp-d-topic").value = d.topic != null ? String(d.topic) : "";
+          var pt = document.getElementById("clp-prompt-template");
+          if (pt) pt.value = resolved.promptTemplate != null ? String(resolved.promptTemplate) : "";
+          clpPopulateAudienceSelect(resolved.audienceOptions, d.audience);
+        }
+
+        function clpGatherConfigFromForm() {
+          function nv(id, fb) {
+            var n = Number(document.getElementById(id).value);
+            return Number.isFinite(n) ? n : fb;
+          }
+          var cfg = {
+            version: 2,
+            promptTemplate: document.getElementById("clp-prompt-template").value,
+            defaults: {
+              nSec: nv("clp-d-nsec", 3),
+              qSame: nv("clp-d-qsame", 5),
+              ansSec: nv("clp-d-anssec", 15),
+              studySec: nv("clp-d-studysec", 60),
+              minSentences: nv("clp-d-minsent", 1),
+              maxSentences: nv("clp-d-maxsent", 6),
+              topic: document.getElementById("clp-d-topic").value.trim(),
+              audience: document.getElementById("clp-audience").value.trim(),
+            },
+          };
+          if (clpAudienceOptionsBackup && clpAudienceOptionsBackup.length) {
+            cfg.audienceOptions = clpAudienceOptionsBackup;
+          }
+          return cfg;
+        }
+
+        function clpPreviewPayload() {
+          function nv(id, fb) {
+            var n = Number(document.getElementById(id).value);
+            return Number.isFinite(n) ? n : fb;
+          }
+          return {
+            kind: "custom_lesson",
+            learningIntent: document.getElementById("clp-learning-intent").value,
+            params: {
+              nSec: nv("clp-d-nsec", 3),
+              qSame: nv("clp-d-qsame", 5),
+              ansSec: nv("clp-d-anssec", 15),
+              studySec: nv("clp-d-studysec", 60),
+              minSentences: nv("clp-d-minsent", 1),
+              maxSentences: nv("clp-d-maxsent", 6),
+              topic: document.getElementById("clp-d-topic").value.trim(),
+              audience: document.getElementById("clp-audience").value.trim(),
+            },
+          };
+        }
+
+        async function clpRunPreview() {
+          try {
+            var data = await api("/api/admin/lesson-ai-prompt/preview-text", {
+              method: "POST",
+              body: JSON.stringify(clpPreviewPayload()),
+            });
+            document.getElementById("clp-preview-user").value = data.text;
+            setMsg("تم تحديث المعاينة.", true);
+          } catch (_) {}
+        }
+
+        function clpSchedulePreview() {
+          if (clpPreviewTimer) clearTimeout(clpPreviewTimer);
+          clpPreviewTimer = setTimeout(function () {
+            clpPreviewTimer = null;
+            void clpRunPreview();
+          }, PREVIEW_DEBOUNCE_MS);
+        }
+
+        async function clpRefreshVersions() {
+          var el = document.getElementById("clp-versions");
+          if (!el) return;
+          try {
+            var data = await api("/api/admin/lesson-ai-prompt-config/versions?limit=25");
+            el.innerHTML =
+              data.versions
+                .map(function (v) {
+                  return (
+                    '<div class="list-item" style="display:flex;justify-content:space-between;gap:.5rem;align-items:center;flex-wrap:wrap"><span>#' +
+                    v.id +
+                    " — " +
+                    v.created_at +
+                    (v.note ? " — " + escapeHtml(v.note) : "") +
+                    '</span><button type="button" class="btn btn-xs btn-secondary" data-clp-restore="' +
+                    v.id +
+                    '">استعادة</button></div>'
+                  );
+                })
+                .join("") || '<div class="muted" style="padding:.4rem">لا نسخ بعد — احفظ لإنشاء أول نسخة.</div>';
+            el.querySelectorAll("[data-clp-restore]").forEach(function (b) {
+              b.addEventListener("click", async function () {
+                var id = Number(b.getAttribute("data-clp-restore"));
+                if (!window.confirm("استعادة الإصدار #" + id + "؟ سيُستبدل الإعداد الحالي.")) return;
+                try {
+                  await api("/api/admin/lesson-ai-prompt-config/restore", {
+                    method: "POST",
+                    body: JSON.stringify({ versionId: id }),
+                  });
+                  var fresh = await api("/api/admin/lesson-ai-prompt-config");
+                  if (fresh.stored && fresh.stored.audienceOptions && fresh.stored.audienceOptions.length) {
+                    clpAudienceOptionsBackup = fresh.stored.audienceOptions;
+                  } else {
+                    clpAudienceOptionsBackup = null;
+                  }
+                  clpApplyResolved(fresh.resolved);
+                  await clpRefreshVersions();
+                  void clpRunPreview();
+                  setMsg("تمت استعادة النسخة #" + id + ".", true);
+                } catch (_) {}
+              });
+            });
+          } catch (_) {
+            el.innerHTML = '<div class="muted" style="padding:.4rem">تعذر تحميل النسخ.</div>';
+          }
+        }
+
+        function clpWatchPreviewInputs() {
+          var ids = [
+            "clp-learning-intent",
+            "clp-prompt-template",
+            "clp-d-nsec",
+            "clp-d-qsame",
+            "clp-d-anssec",
+            "clp-d-studysec",
+            "clp-d-minsent",
+            "clp-d-maxsent",
+            "clp-d-topic",
+            "clp-audience",
+          ];
+          ids.forEach(function (id) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener("input", clpSchedulePreview);
+            el.addEventListener("change", clpSchedulePreview);
+          });
+        }
+
+        document.getElementById("clp-load").onclick = async function () {
+          try {
+            var data = await api("/api/admin/lesson-ai-prompt-config");
+            if (data.stored && data.stored.audienceOptions && data.stored.audienceOptions.length) {
+              clpAudienceOptionsBackup = data.stored.audienceOptions;
+            } else {
+              clpAudienceOptionsBackup = null;
+            }
+            clpApplyResolved(data.resolved);
+            await clpRefreshVersions();
+            void clpRunPreview();
+            setMsg("تم تحميل الإعداد من الخادم.", true);
+          } catch (_) {}
+        };
+
+        document.getElementById("clp-save").onclick = async function () {
+          try {
+            var cfg = clpGatherConfigFromForm();
+            var note = document.getElementById("clp-save-note").value.trim();
+            var res = await api("/api/admin/lesson-ai-prompt-config", {
+              method: "PUT",
+              body: JSON.stringify({ config: cfg, note: note || null }),
+            });
+            if (res.stored && res.stored.audienceOptions && res.stored.audienceOptions.length) {
+              clpAudienceOptionsBackup = res.stored.audienceOptions;
+            }
+            await clpRefreshVersions();
+            void clpRunPreview();
+            setMsg("تم حفظ إعداد البرومبت.", true);
+          } catch (_) {}
+        };
+
+        document.getElementById("clp-preview-btn").onclick = function () {
+          void clpRunPreview();
+        };
+
+        document.getElementById("clp-copy-preview").onclick = async function () {
+          var t = document.getElementById("clp-preview-user").value;
+          if (!t.trim()) {
+            setMsg("لا يوجد نص للمعاينة — اضغط «تحديث المعاينة» أولاً.", false);
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(t);
+            setMsg("تم نسخ البرومبت إلى الحافظة.", true);
+          } catch (_) {
+            setMsg("تعذر النسخ — حدّد النص يدوياً.", false);
+          }
+        };
+
+        document.getElementById("clp-test-json-btn").onclick = async function () {
+          var out = document.getElementById("clp-test-json-result");
+          out.textContent = "";
+          var raw = document.getElementById("clp-test-json").value.trim();
+          if (!raw) {
+            out.textContent = "الصق JSON أولاً.";
+            return;
+          }
+          try {
+            var body = JSON.parse(raw);
+            var data = await api("/api/admin/lesson-ai-prompt/test-json", {
+              method: "POST",
+              body: JSON.stringify(body),
+            });
+            out.textContent = "صالح — " + data.steps + " خطوة — «" + (data.lessonTitle || "") + "»";
+            out.className = "muted ok";
+          } catch (e) {
+            out.textContent = e && e.message ? String(e.message) : "فشل التحقق.";
+            out.className = "muted err";
+          }
+        };
+
+        clpWatchPreviewInputs();
+
+        void (async function clpBootstrap() {
+          try {
+            var data = await api("/api/admin/lesson-ai-prompt-config");
+            if (data.stored && data.stored.audienceOptions && data.stored.audienceOptions.length) {
+              clpAudienceOptionsBackup = data.stored.audienceOptions;
+            } else {
+              clpAudienceOptionsBackup = null;
+            }
+            clpApplyResolved(data.resolved);
+            await clpRefreshVersions();
+            void clpRunPreview();
+          } catch (_) {
+            setMsg("تعذر تحميل الإعداد. تأكد من صلاحيات الأدمن.", false);
+          }
+        })();
+      })();
+    </script>
+  </body>
+</html>

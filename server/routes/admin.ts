@@ -503,6 +503,10 @@ function adminLessonsTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-lessons.html");
 }
 
+function adminCustomLessonPromptTemplatePath(): string {
+  return path.join(process.cwd(), "server", "templates", "admin-custom-lesson-prompt.html");
+}
+
 function adminQuestionBankTemplatePath(): string {
   return path.join(process.cwd(), "server", "templates", "admin-question-bank.html");
 }
@@ -538,6 +542,7 @@ type AdminNavPageId =
   | "categories"
   | "matchBalance"
   | "lessons"
+  | "customLessonPrompt"
   | "simpleContent"
   | "usageAnalytics"
   | "maintenance";
@@ -564,6 +569,12 @@ const ADMIN_NAV_LINK_ROWS: AdminNavLinkRow[] = [
   { id: "categories", href: "/admin/categories", labelAr: "تصنيفات نمط المذاكرة", groupKey: "content" },
   { id: "matchBalance", href: "/admin/match-balance", labelAr: "موازنة المباراة", groupKey: "match" },
   { id: "lessons", href: "/admin/lessons", labelAr: "إدارة الدروس", groupKey: "lessons" },
+  {
+    id: "customLessonPrompt",
+    href: "/admin/custom-lesson-prompt",
+    labelAr: "برومبت الدرس المخصص",
+    groupKey: "lessons",
+  },
   { id: "simpleContent", href: "/admin/simple-content", labelAr: "المسار البسيط", groupKey: "ai" },
   { id: "usageAnalytics", href: "/admin/usage-analytics", labelAr: "تحليلات الاستخدام", groupKey: "ai" },
   { id: "maintenance", href: "/admin/maintenance", labelAr: "الصيانة والتنظيف", groupKey: "maintenance" },
@@ -675,6 +686,13 @@ function readAdminLessonsHtml(questionCount: number | null): string {
   return applyAdminTemplate(fs.readFileSync(adminLessonsTemplatePath(), "utf8"), {
     questionCount,
     nav: "lessons",
+  });
+}
+
+function readAdminCustomLessonPromptHtml(questionCount: number | null): string {
+  return applyAdminTemplate(fs.readFileSync(adminCustomLessonPromptTemplatePath(), "utf8"), {
+    questionCount,
+    nav: "customLessonPrompt",
   });
 }
 
@@ -1199,6 +1217,16 @@ export function registerAdminRoutes(app: Express): void {
       res.status(200).send(readAdminLessonsHtml(total));
     } catch {
       res.status(500).send("تعذر تحميل صفحة إدارة الدروس.");
+    }
+  });
+
+  app.get("/admin/custom-lesson-prompt", async (_req: Request, res: Response) => {
+    try {
+      const total = await countQuestions();
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(readAdminCustomLessonPromptHtml(total));
+    } catch {
+      res.status(500).send("تعذر تحميل صفحة برومبت الدرس المخصص.");
     }
   });
 
