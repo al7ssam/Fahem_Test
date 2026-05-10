@@ -194,9 +194,7 @@
                 <input type="number" id="clp-d-maxsent" min="1" max="20" style="width: 5rem" />
               </div>
             </div>
-            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">موضوع افتراضي (اختياري — قيمة افتراضية للتطبيق عند التوليد؛ ليست من متغيرات القالب <code>{{…}}</code>)</label>
-            <textarea id="clp-d-topic" rows="2" style="width: 100%"></textarea>
-            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">الجمهور المستهدف (افتراضي التطبيق؛ ليس متغير قالب)</label>
+            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">الجمهور المستهدف (افتراضي التطبيق — في القالب: <code>{{audience}}</code> أو <code>{{targetAudience}}</code>)</label>
             <select id="clp-audience" style="width: 100%; max-width: 22rem"></select>
           </div>
         </details>
@@ -207,9 +205,9 @@
         <h4 class="muted" style="margin: 0.85rem 0 0.35rem; font-size: 0.92rem">قالب البرومبت</h4>
         <textarea id="clp-prompt-template" rows="18" style="width: 100%; font-family: ui-monospace, monospace; font-size: 0.72rem; line-height: 1.35" spellcheck="false"></textarea>
         <p class="muted" style="margin: 0.4rem 0 0; font-size: 0.72rem; line-height: 1.45">
-          <strong style="font-weight: 600">متغيرات مدعومة (٨ — استبدال مباشر فقط؛ بلا بلوكات مخفية):</strong>
+          <strong style="font-weight: 600">متغيرات مدعومة (استبدال مباشر فقط؛ بلا بلوكات مخفية):</strong>
           <code>{{learningIntent}}</code> <code>{{nSec}}</code> <code>{{qSame}}</code> <code>{{ansSec}}</code> <code>{{studySec}}</code>
-          <code>{{minSentences}}</code> <code>{{maxSentences}}</code> <code>{{jsonExample}}</code>
+          <code>{{minSentences}}</code> <code>{{maxSentences}}</code> <code>{{jsonExample}}</code> <code>{{audience}}</code> <code>{{targetAudience}}</code>
         </p>
       </div>
 
@@ -328,7 +326,6 @@
           document.getElementById("clp-d-studysec").value = nv(d.studySec, 60);
           document.getElementById("clp-d-minsent").value = nv(d.minSentences, 1);
           document.getElementById("clp-d-maxsent").value = nv(d.maxSentences, 6);
-          document.getElementById("clp-d-topic").value = d.topic != null ? String(d.topic) : "";
           var pt = document.getElementById("clp-prompt-template");
           if (pt) pt.value = resolved.promptTemplate != null ? String(resolved.promptTemplate) : "";
           clpPopulateAudienceSelect(resolved.audienceOptions, d.audience);
@@ -349,7 +346,6 @@
               studySec: nv("clp-d-studysec", 60),
               minSentences: nv("clp-d-minsent", 1),
               maxSentences: nv("clp-d-maxsent", 6),
-              topic: document.getElementById("clp-d-topic").value.trim(),
               audience: document.getElementById("clp-audience").value.trim(),
             },
           };
@@ -375,7 +371,6 @@
               studySec: nv("clp-d-studysec", 60),
               minSentences: nv("clp-d-minsent", 1),
               maxSentences: nv("clp-d-maxsent", 6),
-              topic: document.getElementById("clp-d-topic").value.trim(),
               audience: document.getElementById("clp-audience").value.trim(),
             },
           };
@@ -410,7 +405,6 @@
             "clp-d-studysec",
             "clp-d-minsent",
             "clp-d-maxsent",
-            "clp-d-topic",
             "clp-audience",
           ];
           ids.forEach(function (id) {

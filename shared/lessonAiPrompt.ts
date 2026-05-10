@@ -29,6 +29,9 @@ export const LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS = [
   "minSentences",
   "maxSentences",
   "jsonExample",
+  /** نفس قيمة مستوى الجمهور في الإعدادات؛ الاسمان للتوافق مع القوالب */
+  "audience",
+  "targetAudience",
 ] as const;
 
 export type LessonAiPromptTemplateKey = (typeof LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS)[number];
@@ -43,7 +46,6 @@ export const LESSON_AI_PROMPT_LEGACY_PLACEHOLDER_NAMES = [
   "paramsAndTopic",
   "strictJsonRules",
   "topic",
-  "audience",
   "defaultAnswerMs",
   "studyPhaseMs",
 ] as const;
@@ -112,6 +114,7 @@ export function buildLessonAiPromptVariableMap(
   extras: { learningIntent?: string },
 ): Record<string, string> {
   const learningIntent = String(extras.learningIntent ?? "").trim();
+  const audience = String(p.audience ?? "").trim();
   return {
     learningIntent,
     nSec: String(p.nSec),
@@ -121,6 +124,8 @@ export function buildLessonAiPromptVariableMap(
     minSentences: String(p.minSentences),
     maxSentences: String(p.maxSentences),
     jsonExample: buildLessonAiPromptJsonExample(p),
+    audience,
+    targetAudience: audience,
   };
 }
 
