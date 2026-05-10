@@ -1668,12 +1668,12 @@ function render(): void {
     const rows = savedLessonsRows
       .map(
         (row) => `
-        <button type="button" class="app-card rounded-xl border border-slate-600/45 p-2 flex flex-col gap-1.5 text-right min-h-0 w-full touch-manipulation ssl-open-detail transition active:scale-[0.98]" data-id="${escapeHtml(row.id)}" aria-label="فتح ${escapeHtml(row.title)}">
-          <div class="flex flex-col items-center gap-1 pb-2 border-b border-slate-700/45 shrink-0 pointer-events-none">
-            <span class="text-4xl leading-none select-none" aria-hidden="true">${savedLessonLibraryIconDisplay(row.libraryIcon)}</span>
-            <span class="font-bold text-amber-200 text-xs text-center leading-snug line-clamp-3 w-full">${escapeHtml(row.title)}</span>
-          </div>
-          <p class="text-slate-400 text-[10px] leading-snug m-0 text-center pointer-events-none">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</p>
+        <button type="button" class="app-card rounded-lg border border-slate-600/40 flex flex-row items-center gap-2.5 p-2 min-h-0 w-full text-right touch-manipulation ssl-open-detail transition active:scale-[0.98] hover:border-amber-700/35" data-id="${escapeHtml(row.id)}" aria-label="فتح ${escapeHtml(row.title)}">
+          <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-slate-800/55 border border-slate-600/30 text-2xl leading-none select-none pointer-events-none" aria-hidden="true">${savedLessonLibraryIconDisplay(row.libraryIcon)}</span>
+          <span class="flex min-h-0 min-w-0 flex-1 flex-col items-stretch justify-center gap-0.5 pointer-events-none text-right">
+            <span class="font-semibold text-amber-200 text-[11px] leading-snug line-clamp-2">${escapeHtml(row.title)}</span>
+            <span class="text-slate-500 text-[9px] leading-tight line-clamp-1">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</span>
+          </span>
         </button>`,
       )
       .join("");
@@ -1692,7 +1692,7 @@ function render(): void {
               ? `<p class="text-slate-500 text-sm m-0">لا توجد دروس محفوظة بعد.</p>`
               : ""
           }
-          <div class="grid grid-cols-2 gap-2 flex-1 overflow-y-auto min-h-0 auto-rows-fr">${rows}</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 content-start items-start flex-1 overflow-y-auto min-h-0">${rows}</div>
         </div>
       `),
     );
