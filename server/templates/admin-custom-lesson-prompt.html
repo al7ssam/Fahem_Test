@@ -211,9 +211,9 @@
                 <input type="number" id="clp-d-maxsent" min="1" max="20" style="width: 5rem" />
               </div>
             </div>
-            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">موضوع افتراضي (اختياري — يُمرَّر إلى <code>{{topic}}</code>)</label>
+            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">موضوع افتراضي (اختياري — قيمة افتراضية للتطبيق عند التوليد؛ ليست من متغيرات القالب <code>{{…}}</code>)</label>
             <textarea id="clp-d-topic" rows="2" style="width: 100%"></textarea>
-            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">الجمهور (يُمرَّر إلى <code>{{audience}}</code>)</label>
+            <label class="muted" style="display: block; margin: 0.45rem 0 0.15rem; font-size: 0.82rem">الجمهور المستهدف (افتراضي التطبيق؛ ليس متغير قالب)</label>
             <select id="clp-audience" style="width: 100%; max-width: 22rem"></select>
           </div>
         </details>
@@ -224,11 +224,9 @@
         <h4 class="muted" style="margin: 0.85rem 0 0.35rem; font-size: 0.92rem">قالب البرومبت</h4>
         <textarea id="clp-prompt-template" rows="18" style="width: 100%; font-family: ui-monospace, monospace; font-size: 0.72rem; line-height: 1.35" spellcheck="false"></textarea>
         <p class="muted" style="margin: 0.4rem 0 0; font-size: 0.72rem; line-height: 1.45">
-          <strong style="font-weight: 600">متغيرات مدعومة (استبدال مباشر فقط — بلا بلوكات مخفية):</strong>
-          <code>{{learningIntent}}</code> <code>{{topic}}</code> <code>{{audience}}</code>
-          <code>{{nSec}}</code> <code>{{qSame}}</code> <code>{{ansSec}}</code> <code>{{studySec}}</code>
-          <code>{{minSentences}}</code> <code>{{maxSentences}}</code>
-          <code>{{defaultAnswerMs}}</code> <code>{{studyPhaseMs}}</code> <code>{{jsonExample}}</code>
+          <strong style="font-weight: 600">متغيرات مدعومة (٨ — استبدال مباشر فقط؛ بلا بلوكات مخفية):</strong>
+          <code>{{learningIntent}}</code> <code>{{nSec}}</code> <code>{{qSame}}</code> <code>{{ansSec}}</code> <code>{{studySec}}</code>
+          <code>{{minSentences}}</code> <code>{{maxSentences}}</code> <code>{{jsonExample}}</code>
         </p>
       </div>
 

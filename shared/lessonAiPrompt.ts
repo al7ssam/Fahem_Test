@@ -19,25 +19,21 @@ export type LessonAiPromptParams = {
 
 export type ClampedLessonAiPromptParams = ReturnType<typeof clampLessonPromptParams>;
 
-/** متغيرات مدعومة رسمياً — كلها قيم مباشرة أو {{jsonExample}} المُولَّد من شكل JSON فقط. */
+/** متغيرات مدعومة رسمياً — قيم مباشرة + {{jsonExample}} فقط (نهج يعتمد على نية التعلّم). */
 export const LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS = [
   "learningIntent",
-  "topic",
-  "audience",
   "nSec",
   "qSame",
   "ansSec",
   "studySec",
   "minSentences",
   "maxSentences",
-  "defaultAnswerMs",
-  "studyPhaseMs",
   "jsonExample",
 ] as const;
 
 export type LessonAiPromptTemplateKey = (typeof LESSON_AI_PROMPT_TEMPLATE_VARIABLE_KEYS)[number];
 
-/** أسماء placeholders القديمة (بلوكات مخفية) — إن وُجدت في قالب مخزَّن يُنصح بالرجوع للقالب الافتراضي الجديد عند الدمج. */
+/** أسماء placeholders لم تعد تُستبدل — إن وُجدت في قالب مخزَّن يُستخدم القالب الافتراضي الجديد عند الدمج. */
 export const LESSON_AI_PROMPT_LEGACY_PLACEHOLDER_NAMES = [
   "learningIntentSection",
   "topicBlock",
@@ -46,6 +42,10 @@ export const LESSON_AI_PROMPT_LEGACY_PLACEHOLDER_NAMES = [
   "structureAndItems",
   "paramsAndTopic",
   "strictJsonRules",
+  "topic",
+  "audience",
+  "defaultAnswerMs",
+  "studyPhaseMs",
 ] as const;
 
 export function lessonAiPromptTemplateContainsLegacyPlaceholders(template: string): boolean {
@@ -112,21 +112,15 @@ export function buildLessonAiPromptVariableMap(
   p: ClampedLessonAiPromptParams,
   extras: { learningIntent?: string },
 ): Record<string, string> {
-  const defaultAnswerMs = Math.round(p.ansSec * 1000);
-  const studyPhaseMsUnified = Math.round(p.studySec * 1000);
   const learningIntent = String(extras.learningIntent ?? "").trim();
   return {
     learningIntent,
-    topic: p.topic,
-    audience: p.audience,
     nSec: String(p.nSec),
     qSame: String(p.qSame),
     ansSec: String(p.ansSec),
     studySec: String(p.studySec),
     minSentences: String(p.minSentences),
     maxSentences: String(p.maxSentences),
-    defaultAnswerMs: String(defaultAnswerMs),
-    studyPhaseMs: String(studyPhaseMsUnified),
     jsonExample: buildLessonAiPromptJsonExample(p),
   };
 }
@@ -174,10 +168,10 @@ export const DEFAULT_LESSON_AI_PROMPT_TEMPLATE =
   "— lesson: title (نص غير فارغ)، slug (نص أو null)، description (نص أو null)، defaultAnswerMs (عدد صحيح بالمللي ثانية بين 3000 و120000)، sortOrder (عدد صحيح ≥0، يُفضّل 0).\n" +
   "— sections: مصفوفة طولها بالضبط {{nSec}}؛ كل عنصر: titleAr (نص أو null)، studyPhaseMs (عدد صحيح بالمللي ثانية)، items (مصفوفة أسئلة).\n" +
   "لا تُضمّن lessonCategoryId ولا أي حقل لتصنيف الدرس في JSON.\n\n" +
-  "جميع الأقسام الـ {{nSec}}: لكل قسم items بعدد موحّد {{qSame}} سؤالاً، وstudyPhaseMs = {{studyPhaseMs}} (مللي ثانية) لكل قسم.\n\n" +
+  "جميع الأقسام الـ {{nSec}}: لكل قسم items بعدد موحّد {{qSame}} سؤالاً. زمن مذاكرة كل قسم مطلوب بالثواني: {{studySec}} ثانية لكل قسم — في JSON يُعبَّأ الحقل studyPhaseMs بالمللي ثانية وبما يطابق هذا الزمن تماماً كما في {{jsonExample}}.\n\n" +
   "كل سؤال داخل items يجب أن يحتوي:\n" +
   "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (عدد صحيح حسب طول options أعلاه)، difficulty: easy أو medium أو hard، studyBody (نص غير فارغ)، answerMs اختياري (عدد أو null)، subcategoryKey اختياري (نص مثل general_default).\n" +
-  "قائمة تحقق قبل الإرسال: طول sections = {{nSec}}؛ طول items في كل قسم = {{qSame}}؛ defaultAnswerMs في lesson = {{defaultAnswerMs}}؛ studyPhaseMs في كل قسم = {{studyPhaseMs}}؛ كل options إما 2 أو 4 عناصر؛ كل studyBody غير فارغ.\n\n" +
+  "قائمة تحقق قبل الإرسال: طول sections = {{nSec}}؛ طول items في كل قسم = {{qSame}}؛ defaultAnswerMs في lesson يعادل مدة الإجابة {{ansSec}} ثانية (بالمللي ثانية كما في المثال JSON)؛ studyPhaseMs لكل قسم يعادل {{studySec}} ثانية لكل قسم؛ كل options إما 2 أو 4 عناصر؛ كل studyBody غير فارغ.\n\n" +
   "جودة المحتوى (إلزامي اتباع الروح):\n" +
   "— المشتتات: اجعل الخيارات الخاطئة من نفس المجال وتبدو معقولة لمن لم يقرأ بطاقة المذاكرة جيداً؛ تجنّب الخيارات السخيفة أو البديهية جداً.\n" +
   "— تطابق المذاكرة والاختبار: يجب أن يوفّر studyBody المفهوم أو المهارة التي تمكّن الطالب من الإجابة الصحيحة، دون تلقين الحل المباشر ودون إعادة نفس أرقام السؤال أو معادلاته أو أمثلته؛ قدّم المعلومة اللازمة كشرح مفهومي أو قاعدة عامة يستنتج منها الطالب الحل. لا تطلب معلومة خارج ما علّمته البطاقة.\n" +
@@ -187,13 +181,9 @@ export const DEFAULT_LESSON_AI_PROMPT_TEMPLATE =
   "قيود المعطيات لهذا الطلب:\n" +
   "— عدد الأقسام: {{nSec}}.\n" +
   "— عدد الأسئلة في كل قسم موحّد: {{qSame}} لكل من الأقسام الـ {{nSec}}.\n" +
-  "— defaultAnswerMs للدرس: {{defaultAnswerMs}} مللي ثانية ({{ansSec}} ثانية).\n" +
-  "— زمن مذاكرة كل قسم موحّد: studyPhaseMs = {{studyPhaseMs}} مللي ثانية ({{studySec}} ثانية) لجميع الأقسام.\n\n" +
-  "سياق الموضوع والجمهور (استخدم ما يلي إن كان غير فارغ):\n" +
-  "{{topic}}\n" +
-  "مستوى الجمهور المستهدف (إن وُجد):\n" +
-  "{{audience}}\n\n" +
-  "املأ النصوص التعليمية بالعربية المناسبة للجمهور. تأكد أن كل قسم يطابق أعداد items وstudyPhaseMs أعلاه وأن الخيارات والإجابة الصحيحة متسقة.\n\n" +
+  "— مدة الإجابة الافتراضية للدرس: {{ansSec}} ثانية (في JSON: defaultAnswerMs بالمللي ثانية كما في المثال).\n" +
+  "— زمن مذاكرة كل قسم بالثواني: {{studySec}} ثانية لكل قسم (في JSON: studyPhaseMs بالمللي ثانية كما في المثال).\n\n" +
+  "املأ النصوص التعليمية بالعربية بما يتماشى مع نية التعلّم أعلاه. تأكد أن كل قسم يطابق الأعداد والأزمنة وأن الخيارات والإجابة الصحيحة متسقة مع {{jsonExample}}.\n\n" +
   "أخرج JSON الآن.\n\n" +
   "(اختياري عند اللصق في أداة تفصل رسالة النظام عن المستخدم: ضع التعليمات أعلاه في رسالة المستخدم، وصفّ دور النموذج في رسالة النظام كمُنشئ JSON عربي لتطبيق تعليمي دون تعليق خارج JSON.)";
 
