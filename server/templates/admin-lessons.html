@@ -286,14 +286,18 @@
             <select id="new-q-correct" aria-label="فهرس الإجابة الصحيحة"></select>
           </div>
           <div class="create-q-extra">
-              <div class="row" style="margin-top:.35rem">
-                <label class="muted">الصعوبة</label>
-                <select id="new-q-diff">
-                  <option value="easy">سهل</option>
-                  <option value="medium" selected>متوسط</option>
-                  <option value="hard">صعب</option>
-                </select>
-              </div>
+              <details style="margin-top:.35rem;border:1px solid var(--border);border-radius:.5rem;padding:.35rem .5rem">
+                <summary class="muted" style="cursor:pointer;font-size:.82rem">صعوبة السجل في بنك الأسئلة (اختياري)</summary>
+                <p class="muted" style="margin:.35rem 0;font-size:.76rem;line-height:1.45">لا تؤثر على تشغيل الدرس في اللعبة؛ للتوافق مع بنك الأسئلة إذا وُجد استخدام لاحق خارج مسار الدرس. الافتراضي: متوسط.</p>
+                <div class="row" style="margin-top:.25rem">
+                  <label class="muted">الصعوبة</label>
+                  <select id="new-q-diff">
+                    <option value="easy">سهل</option>
+                    <option value="medium" selected>متوسط</option>
+                    <option value="hard">صعب</option>
+                  </select>
+                </div>
+              </details>
               <label class="muted" style="display:block;margin-top:.35rem">بطاقة المذاكرة</label>
               <textarea id="new-q-study" rows="2" style="width:100%" placeholder="نص البطاقة (مطلوب)"></textarea>
               <div class="row" style="margin-top:.45rem">
@@ -313,13 +317,19 @@
           <div class="row" style="margin-top:.45rem">
             <label class="muted">عدد الخيارات</label>
             <select id="own-opt-count"><option value="4">4</option><option value="2">2</option></select>
-            <label class="muted">الصعوبة</label>
-            <select id="own-diff">
-              <option value="easy">سهل</option>
-              <option value="medium">متوسط</option>
-              <option value="hard">صعب</option>
-            </select>
           </div>
+          <details style="margin-top:.35rem;border:1px solid var(--border);border-radius:.5rem;padding:.35rem .5rem">
+            <summary class="muted" style="cursor:pointer;font-size:.82rem">صعوبة السجل في بنك الأسئلة (اختياري)</summary>
+            <p class="muted" style="margin:.35rem 0;font-size:.76rem;line-height:1.45">لا تؤثر على تشغيل الدرس؛ للتوافق مع البنك المشترك.</p>
+            <div class="row" style="margin-top:.25rem">
+              <label class="muted">الصعوبة</label>
+              <select id="own-diff">
+                <option value="easy">سهل</option>
+                <option value="medium">متوسط</option>
+                <option value="hard">صعب</option>
+              </select>
+            </div>
+          </details>
           <label class="muted" style="display:block;margin-top:.35rem">الخيارات</label>
           <div style="display:grid;gap:.35rem;margin:.25rem 0">
             <input id="own-o0" type="text" placeholder="خيار 1" />

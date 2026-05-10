@@ -92,7 +92,6 @@ export function buildLessonAiPromptJsonExample(p: ClampedLessonAiPromptParams): 
               prompt: "نص السؤال؟",
               options: ["خيار أ", "خيار ب", "خيار ج", "خيار د"],
               correctIndex: 0,
-              difficulty: "medium",
               studyBody: "نص بطاقة المذاكرة.",
             },
           ],
@@ -158,7 +157,7 @@ export const DEFAULT_LESSON_AI_PROMPT_TEMPLATE =
   "— جميع مفاتيح الكائنات والسلاسل النصية بين علامتي تنصيص مزدوجة ASCII (\")؛ يُمنع استخدام علامات التنصيص المفردة (') كحدود لسلسلة JSON.\n" +
   "— الأرقام (defaultAnswerMs، studyPhaseMs، correctIndex، sortOrder) يجب أن تكون أرقاماً JSON خامة بلا علامات اقتباس.\n" +
   "— correctIndex: إن كان options بطول 2 فالمسموح 0 أو 1 فقط؛ إن كان بطول 4 فالمسموح 0 أو 1 أو 2 أو 3 فقط.\n" +
-  "— difficulty نص JSON فقط واحد من الثلاثة: \"easy\" أو \"medium\" أو \"hard\" (أحرف إنجليزية صغيرة).\n" +
+  "— لا تُدرج مفتاح difficulty داخل عناصر items إلا إذا أردت صراحةً إحدى القيم easy أو medium أو hard؛ عند الغياب يُكمَل تلقائياً على الخادم ولا يُشترط التفكير في تصنيف الصعوبة.\n" +
   "— لا تلف المخرجات داخل سياج Markdown ولا تسبقها أو تلحقها بأي نص؛ لا تعليقات // ولا /* */ داخل JSON.\n" +
   "— لا فاصلة ختامية بعد آخر عنصر في {} أو []. لا تستخدم undefined أو NaN أو Infinity.\n" +
   "— slug وdescription يمكن أن تكون null أو نصاً؛ sortOrder عدد صحيح (استخدم 0 إن لم يكن لديك تفضيل).\n\n" +
@@ -170,7 +169,7 @@ export const DEFAULT_LESSON_AI_PROMPT_TEMPLATE =
   "لا تُضمّن lessonCategoryId ولا أي حقل لتصنيف الدرس في JSON.\n\n" +
   "جميع الأقسام الـ {{nSec}}: لكل قسم items بعدد موحّد {{qSame}} سؤالاً. زمن مذاكرة كل قسم مطلوب بالثواني: {{studySec}} ثانية لكل قسم — في JSON يُعبَّأ الحقل studyPhaseMs بالمللي ثانية وبما يطابق هذا الزمن تماماً كما في {{jsonExample}}.\n\n" +
   "كل سؤال داخل items يجب أن يحتوي:\n" +
-  "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (عدد صحيح حسب طول options أعلاه)، difficulty: easy أو medium أو hard، studyBody (نص غير فارغ)، answerMs اختياري (عدد أو null)، subcategoryKey اختياري (نص مثل general_default).\n" +
+  "prompt، options (مصفوفة نصوص بطول 2 أو 4 — استخدم 4 خيارات ما لم يُطلب غير ذلك)، correctIndex (عدد صحيح حسب طول options أعلاه)، studyBody (نص غير فارغ)، answerMs اختياري (عدد أو null)، subcategoryKey اختياري (نص مثل general_default). حقل difficulty اختياري وثانوي — ركّز الجهد على جودة الشرح والمشتتات وبطاقات المذاكرة.\n" +
   "قائمة تحقق قبل الإرسال: طول sections = {{nSec}}؛ طول items في كل قسم = {{qSame}}؛ defaultAnswerMs في lesson يعادل مدة الإجابة {{ansSec}} ثانية (بالمللي ثانية كما في المثال JSON)؛ studyPhaseMs لكل قسم يعادل {{studySec}} ثانية لكل قسم؛ كل options إما 2 أو 4 عناصر؛ كل studyBody غير فارغ.\n\n" +
   "جودة المحتوى (إلزامي اتباع الروح):\n" +
   "— المشتتات: اجعل الخيارات الخاطئة من نفس المجال وتبدو معقولة لمن لم يقرأ بطاقة المذاكرة جيداً؛ تجنّب الخيارات السخيفة أو البديهية جداً.\n" +
