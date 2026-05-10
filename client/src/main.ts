@@ -33,9 +33,11 @@ import {
   fetchSavedLessonsList,
   patchSavedLesson,
   postSavedLesson,
+  type SavedLessonSummary,
 } from "./savedLessonsApi";
 import {
   collectSavedLessonPayloadFromEditor,
+  readLibraryIconFromEditor,
   removeQuestionFromPayload,
   removeSectionFromPayload,
   renderSavedLessonEditorMarkup,
@@ -245,13 +247,18 @@ let customLessonMsg = "";
 let customLessonClientId = "";
 /** يظهر لصق JSON وأزرار الأدوات الخارجية بعد نسخ البرومبت (أو استعادة مسودة) */
 let customLessonShowJsonPanel = false;
-let savedLessonsRows: Array<{ id: string; title: string; expiresAt: string; updatedAt: string }> = [];
+let savedLessonsRows: SavedLessonSummary[] = [];
 let savedLessonsLoading = false;
 let savedLessonsLibraryErr = "";
 let savedLessonEditingId: string | null = null;
+/** أيقونة المكتبة للدرس قيد التعديل (من الخادم أو بعد الحفظ) */
+let savedLessonLibraryIcon: string | null = null;
 let savedLessonEditorPayload: Record<string, unknown> | null = null;
 let savedLessonEditorErr = "";
 let savedLessonEditorMsg = "";
+/** وجهة الرجوع بعد الخروج من التعلم الفردي للدرس (معاينة / مكتبة / دروس المنصة) */
+type LessonSoloPlaybackReturnTarget = "lesson_menu" | "saved_lessons_library" | "custom_lesson";
+let lessonSoloPlaybackReturnTarget: LessonSoloPlaybackReturnTarget = "lesson_menu";
 /** إعداد برومبت الدرس من الخادم (يقع إلى القيم الافتراضية في الكود عند الفشل). */
 let lessonAiPromptRemote: {
   defaults: LessonAiPromptParams;
@@ -786,6 +793,7 @@ function returnToDifficultyFromSearch(): void {
 
 function returnToHomeFromSearch(): void {
   disconnectSearchSocket();
+  lessonSoloPlaybackReturnTarget = "lesson_menu";
   phase = "name";
   nameFlowStep = "mode";
   selectedDifficultyMode = "mix";
@@ -1571,7 +1579,7 @@ function render(): void {
       }
       persistDraft();
       clearTimer();
-      beginLessonPlayback(customLessonPreviewLesson);
+      beginLessonPlayback(customLessonPreviewLesson, "custom_lesson");
       render();
     });
     app.querySelector("#cl-save-lib")?.addEventListener("click", async () => {
@@ -1657,10 +1665,13 @@ function render(): void {
     const rows = savedLessonsRows
       .map(
         (row) => `
-        <div class="app-card p-2.5 space-y-1.5 text-right">
-          <div class="font-bold text-amber-200 text-sm leading-snug">${escapeHtml(row.title)}</div>
-          <p class="text-slate-400 text-[11px] leading-snug m-0">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</p>
-          <div class="flex flex-col gap-1.5 pt-0.5">
+        <div class="app-card rounded-xl border border-slate-600/45 p-2 flex flex-col gap-1.5 text-right min-h-0">
+          <div class="flex flex-col items-center gap-1 pb-2 border-b border-slate-700/45 shrink-0">
+            <span class="text-4xl leading-none select-none" aria-hidden="true">${savedLessonLibraryIconDisplay(row.libraryIcon)}</span>
+            <span class="font-bold text-amber-200 text-xs text-center leading-snug line-clamp-3 w-full">${escapeHtml(row.title)}</span>
+          </div>
+          <p class="text-slate-400 text-[10px] leading-snug m-0 text-center">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</p>
+          <div class="flex flex-col gap-1.5 mt-auto pt-0.5">
             <button type="button" class="ui-btn ui-btn--primary w-full py-1.5 px-2 text-xs min-h-[36px] ssl-play" data-id="${escapeHtml(row.id)}">التعلم الفردي</button>
             <button type="button" class="ui-btn ui-btn--ghost w-full py-1.5 px-2 text-xs min-h-[36px] ssl-private" data-id="${escapeHtml(row.id)}">غرفة خاصة</button>
             <button type="button" class="ui-btn ui-btn--ghost w-full py-1.5 px-2 text-xs min-h-[36px] ssl-edit" data-id="${escapeHtml(row.id)}">تعديل</button>
@@ -1684,7 +1695,7 @@ function render(): void {
               ? `<p class="text-slate-500 text-sm m-0">لا توجد دروس محفوظة بعد.</p>`
               : ""
           }
-          <div class="flex flex-col gap-2 flex-1 overflow-y-auto min-h-0">${rows}</div>
+          <div class="grid grid-cols-2 gap-2 flex-1 overflow-y-auto min-h-0 auto-rows-fr">${rows}</div>
         </div>
       `),
     );
@@ -1721,7 +1732,7 @@ function render(): void {
             return;
           }
           clearTimer();
-          beginLessonPlayback(data.lesson);
+          beginLessonPlayback(data.lesson, "saved_lessons_library");
           render();
         } catch {
           savedLessonsLibraryErr = "تعذر الاتصال بالخادم.";
@@ -1743,6 +1754,9 @@ function render(): void {
         }
         savedLessonEditingId = id;
         savedLessonEditorPayload = payload;
+        const rawIcon = det.lesson?.libraryIcon;
+        savedLessonLibraryIcon =
+          rawIcon != null && String(rawIcon).trim() !== "" ? String(rawIcon).trim() : null;
         savedLessonEditorErr = "";
         savedLessonEditorMsg = "";
         phase = "saved_lesson_edit";
@@ -1810,11 +1824,12 @@ function render(): void {
 
   if (phase === "saved_lesson_edit") {
     if (!savedLessonEditingId || !savedLessonEditorPayload) {
+      savedLessonLibraryIcon = null;
       phase = "saved_lessons_library";
       render();
       return;
     }
-    const markup = renderSavedLessonEditorMarkup(savedLessonEditorPayload);
+    const markup = renderSavedLessonEditorMarkup(savedLessonEditorPayload, savedLessonLibraryIcon);
     app.append(
       el(`
         <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3 text-right pb-28">
@@ -1872,10 +1887,19 @@ function render(): void {
         render();
       });
     });
+    const iconInput = app.querySelector<HTMLInputElement>("#sle-library-icon");
+    app.querySelectorAll<HTMLButtonElement>(".sle-lib-icon-preset").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        const ic = btn.dataset.libIcon;
+        if (iconInput && ic != null) iconInput.value = ic;
+      });
+    });
     app.querySelector("#sle-back-lib")?.addEventListener("click", () => {
       phase = "saved_lessons_library";
       savedLessonEditingId = null;
       savedLessonEditorPayload = null;
+      savedLessonLibraryIcon = null;
       savedLessonEditorErr = "";
       savedLessonEditorMsg = "";
       void (async () => {
@@ -1898,13 +1922,18 @@ function render(): void {
         render();
         return;
       }
-      const r = await patchSavedLesson(savedLessonEditingId, { payload: collected.payload });
+      const iconVal = readLibraryIconFromEditor(rootEl as HTMLElement);
+      const r = await patchSavedLesson(savedLessonEditingId, {
+        payload: collected.payload,
+        libraryIcon: iconVal,
+      });
       if (!r.ok) {
         savedLessonEditorErr = "تعذر حفظ التعديلات.";
         render();
         return;
       }
       savedLessonEditorPayload = collected.payload;
+      savedLessonLibraryIcon = iconVal;
       savedLessonEditorMsg = "تم حفظ التعديلات.";
       render();
     });
@@ -2219,15 +2248,17 @@ function render(): void {
         </div>
       `),
     );
-    const exit = () => {
+    const exit = (): void => {
       exitLessonPlaybackToHub();
-      void fetchLessonBrowse()
-        .then(() => {
-          render();
-        })
-        .catch(() => {
-          render();
-        });
+      if (phase === "lesson_menu") {
+        void fetchLessonBrowse()
+          .then(() => {
+            render();
+          })
+          .catch(() => {
+            render();
+          });
+      }
     };
     app.querySelector("#lesson-study-exit")?.addEventListener("click", exit);
     app.querySelector("#lesson-study-prev")?.addEventListener("click", () => {
@@ -2338,9 +2369,11 @@ function render(): void {
     }
     app.querySelector("#lesson-quiz-exit")?.addEventListener("click", () => {
       exitLessonPlaybackToHub();
-      void fetchLessonBrowse()
-        .then(() => render())
-        .catch(() => render());
+      if (phase === "lesson_menu") {
+        void fetchLessonBrowse()
+          .then(() => render())
+          .catch(() => render());
+      }
     });
     startLessonQuizTimer();
     return;
@@ -2375,7 +2408,13 @@ function render(): void {
     });
     app.querySelector("#lesson-done-end-custom")?.addEventListener("click", () => {
       clearTimer();
+      const fromSavedLibrary = lessonSoloPlaybackReturnTarget === "saved_lessons_library";
       resetLessonState();
+      lessonSoloPlaybackReturnTarget = "lesson_menu";
+      if (fromSavedLibrary) {
+        openSavedLessonsLibraryScreen();
+        return;
+      }
       customLessonPreviewLesson = null;
       customLessonValidatedBody = null;
       customLessonSessionToken = null;
@@ -3197,9 +3236,37 @@ function lessonBrowseCategoryLabel(): string {
   return "جميع الدروس";
 }
 
+function openSavedLessonsLibraryScreen(): void {
+  phase = "saved_lessons_library";
+  savedLessonsLoading = true;
+  savedLessonsRows = [];
+  savedLessonsLibraryErr = "";
+  render();
+  void fetchSavedLessonsList().then((r) => {
+    savedLessonsLoading = false;
+    if (r.ok) savedLessonsRows = r.lessons ?? [];
+    else savedLessonsLibraryErr = "تعذر تحميل المكتبة.";
+    render();
+  });
+}
+
 function exitLessonPlaybackToHub(): void {
   clearTimer();
   resetLessonState();
+  const target = lessonSoloPlaybackReturnTarget;
+  lessonSoloPlaybackReturnTarget = "lesson_menu";
+
+  if (target === "saved_lessons_library") {
+    openSavedLessonsLibraryScreen();
+    return;
+  }
+
+  if (target === "custom_lesson") {
+    phase = "custom_lesson";
+    render();
+    return;
+  }
+
   lessonBrowseStep = "lesson_hub";
   phase = "lesson_menu";
 }
@@ -3218,7 +3285,13 @@ async function fetchLessonBrowse(): Promise<void> {
   lessonBrowseLessons = lJson.lessons ?? [];
 }
 
-function beginLessonPlayback(data: LessonPlaybackPayload): void {
+function beginLessonPlayback(
+  data: LessonPlaybackPayload,
+  returnTarget?: LessonSoloPlaybackReturnTarget,
+): void {
+  if (returnTarget !== undefined) {
+    lessonSoloPlaybackReturnTarget = returnTarget;
+  }
   resetLessonState();
   lessonPlayback = data;
   lessonSectionIdx = 0;
@@ -3312,7 +3385,7 @@ async function openLessonById(id: number): Promise<void> {
       return;
     }
     lessonBrowseMsg = "";
-    beginLessonPlayback(data.lesson);
+    beginLessonPlayback(data.lesson, "lesson_menu");
     render();
   } catch {
     lessonBrowseMsg = "تعذر تحميل الدرس.";
@@ -3357,6 +3430,12 @@ function savedLessonExpiryCaption(expiresAtIso: string): string {
   if (n === 1) return "سيتم حذفه بعد يوم واحد.";
   if (n === 2) return "سيتم حذفه بعد يومين.";
   return `سيتم حذفه بعد ${n} أيام.`;
+}
+
+/** إيموجي المكتبة للعرض؛ الفراغ يُعرَض كتاباً افتراضياً */
+function savedLessonLibraryIconDisplay(icon: string | null | undefined): string {
+  const s = icon?.trim();
+  return s && s.length > 0 ? escapeHtml(s) : "📖";
 }
 
 function escapeHtml(s: string): string {
@@ -5004,7 +5083,7 @@ if (lessonPreviewBoot === "1") {
       sessionStorage.removeItem(FAHEM_ADMIN_LESSON_PREVIEW_KEY);
       const payload = JSON.parse(raw) as LessonPlaybackPayload;
       if (payload && typeof payload === "object" && Array.isArray(payload.steps) && payload.steps.length > 0) {
-        beginLessonPlayback(payload);
+        beginLessonPlayback(payload, "lesson_menu");
         history.replaceState({}, "", window.location.pathname + window.location.hash);
         render();
       } else {

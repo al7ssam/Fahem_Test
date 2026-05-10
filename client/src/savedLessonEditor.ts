@@ -4,6 +4,35 @@ function escapeEditorHtml(s: string): string {
   });
 }
 
+/** إيموجي جاهزة لعرض المكتبة (زر واحد = إدراج في الحقل) */
+const LIBRARY_ICON_PRESETS = [
+  "📖",
+  "📚",
+  "📕",
+  "📗",
+  "📘",
+  "📙",
+  "📓",
+  "✏️",
+  "🎓",
+  "🔬",
+  "💡",
+  "🎯",
+  "⭐",
+  "📝",
+  "🧪",
+  "📊",
+] as const;
+
+export function readLibraryIconFromEditor(root: HTMLElement): string | null {
+  const raw = (root.querySelector<HTMLInputElement>("#sle-library-icon")?.value ?? "").trim();
+  if (!raw) return null;
+  return Array.from(raw)
+    .slice(0, 32)
+    .join("")
+    .trim();
+}
+
 function readNum(el: HTMLInputElement | null, fallback: number, min: number, max: number): number {
   if (!el) return fallback;
   const v = parseFloat(el.value);
@@ -67,7 +96,10 @@ export function removeQuestionFromPayload(
 }
 
 /** واجهة مبسطة للجوال: حقول تطابق بنية الاستيراد للدرس المخصص */
-export function renderSavedLessonEditorMarkup(payload: Record<string, unknown>): string {
+export function renderSavedLessonEditorMarkup(
+  payload: Record<string, unknown>,
+  libraryIcon: string | null,
+): string {
   const lesson = (payload.lesson ?? {}) as Record<string, unknown>;
   const sections = Array.isArray(payload.sections) ? payload.sections : [];
   const title = String(lesson.title ?? "");
@@ -75,6 +107,22 @@ export function renderSavedLessonEditorMarkup(payload: Record<string, unknown>):
   const slugStored =
     lesson.slug != null && String(lesson.slug).trim() !== "" ? String(lesson.slug).trim() : "";
   const descVal = lesson.description != null ? String(lesson.description) : "";
+  const iconInputVal = libraryIcon != null && String(libraryIcon).trim() !== "" ? String(libraryIcon).trim() : "";
+
+  const iconPicker = `
+    <div class="space-y-2 border border-amber-800/35 rounded-lg p-3 bg-amber-950/15">
+      <span class="text-amber-200 text-sm font-bold">أيقونة المكتبة</span>
+      <p class="text-[10px] text-slate-500 m-0 leading-snug">تظهر في «مكتبة دروسي». اترك الحقل فارغاً لاستخدام 📖.</p>
+      <div class="flex flex-wrap gap-1.5 justify-center">
+        ${LIBRARY_ICON_PRESETS.map(
+          (ic) =>
+            `<button type="button" class="sle-lib-icon-preset touch-manipulation min-h-[44px] min-w-[44px] flex items-center justify-center text-2xl rounded-lg border border-slate-600/50 bg-slate-900/45 active:bg-slate-800/80" data-lib-icon="${escapeEditorHtml(ic)}" aria-label="اختيار الأيقونة">${ic}</button>`,
+        ).join("")}
+      </div>
+      <label class="block text-xs text-slate-400">أو الصق إيموجي مخصّصاً</label>
+      <input type="text" id="sle-library-icon" maxlength="32" class="app-input w-full px-2 py-2 text-center text-2xl min-h-[48px]" placeholder="📖" value="${escapeEditorHtml(iconInputVal)}" dir="ltr" autocomplete="off" inputmode="text" />
+    </div>
+  `;
 
   const lessonFields = `
     <div class="space-y-2 border border-slate-600/50 rounded-lg p-3">
@@ -165,6 +213,7 @@ export function renderSavedLessonEditorMarkup(payload: Record<string, unknown>):
 
   return `
     <div id="sle-editor-root" class="space-y-3">
+      ${iconPicker}
       ${lessonFields}
       <div class="space-y-2">${sectionBlocks.join("")}</div>
     </div>

@@ -3,6 +3,8 @@ import { apiFetch } from "./auth/apiClient";
 export type SavedLessonSummary = {
   id: string;
   title: string;
+  /** إيموجي المكتبة؛ غائب أو فارغ يُعرَض كتاب افتراضياً */
+  libraryIcon?: string | null;
   expiresAt: string;
   updatedAt: string;
 };
@@ -12,6 +14,7 @@ export type SavedLessonDetailResponse = {
   lesson?: {
     id: string;
     title: string;
+    libraryIcon?: string | null;
     payload: Record<string, unknown>;
     expiresAt: string;
     createdAt: string;
@@ -65,7 +68,7 @@ export async function postSavedLesson(payload: Record<string, unknown>): Promise
 
 export async function patchSavedLesson(
   id: string,
-  body: { title?: string; payload?: Record<string, unknown> },
+  body: { title?: string; payload?: Record<string, unknown>; libraryIcon?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
   const res = await apiFetch(`/api/me/saved-lessons/${encodeURIComponent(id)}`, {
     method: "PATCH",

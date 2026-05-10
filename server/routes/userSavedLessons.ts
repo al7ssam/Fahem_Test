@@ -32,13 +32,18 @@ function verifyAdmin(req: Request, res: Response): boolean {
 
 const uuidParamSchema = z.string().uuid();
 
+const createSavedLessonBodySchema = lessonImportBodySchema.extend({
+  libraryIcon: z.string().trim().max(32).optional(),
+});
+
 const patchBodySchema = z
   .object({
     title: z.string().trim().min(1).max(300).optional(),
     payload: lessonImportBodySchema.optional(),
+    libraryIcon: z.union([z.string().trim().max(32), z.literal("")]).optional(),
   })
-  .refine((d) => d.title !== undefined || d.payload !== undefined, {
-    message: "title_or_payload_required",
+  .refine((d) => d.title !== undefined || d.payload !== undefined || d.libraryIcon !== undefined, {
+    message: "at_least_one_field",
   });
 
 export function registerUserSavedLessonsRoutes(app: Express): void {
@@ -73,7 +78,7 @@ export function registerUserSavedLessonsRoutes(app: Express): void {
 
   app.post("/api/me/saved-lessons", requireAuth, async (req: Request, res: Response) => {
     const userId = req.auth!.userId;
-    const parsed = lessonImportBodySchema.safeParse(req.body ?? {});
+    const parsed = createSavedLessonBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: "invalid_body", issues: parsed.error.flatten() });
       return;
@@ -88,18 +93,22 @@ export function registerUserSavedLessonsRoutes(app: Express): void {
         res.status(409).json({ ok: false, error: "max_lessons_reached", max: policy.maxLessonsPerUser });
         return;
       }
-      const title = parsed.data.lesson.title.trim();
+      const d = parsed.data;
+      const title = d.lesson.title.trim();
+      const payloadBody = { lesson: d.lesson, sections: d.sections };
       const row = await insertSavedLesson(pool, {
         userId,
         title,
-        payload: parsed.data,
+        payload: payloadBody,
         retentionDays: policy.retentionDays,
+        libraryIcon: d.libraryIcon,
       });
       res.status(201).json({
         ok: true,
         lesson: {
           id: row.id,
           title: row.title,
+          libraryIcon: row.libraryIcon,
           payload: row.payload,
           expiresAt: row.expiresAt,
           createdAt: row.createdAt,
@@ -131,6 +140,7 @@ export function registerUserSavedLessonsRoutes(app: Express): void {
         lesson: {
           id: row.id,
           title: row.title,
+          libraryIcon: row.libraryIcon,
           payload: row.payload,
           expiresAt: row.expiresAt,
           createdAt: row.createdAt,
@@ -181,6 +191,13 @@ export function registerUserSavedLessonsRoutes(app: Express): void {
         res.status(400).json({ ok: false, error: "invalid_title" });
         return;
       }
+      let iconFinal: string | null;
+      if (bodyParsed.data.libraryIcon !== undefined) {
+        const t = bodyParsed.data.libraryIcon.trim();
+        iconFinal = t === "" ? null : t.slice(0, 32);
+      } else {
+        iconFinal = existing.libraryIcon ?? null;
+      }
       const storedPolicy = await getUserSavedLessonsPolicyStored(pool);
       const policy = mergeUserSavedLessonsPolicy(storedPolicy);
       const updated = await updateSavedLesson(pool, {
@@ -189,6 +206,7 @@ export function registerUserSavedLessonsRoutes(app: Express): void {
         title: titleCheck.data,
         payload: payloadFinal,
         retentionDays: policy.retentionDays,
+        libraryIcon: iconFinal,
       });
       if (!updated) {
         res.status(404).json({ ok: false, error: "not_found" });
@@ -199,6 +217,7 @@ export function registerUserSavedLessonsRoutes(app: Express): void {
         lesson: {
           id: updated.id,
           title: updated.title,
+          libraryIcon: updated.libraryIcon,
           payload: updated.payload,
           expiresAt: updated.expiresAt,
           createdAt: updated.createdAt,
