@@ -54,6 +54,7 @@ type Phase =
   | "name"
   | "custom_lesson"
   | "saved_lessons_library"
+  | "saved_lesson_detail"
   | "saved_lesson_edit"
   | "lesson_menu"
   | "lesson_study"
@@ -253,6 +254,8 @@ let savedLessonsLibraryErr = "";
 let savedLessonEditingId: string | null = null;
 /** أيقونة المكتبة للدرس قيد التعديل (من الخادم أو بعد الحفظ) */
 let savedLessonLibraryIcon: string | null = null;
+/** الدرس المفتوح من المكتبة (صفحة التفاصيل بالأزرار) */
+let savedLessonDetailId: string | null = null;
 let savedLessonEditorPayload: Record<string, unknown> | null = null;
 let savedLessonEditorErr = "";
 let savedLessonEditorMsg = "";
@@ -1665,19 +1668,13 @@ function render(): void {
     const rows = savedLessonsRows
       .map(
         (row) => `
-        <div class="app-card rounded-xl border border-slate-600/45 p-2 flex flex-col gap-1.5 text-right min-h-0">
-          <div class="flex flex-col items-center gap-1 pb-2 border-b border-slate-700/45 shrink-0">
+        <button type="button" class="app-card rounded-xl border border-slate-600/45 p-2 flex flex-col gap-1.5 text-right min-h-0 w-full touch-manipulation ssl-open-detail transition active:scale-[0.98]" data-id="${escapeHtml(row.id)}" aria-label="فتح ${escapeHtml(row.title)}">
+          <div class="flex flex-col items-center gap-1 pb-2 border-b border-slate-700/45 shrink-0 pointer-events-none">
             <span class="text-4xl leading-none select-none" aria-hidden="true">${savedLessonLibraryIconDisplay(row.libraryIcon)}</span>
             <span class="font-bold text-amber-200 text-xs text-center leading-snug line-clamp-3 w-full">${escapeHtml(row.title)}</span>
           </div>
-          <p class="text-slate-400 text-[10px] leading-snug m-0 text-center">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</p>
-          <div class="flex flex-col gap-1.5 mt-auto pt-0.5">
-            <button type="button" class="ui-btn ui-btn--primary w-full py-1.5 px-2 text-xs min-h-[36px] ssl-play" data-id="${escapeHtml(row.id)}">التعلم الفردي</button>
-            <button type="button" class="ui-btn ui-btn--ghost w-full py-1.5 px-2 text-xs min-h-[36px] ssl-private" data-id="${escapeHtml(row.id)}">غرفة خاصة</button>
-            <button type="button" class="ui-btn ui-btn--ghost w-full py-1.5 px-2 text-xs min-h-[36px] ssl-edit" data-id="${escapeHtml(row.id)}">تعديل</button>
-            <button type="button" class="ui-btn ui-btn--ghost w-full py-1.5 px-2 text-xs min-h-[36px] text-red-300 ssl-del" data-id="${escapeHtml(row.id)}">حذف</button>
-          </div>
-        </div>`,
+          <p class="text-slate-400 text-[10px] leading-snug m-0 text-center pointer-events-none">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</p>
+        </button>`,
       )
       .join("");
     app.append(
@@ -1687,7 +1684,7 @@ function render(): void {
             <button type="button" id="ssl-back-custom" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">درس مخصص</button>
             <h1 class="text-xl font-extrabold text-amber-300 m-0">مكتبة دروسي</h1>
           </div>
-          <p class="text-slate-400 text-sm m-0">دروسك المحفوظة في حسابك بعد تسجيل الدخول.</p>
+          <p class="text-slate-400 text-sm m-0">دروسك المحفوظة في حسابك بعد تسجيل الدخول. اضغط على درس لعرض الخيارات.</p>
           ${savedLessonsLoading ? `<p class="text-slate-400 text-sm m-0">جاري التحميل…</p>` : ""}
           ${savedLessonsLibraryErr ? `<p class="text-red-400 text-sm m-0">${escapeHtml(savedLessonsLibraryErr)}</p>` : ""}
           ${
@@ -1703,128 +1700,177 @@ function render(): void {
       phase = "custom_lesson";
       render();
     });
-    for (const btn of app.querySelectorAll<HTMLButtonElement>(".ssl-play")) {
-      btn.addEventListener("click", async () => {
+    for (const btn of app.querySelectorAll<HTMLButtonElement>(".ssl-open-detail")) {
+      btn.addEventListener("click", () => {
         const id = btn.dataset.id;
         if (!id) return;
+        savedLessonDetailId = id;
         savedLessonsLibraryErr = "";
-        const det = await fetchSavedLessonDetail(id);
-        const payload = det.lesson?.payload as Record<string, unknown> | undefined;
-        if (!payload) {
-          savedLessonsLibraryErr = "تعذر تحميل الدرس.";
-          render();
-          return;
-        }
-        try {
-          const res = await fetch("/api/custom-lessons/preview", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          const data = (await res.json()) as {
-            ok?: boolean;
-            lesson?: LessonPlaybackPayload;
-            error?: string;
-          };
-          if (!res.ok || !data.ok || !data.lesson) {
-            savedLessonsLibraryErr = data.error || "تعذر تشغيل الدرس.";
-            render();
-            return;
-          }
-          clearTimer();
-          beginLessonPlayback(data.lesson, "saved_lessons_library");
-          render();
-        } catch {
-          savedLessonsLibraryErr = "تعذر الاتصال بالخادم.";
-          render();
-        }
-      });
-    }
-    for (const btn of app.querySelectorAll<HTMLButtonElement>(".ssl-edit")) {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.id;
-        if (!id) return;
-        savedLessonsLibraryErr = "";
-        const det = await fetchSavedLessonDetail(id);
-        const payload = det.lesson?.payload as Record<string, unknown> | undefined;
-        if (!payload) {
-          savedLessonsLibraryErr = "تعذر تحميل الدرس للتعديل.";
-          render();
-          return;
-        }
-        savedLessonEditingId = id;
-        savedLessonEditorPayload = payload;
-        const rawIcon = det.lesson?.libraryIcon;
-        savedLessonLibraryIcon =
-          rawIcon != null && String(rawIcon).trim() !== "" ? String(rawIcon).trim() : null;
-        savedLessonEditorErr = "";
-        savedLessonEditorMsg = "";
-        phase = "saved_lesson_edit";
-        render();
-      });
-    }
-    for (const btn of app.querySelectorAll<HTMLButtonElement>(".ssl-private")) {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.id;
-        if (!id) return;
-        savedLessonsLibraryErr = "";
-        const det = await fetchSavedLessonDetail(id);
-        const body = det.lesson?.payload as Record<string, unknown> | undefined;
-        if (!body) {
-          savedLessonsLibraryErr = "تعذر تحميل الدرس.";
-          render();
-          return;
-        }
-        const name = getEffectivePlayerName(playerNameDraft);
-        try {
-          const res = await fetch("/api/custom-lessons/session", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          const data = (await res.json()) as { ok?: boolean; token?: string; error?: string };
-          if (!res.ok || !data.ok || !data.token) {
-            savedLessonsLibraryErr = data.error || "تعذر إنشاء جلسة الدرس.";
-            render();
-            return;
-          }
-          customLessonSessionToken = data.token;
-          storePlayerName(name);
-          playerNameDraft = name;
-          phase = "matchmaking";
-          soloLearningPending = false;
-          currentGameMode = "lesson";
-          lobbyNotice = "جاري إنشاء الغرفة الخاصة للدرس المحفوظ…";
-          render();
-          connectSocket(name, "lesson", null, "mix", "private_create", undefined, null, data.token);
-        } catch {
-          savedLessonsLibraryErr = "تعذر الاتصال بالخادم.";
-          render();
-        }
-      });
-    }
-    for (const btn of app.querySelectorAll<HTMLButtonElement>(".ssl-del")) {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.id;
-        if (!id) return;
-        if (!window.confirm("حذف هذا الدرس من المكتبة؟")) return;
-        savedLessonsLibraryErr = "";
-        const r = await deleteSavedLesson(id);
-        if (!r.ok) {
-          savedLessonsLibraryErr = "تعذر الحذف.";
-          render();
-          return;
-        }
-        savedLessonsRows = savedLessonsRows.filter((x) => x.id !== id);
+        phase = "saved_lesson_detail";
         render();
       });
     }
     return;
   }
 
+  if (phase === "saved_lesson_detail") {
+    if (!savedLessonDetailId) {
+      phase = "saved_lessons_library";
+      render();
+      return;
+    }
+    const row = savedLessonsRows.find((r) => r.id === savedLessonDetailId);
+    if (!row) {
+      savedLessonDetailId = null;
+      phase = "saved_lessons_library";
+      render();
+      return;
+    }
+    app.append(
+      el(`
+        <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-4 text-right">
+          <div class="flex items-center justify-between gap-2">
+            <button type="button" id="ssd-back" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">المكتبة</button>
+            <h1 class="text-lg font-extrabold text-amber-300 m-0 truncate max-w-[60%]">${escapeHtml(row.title)}</h1>
+          </div>
+          <div class="flex flex-col items-center gap-2 py-2 border border-slate-600/45 rounded-xl bg-slate-900/30">
+            <span class="text-6xl leading-none select-none" aria-hidden="true">${savedLessonLibraryIconDisplay(row.libraryIcon)}</span>
+            <span class="font-bold text-amber-200 text-base text-center px-2">${escapeHtml(row.title)}</span>
+            <p class="text-slate-400 text-sm m-0">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</p>
+          </div>
+          ${savedLessonsLibraryErr ? `<p class="text-red-400 text-sm m-0">${escapeHtml(savedLessonsLibraryErr)}</p>` : ""}
+          <div class="flex flex-col gap-2 pt-1">
+            <button type="button" class="ui-btn ui-btn--primary w-full py-2.5 text-sm min-h-[44px] ssl-play" data-id="${escapeHtml(row.id)}">التعلم الفردي</button>
+            <button type="button" class="ui-btn ui-btn--ghost w-full py-2.5 text-sm min-h-[44px] ssl-private" data-id="${escapeHtml(row.id)}">غرفة خاصة</button>
+            <button type="button" class="ui-btn ui-btn--ghost w-full py-2.5 text-sm min-h-[44px] ssl-edit" data-id="${escapeHtml(row.id)}">تعديل</button>
+            <button type="button" class="ui-btn ui-btn--ghost w-full py-2.5 text-sm min-h-[44px] text-red-300 ssl-del" data-id="${escapeHtml(row.id)}">حذف</button>
+          </div>
+        </div>
+      `),
+    );
+    app.querySelector("#ssd-back")?.addEventListener("click", () => {
+      savedLessonDetailId = null;
+      savedLessonsLibraryErr = "";
+      phase = "saved_lessons_library";
+      render();
+    });
+    app.querySelector(".ssl-play")?.addEventListener("click", async () => {
+      const id = savedLessonDetailId;
+      if (!id) return;
+      savedLessonsLibraryErr = "";
+      const det = await fetchSavedLessonDetail(id);
+      const payload = det.lesson?.payload as Record<string, unknown> | undefined;
+      if (!payload) {
+        savedLessonsLibraryErr = "تعذر تحميل الدرس.";
+        render();
+        return;
+      }
+      try {
+        const res = await fetch("/api/custom-lessons/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          lesson?: LessonPlaybackPayload;
+          error?: string;
+        };
+        if (!res.ok || !data.ok || !data.lesson) {
+          savedLessonsLibraryErr = data.error || "تعذر تشغيل الدرس.";
+          render();
+          return;
+        }
+        clearTimer();
+        beginLessonPlayback(data.lesson, "saved_lessons_library");
+        render();
+      } catch {
+        savedLessonsLibraryErr = "تعذر الاتصال بالخادم.";
+        render();
+      }
+    });
+    app.querySelector(".ssl-edit")?.addEventListener("click", async () => {
+      const id = savedLessonDetailId;
+      if (!id) return;
+      savedLessonsLibraryErr = "";
+      const det = await fetchSavedLessonDetail(id);
+      const payload = det.lesson?.payload as Record<string, unknown> | undefined;
+      if (!payload) {
+        savedLessonsLibraryErr = "تعذر تحميل الدرس للتعديل.";
+        render();
+        return;
+      }
+      savedLessonEditingId = id;
+      savedLessonEditorPayload = payload;
+      const rawIcon = det.lesson?.libraryIcon;
+      savedLessonLibraryIcon =
+        rawIcon != null && String(rawIcon).trim() !== "" ? String(rawIcon).trim() : null;
+      savedLessonEditorErr = "";
+      savedLessonEditorMsg = "";
+      phase = "saved_lesson_edit";
+      render();
+    });
+    app.querySelector(".ssl-private")?.addEventListener("click", async () => {
+      const id = savedLessonDetailId;
+      if (!id) return;
+      savedLessonsLibraryErr = "";
+      const det = await fetchSavedLessonDetail(id);
+      const body = det.lesson?.payload as Record<string, unknown> | undefined;
+      if (!body) {
+        savedLessonsLibraryErr = "تعذر تحميل الدرس.";
+        render();
+        return;
+      }
+      const name = getEffectivePlayerName(playerNameDraft);
+      try {
+        const res = await fetch("/api/custom-lessons/session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json()) as { ok?: boolean; token?: string; error?: string };
+        if (!res.ok || !data.ok || !data.token) {
+          savedLessonsLibraryErr = data.error || "تعذر إنشاء جلسة الدرس.";
+          render();
+          return;
+        }
+        customLessonSessionToken = data.token;
+        storePlayerName(name);
+        playerNameDraft = name;
+        phase = "matchmaking";
+        soloLearningPending = false;
+        currentGameMode = "lesson";
+        lobbyNotice = "جاري إنشاء الغرفة الخاصة للدرس المحفوظ…";
+        render();
+        connectSocket(name, "lesson", null, "mix", "private_create", undefined, null, data.token);
+      } catch {
+        savedLessonsLibraryErr = "تعذر الاتصال بالخادم.";
+        render();
+      }
+    });
+    app.querySelector(".ssl-del")?.addEventListener("click", async () => {
+      const id = savedLessonDetailId;
+      if (!id) return;
+      if (!window.confirm("حذف هذا الدرس من المكتبة؟")) return;
+      savedLessonsLibraryErr = "";
+      const r = await deleteSavedLesson(id);
+      if (!r.ok) {
+        savedLessonsLibraryErr = "تعذر الحذف.";
+        render();
+        return;
+      }
+      savedLessonsRows = savedLessonsRows.filter((x) => x.id !== id);
+      savedLessonDetailId = null;
+      phase = "saved_lessons_library";
+      render();
+    });
+    return;
+  }
+
   if (phase === "saved_lesson_edit") {
     if (!savedLessonEditingId || !savedLessonEditorPayload) {
       savedLessonLibraryIcon = null;
+      savedLessonDetailId = null;
       phase = "saved_lessons_library";
       render();
       return;
@@ -1900,6 +1946,7 @@ function render(): void {
       savedLessonEditingId = null;
       savedLessonEditorPayload = null;
       savedLessonLibraryIcon = null;
+      savedLessonDetailId = null;
       savedLessonEditorErr = "";
       savedLessonEditorMsg = "";
       void (async () => {
@@ -3238,6 +3285,7 @@ function lessonBrowseCategoryLabel(): string {
 
 function openSavedLessonsLibraryScreen(): void {
   phase = "saved_lessons_library";
+  savedLessonDetailId = null;
   savedLessonsLoading = true;
   savedLessonsRows = [];
   savedLessonsLibraryErr = "";
