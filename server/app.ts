@@ -46,6 +46,23 @@ export function createApp() {
 
   app.use(express.json({ limit: "1mb" }));
   app.use(cookieParser());
+  const jsonrepairUmdPath = path.join(
+    process.cwd(),
+    "node_modules",
+    "jsonrepair",
+    "lib",
+    "umd",
+    "jsonrepair.min.js",
+  );
+  app.get("/vendor/jsonrepair.min.js", (_req, res) => {
+    res.type("application/javascript");
+    res.sendFile(jsonrepairUmdPath);
+  });
+  const lessonPasteJsonPath = path.join(process.cwd(), "server", "static", "lessonPasteJson.js");
+  app.get("/assets/lessonPasteJson.js", (_req, res) => {
+    res.type("application/javascript");
+    res.sendFile(lessonPasteJsonPath);
+  });
   app.use(optionalAuth);
   registerAuthRoutes(app);
   registerProfileRoutes(app);

@@ -8,7 +8,7 @@ import {
   type LessonAiPromptParams,
   type BuildLessonAiPromptOptions,
 } from "./lessonPromptBuilder";
-import { normalizePastedJsonForParse } from "./jsonNormalize";
+import { parseLessonPastedJson } from "@shared/lessonJsonParse";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
@@ -1448,26 +1448,14 @@ function render(): void {
       readParamsFromDom();
       customLessonErr = "";
       customLessonMsg = "";
-      let body: Record<string, unknown>;
-      try {
-        const raw = normalizePastedJsonForParse(customLessonJsonText);
-        if (!raw) {
-          customLessonErr = "الصق JSON الدرس أولاً.";
-          persistDraft();
-          render();
-          return;
-        }
-        body = JSON.parse(raw) as Record<string, unknown>;
-      } catch (e) {
-        const detail =
-          e instanceof SyntaxError && typeof e.message === "string" && e.message.trim()
-            ? e.message.trim()
-            : "صياغة غير صالحة";
-        customLessonErr = `JSON غير صالح (${detail}).`;
+      const parsedJson = parseLessonPastedJson(customLessonJsonText);
+      if (!parsedJson.ok) {
+        customLessonErr = parsedJson.detail;
         persistDraft();
         render();
         return;
       }
+      const body = parsedJson.value as Record<string, unknown>;
       customLessonValidatedBody = null;
       customLessonPreviewLesson = null;
       customLessonSessionToken = null;

@@ -236,6 +236,8 @@
       </div>
     </div>
 
+    <script src="/vendor/jsonrepair.min.js"></script>
+    <script src="/assets/lessonPasteJson.js"></script>
     <script>
       (function () {
         var msg = document.getElementById("clp-msg");
@@ -469,16 +471,22 @@
         document.getElementById("clp-test-json-btn").onclick = async function () {
           var out = document.getElementById("clp-test-json-result");
           out.textContent = "";
-          var raw = document.getElementById("clp-test-json").value.trim();
-          if (!raw) {
+          var raw = document.getElementById("clp-test-json").value;
+          if (!String(raw || "").trim()) {
             out.textContent = "الصق JSON أولاً.";
             return;
           }
+          var parsed =
+            typeof parseLessonPastedJson === "function" ? parseLessonPastedJson(raw) : null;
+          if (!parsed || !parsed.ok) {
+            out.textContent = parsed && parsed.detail ? parsed.detail : "JSON غير صالح.";
+            out.className = "muted err";
+            return;
+          }
           try {
-            var body = JSON.parse(raw);
             var data = await api("/api/admin/lesson-ai-prompt/test-json", {
               method: "POST",
-              body: JSON.stringify(body),
+              body: JSON.stringify(parsed.value),
             });
             out.textContent = "صالح — " + data.steps + " خطوة — «" + (data.lessonTitle || "") + "»";
             out.className = "muted ok";

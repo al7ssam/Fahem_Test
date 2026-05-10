@@ -365,6 +365,8 @@
       </div>
     </div>
 
+    <script src="/vendor/jsonrepair.min.js"></script>
+    <script src="/assets/lessonPasteJson.js"></script>
     <script>
       (function () {
         const msg = document.getElementById("msg");
@@ -1147,27 +1149,20 @@
           lessonPreviewIndex = 0;
         }
 
-        function normalizePastedJsonForParse(raw) {
-          var s = String(raw == null ? "" : raw).trim();
-          if (!s) return "";
-          s = s.replace(/^\uFEFF/, "");
-          s = s.replace(/^\s*```(?:json)?\s*\r?\n?/i, "");
-          s = s.replace(/\s*```\s*$/i, "");
-          return s.trim();
-        }
-
         function parseImportJsonFromUI() {
-          const normalized = normalizePastedJsonForParse(document.getElementById("import-json-text").value);
-          if (!normalized) {
-            setMsg("الصق JSON أو اختر ملفاً.", false);
-            throw new Error("empty_json");
-          }
-          try {
-            return JSON.parse(normalized);
-          } catch (_e) {
-            setMsg("JSON غير صالح (خطأ في الصياغة).", false);
+          const raw = document.getElementById("import-json-text").value;
+          const parsed =
+            typeof parseLessonPastedJson === "function" ? parseLessonPastedJson(raw) : null;
+          if (!parsed || !parsed.ok) {
+            const detail = parsed && parsed.detail ? parsed.detail : "JSON غير صالح.";
+            if (detail === "الصق JSON الدرس أولاً.") {
+              setMsg("الصق JSON أو اختر ملفاً.", false);
+            } else {
+              setMsg(detail, false);
+            }
             throw new Error("bad_json");
           }
+          return parsed.value;
         }
 
         document.getElementById("import-json-file").addEventListener("change", function (ev) {
