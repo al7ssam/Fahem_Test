@@ -13,6 +13,18 @@ import {
 } from "./lessonPromptBuilder";
 import { parseLessonPastedJson } from "@shared/lessonJsonParse";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
+import {
+  clearCustomLessonPromptPrefs,
+  hasLocalCustomLessonPromptPrefs,
+  loadCustomLessonPromptPrefs,
+  mergeUserPromptParamsWithSiteDefaults,
+  saveCustomLessonPromptPrefs,
+} from "./customLessonPromptPrefs";
+import {
+  deleteMeCustomLessonPromptParams,
+  fetchMeCustomLessonPromptParams,
+  putMeCustomLessonPromptParams,
+} from "./customLessonPromptPrefsApi";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
 import {
@@ -268,6 +280,17 @@ let lessonAiPromptRemote: {
   audienceOptions: Array<{ v: string; t: string }>;
   promptTemplate: string;
 } | null = null;
+/** هل للمستخدم معلمات محفوظة على الخادم (تمنع استبدال الذاكرة بافتراضيات الموقع عند جلب الإعداد البعيد). */
+let customLessonPromptHasServerOverride = false;
+
+async function refreshCustomLessonPromptServerOverrideFlag(): Promise<void> {
+  if (getAuthState().status !== "authenticated") {
+    customLessonPromptHasServerOverride = false;
+    return;
+  }
+  const r = await fetchMeCustomLessonPromptParams();
+  customLessonPromptHasServerOverride = Boolean(r.ok && r.params != null);
+}
 
 async function fetchLessonAiPromptPublicConfig(): Promise<void> {
   try {
@@ -282,9 +305,11 @@ async function fetchLessonAiPromptPublicConfig(): Promise<void> {
     };
     if (res.ok && data.ok && data.config) {
       lessonAiPromptRemote = data.config;
-      /** مزامنة مع إعدادات الإدارة (`mergeLessonAiPromptStored`) عند عدم تحرير شاشة الدرس المخصص */
+      /** لا تستبدل معاملات البرومبت إذا خصّصها المستخدم محلياً أو على الخادم. */
       if (phase !== "custom_lesson") {
-        customLessonPromptParams = defaultCustomPromptParams();
+        if (!hasLocalCustomLessonPromptPrefs() && !customLessonPromptHasServerOverride) {
+          customLessonPromptParams = defaultCustomPromptParams();
+        }
       }
     }
   } catch {
@@ -1101,16 +1126,31 @@ function render(): void {
             err.textContent = "";
             void (async () => {
               await fetchLessonAiPromptPublicConfig();
+              await refreshCustomLessonPromptServerOverrideFlag();
+              const base = defaultCustomPromptParams();
               const d = loadCustomLessonDraft();
+              const localPrefs = loadCustomLessonPromptPrefs();
+              let promptResolved = base;
+              if (getAuthState().status === "authenticated") {
+                const me = await fetchMeCustomLessonPromptParams();
+                if (me.ok && me.params != null) {
+                  promptResolved = mergeUserPromptParamsWithSiteDefaults(base, me.params);
+                  customLessonPromptHasServerOverride = true;
+                } else if (localPrefs) {
+                  promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
+                } else if (d?.promptParams) {
+                  promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
+                }
+              } else if (localPrefs) {
+                promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
+              } else if (d?.promptParams) {
+                promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
+              }
+              customLessonPromptParams = promptResolved;
               if (d) {
                 customLessonClientId = d.clientLessonId;
                 customLessonLearningIntent = d.learningIntent;
                 customLessonJsonText = d.jsonText;
-                customLessonPromptParams = clampCustomLessonFlowParams({
-                  ...defaultCustomPromptParams(),
-                  ...d.promptParams,
-                  topic: "",
-                });
                 customLessonSessionToken = d.lastSessionToken ?? null;
                 customLessonShowJsonPanel =
                   d.showJsonPanel === true ||
@@ -1119,7 +1159,6 @@ function render(): void {
                 customLessonClientId = "";
                 customLessonLearningIntent = "";
                 customLessonJsonText = "";
-                customLessonPromptParams = defaultCustomPromptParams();
                 customLessonSessionToken = null;
                 customLessonShowJsonPanel = false;
               }
@@ -1361,6 +1400,16 @@ function render(): void {
         showJsonPanel: customLessonShowJsonPanel,
       });
     };
+    const persistPromptPrefs = (): void => {
+      readParamsFromDom();
+      saveCustomLessonPromptPrefs(customLessonPromptParams);
+      if (getAuthState().status === "authenticated") {
+        void putMeCustomLessonPromptParams(customLessonPromptParams).then((r) => {
+          if (r.ok) customLessonPromptHasServerOverride = true;
+        });
+      }
+      persistDraft();
+    };
     const audienceOptions: Array<{ v: string; t: string }> =
       lessonAiPromptRemote?.audienceOptions && lessonAiPromptRemote.audienceOptions.length > 0
         ? lessonAiPromptRemote.audienceOptions
@@ -1410,6 +1459,7 @@ function render(): void {
             <select id="cl-audience" class="app-input w-full px-2 py-1 text-sm" title="من يخاطبهم الدرس" aria-label="مستوى الجمهور">
               ${audienceOptions.map((o) => `<option value="${escapeHtml(o.v)}" ${p.audience === o.v ? "selected" : ""}>${escapeHtml(o.t)}</option>`).join("")}
             </select>
+            <button type="button" id="cl-prompt-reset-site" class="ui-btn ui-btn--ghost w-full py-2 text-xs mt-1 border border-slate-600/40">استعادة افتراضيات الموقع</button>
           </details>
           <button type="button" id="cl-copy" class="ui-btn ui-btn--primary w-full py-2">نسخ البرومبت</button>
           ${
@@ -1462,16 +1512,37 @@ function render(): void {
       const jsonTa = app.querySelector<HTMLTextAreaElement>("#cl-json");
       if (jsonTa) customLessonJsonText = jsonTa.value ?? "";
     };
-    app.querySelector("#cl-back")?.addEventListener("click", () => {
-      readParamsFromDom();
+    for (const sel of [
+      "#cl-nsec",
+      "#cl-qsame",
+      "#cl-anssec",
+      "#cl-studysec",
+      "#cl-minsent",
+      "#cl-maxsent",
+      "#cl-audience",
+    ] as const) {
+      app.querySelector(sel)?.addEventListener("change", () => {
+        persistPromptPrefs();
+      });
+    }
+    app.querySelector("#cl-prompt-reset-site")?.addEventListener("click", () => {
+      clearCustomLessonPromptPrefs();
+      customLessonPromptHasServerOverride = false;
+      if (getAuthState().status === "authenticated") {
+        void deleteMeCustomLessonPromptParams();
+      }
+      customLessonPromptParams = defaultCustomPromptParams();
       persistDraft();
+      render();
+    });
+    app.querySelector("#cl-back")?.addEventListener("click", () => {
+      persistPromptPrefs();
       phase = "name";
       nameFlowStep = "mode";
       render();
     });
     app.querySelector("#cl-library")?.addEventListener("click", async () => {
-      readParamsFromDom();
-      persistDraft();
+      persistPromptPrefs();
       const go = async (): Promise<void> => {
         phase = "saved_lessons_library";
         savedLessonsLoading = true;
@@ -1518,7 +1589,7 @@ function render(): void {
       } catch {
         customLessonErr = "تعذر النسخ — انسخ يدوياً.";
       }
-      persistDraft();
+      persistPromptPrefs();
       render();
     });
     app.querySelector("#cl-open-gpt")?.addEventListener("click", () => {
@@ -1534,7 +1605,7 @@ function render(): void {
       const parsedJson = parseLessonPastedJson(customLessonJsonText);
       if (!parsedJson.ok) {
         customLessonErr = parsedJson.detail;
-        persistDraft();
+        persistPromptPrefs();
         render();
         return;
       }
@@ -1557,7 +1628,7 @@ function render(): void {
         if (!res.ok || !data.ok || !data.lesson) {
           const iss = data.issues?.map((i) => `${i.path}: ${i.message}`).join("؛ ") || data.error || "رفض الخادم";
           customLessonErr = iss;
-          persistDraft();
+          persistPromptPrefs();
           render();
           return;
         }
@@ -1567,7 +1638,7 @@ function render(): void {
       } catch {
         customLessonErr = "تعذر الاتصال بالخادم.";
       }
-      persistDraft();
+      persistPromptPrefs();
       render();
     });
     app.querySelector("#cl-solo")?.addEventListener("click", () => {
@@ -1576,11 +1647,11 @@ function render(): void {
       customLessonMsg = "";
       if (!customLessonPreviewLesson) {
         customLessonErr = "استخدم «إضافة الدرس» أولاً.";
-        persistDraft();
+        persistPromptPrefs();
         render();
         return;
       }
-      persistDraft();
+      persistPromptPrefs();
       clearTimer();
       beginLessonPlayback(customLessonPreviewLesson, "custom_lesson");
       render();
@@ -1591,7 +1662,7 @@ function render(): void {
       customLessonMsg = "";
       if (!customLessonValidatedBody) {
         customLessonErr = "استخدم «إضافة الدرس» أولاً.";
-        persistDraft();
+        persistPromptPrefs();
         render();
         return;
       }
@@ -1603,12 +1674,12 @@ function render(): void {
           } else {
             customLessonErr = "تعذر الحفظ.";
           }
-          persistDraft();
+          persistPromptPrefs();
           render();
           return;
         }
         customLessonMsg = "تم حفظ الدرس في المكتبة.";
-        persistDraft();
+        persistPromptPrefs();
         render();
       };
       if (getAuthState().status !== "authenticated") {
@@ -1627,7 +1698,7 @@ function render(): void {
       customLessonMsg = "";
       if (!customLessonValidatedBody) {
         customLessonErr = "استخدم «إضافة الدرس» أولاً.";
-        persistDraft();
+        persistPromptPrefs();
         render();
         return;
       }
@@ -1641,12 +1712,12 @@ function render(): void {
         const data = (await res.json()) as { ok?: boolean; token?: string; error?: string };
         if (!res.ok || !data.ok || !data.token) {
           customLessonErr = data.error || "تعذر إنشاء جلسة الدرس.";
-          persistDraft();
+          persistPromptPrefs();
           render();
           return;
         }
         customLessonSessionToken = data.token;
-        persistDraft();
+        persistPromptPrefs();
         storePlayerName(name);
         playerNameDraft = name;
         phase = "matchmaking";
@@ -1657,7 +1728,7 @@ function render(): void {
         connectSocket(name, "lesson", null, "mix", "private_create", undefined, null, data.token);
       } catch {
         customLessonErr = "تعذر الاتصال بالخادم.";
-        persistDraft();
+        persistPromptPrefs();
         render();
       }
     });
@@ -5047,6 +5118,7 @@ if (pendingJoinRoomCode) {
   privateEntryAutoJoinTried = false;
 }
 subscribeAuthState(() => {
+  void refreshCustomLessonPromptServerOverrideFlag();
   if (phase === "name") render();
 });
 window.addEventListener("fahem:profile-cache-updated", () => {

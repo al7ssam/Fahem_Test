@@ -9,6 +9,7 @@ import { registerAdminRoutes } from "./routes/admin";
 import { registerCustomLessonRoutes } from "./routes/customLessons";
 import { registerLessonAiPromptRoutes } from "./routes/lessonAiPrompt";
 import { registerUserSavedLessonsRoutes } from "./routes/userSavedLessons";
+import { registerMeCustomLessonPromptRoutes } from "./routes/meCustomLessonPrompt";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerProfileRoutes } from "./routes/profile";
 import { optionalAuth } from "./auth/middleware";
@@ -75,6 +76,7 @@ export function createApp() {
   registerCustomLessonRoutes(app);
   registerLessonAiPromptRoutes(app);
   registerUserSavedLessonsRoutes(app);
+  registerMeCustomLessonPromptRoutes(app);
   registerAdminRoutes(app);
 
   if (config.isProduction) {
