@@ -1,4 +1,5 @@
 ﻿import type { Server } from "socket.io";
+import { randomBytes, timingSafeEqual } from "crypto";
 import { getPool } from "../db/pool";
 import type { LessonPlaybackPayload } from "../db/lessons";
 import {
@@ -21,6 +22,14 @@ import {
   resolveQuestionMsFromAppSetting,
   resolveStudyPhaseMsFromAppSetting,
 } from "./runtimeGameTiming";
+import type { MatchSeatInput } from "./participantTypes";
+import type {
+  MatchPrivateRuntimeOptions,
+  MatchTeamSnapshot,
+  PrivateRoomHeartsPerPlayer,
+  PrivateRoomTeamPlayMode,
+} from "./privateRoomTeamTypes";
+import { MATCH_RECONNECT_GRACE_MS } from "./reconnectConfig";
 
 /** بعد انتهاء الإجابات يبقى استقبال القدرات مفعّلاً لهذا الوقت (تخفيف سباق الشبكة مع finishRound). */
 const ABILITY_GRACE_MS = 500;
@@ -34,7 +43,8 @@ export type GameMode = "direct" | "study_then_quiz" | "lesson";
 export type DifficultyMode = "mix" | "easy" | "medium" | "hard";
 
 export type MatchPlayerPublic = {
-  socketId: string;
+  participantId: string;
+  userId: string | null;
   name: string;
   hearts: number;
   eliminated: boolean;
@@ -43,9 +53,13 @@ export type MatchPlayerPublic = {
   lastAward: number;
   keys: number;
   skillBoostStacks: number;
+  teamId: string | null;
+  isCaptain: boolean;
 };
 
 type MatchPlayerState = {
+  currentSocketId: string;
+  userId: string | null;
   playerSessionId: string;
   name: string;
   hearts: number;
@@ -56,6 +70,8 @@ type MatchPlayerState = {
   keys: number;
   correctStreak: number;
   skillBoostStacks: number;
+  teamId: string | null;
+  isCaptain: boolean;
 };
 
 export type AbilityAck =
@@ -72,9 +88,8 @@ export class Match {
   }
   readonly room: string;
   private readonly isSoloMatch: boolean;
+  /** مفتاح: participantId */
   private readonly players = new Map<string, MatchPlayerState>();
-  private readonly playerSessionToSocket = new Map<string, string>();
-  private readonly socketToPlayerSession = new Map<string, string>();
   private usedQuestionIds: number[] = [];
   private round = 0;
   private currentQuestionId: number | null = null;
@@ -100,14 +115,14 @@ export class Match {
   private roundReady = new Set<string>();
   private roundReadyResolve: (() => void) | null = null;
   private roundReadyTimer: ReturnType<typeof setTimeout> | null = null;
-  private skipSocketsForQuestion = new Set<string>();
-  private revealRemainingBySocket = new Map<string, number>();
-  private revealMacroRoundBySocket = new Map<string, number | null>();
+  private skipParticipantsForQuestion = new Set<string>();
+  private revealRemainingByParticipant = new Map<string, number>();
+  private revealMacroRoundByParticipant = new Map<string, number | null>();
   /** study_then_quiz فردي: إكمال جميع جولات المذاكرة/الأسئلة دون خروج مبكر */
   private soloStudyQuizReachedFullCourse = false;
   /** direct فردي: إكمال حلقة الأسئلة حتى حد MAX_ROUNDS وهو لا يزال حيًا */
   private soloDirectReachedFullCourse = false;
-  /** في نمط الدرس: تاريخ إجابات لكل مقبس لبناء lessonReview عند game_over */
+  /** في نمط الدرس: تاريخ إجابات لكل مشارك لبناء lessonReview عند game_over */
   private lessonAnswerHistory = new Map<
     string,
     Array<{
@@ -119,6 +134,27 @@ export class Match {
       studyBody: string | null;
     }>
   >();
+  private readonly privateRuntime: MatchPrivateRuntimeOptions | null = null;
+  private readonly teamSnapshots = new Map<string, MatchTeamSnapshot>();
+  private readonly teamScores = new Map<string, number>();
+  /** إرسال إجابة الفريق لهذه الجولة (teamId → من أرسل والخيار والوقت). */
+  private teamRoundSubmissions = new Map<
+    string,
+    {
+      byParticipantId: string;
+      choiceIndex: number;
+      at: number;
+      /** لقطة skillBoostStacks عند القفل (مُرسّل قد ينقطع قبل finishRound). */
+      skillBoostStacksAtLock: number;
+    }
+  >();
+  /** وضع الكابتن: teamId → (participantId → صوت). */
+  private captainRoundVotes = new Map<string, Map<string, number>>();
+  /** teamId → آخر خيار نقر عليه الكابتن في انتظار النقرة الثانية للإرسال. */
+  private captainAwaitingSecondOn = new Map<string, number | null>();
+  /** تجنب تكرار emit لـ team_vote_update لنفس الحالة. */
+  private lastTeamVoteWireKey = new Map<string, string>();
+  private heartsFromAnswersDisabled = false;
   private keysStreakPerKey = 5;
   private keysSmallStreakReward = 1;
   private keysMegaStreak = 8;
@@ -141,11 +177,23 @@ export class Match {
   private abilityRevealDirectEnabled = true;
   private abilityRevealStudyEnabled = true;
   private questionMs = DEFAULT_GAME_QUESTION_MS;
+  /** رمز استئناف النقل لكل مقعد (لا يُعرَض إلا عبر `match_resume_token`). */
+  private readonly resumeSecretsByParticipant = new Map<string, Buffer>();
+  /** لقطات نص السؤال الحالي لإعادة المزامنة بعد الاستئناف. */
+  private currentQuestionPrompt: string | null = null;
+  private currentQuestionOptions: string[] | null = null;
+  /** آخر حزمة مذاكرة بُثّت (لإعادة ربط منتصف المذاكرة). */
+  private studyResyncBundle: {
+    study_phase: Record<string, unknown>;
+    round_ready_window: Record<string, unknown>;
+  } | null = null;
+  /** تلميح طور للّقطة: يُحدَّث عند المذاكرة / بين المذاكرة والسؤال / السؤال. */
+  private matchPhaseHint: "idle" | "study" | "between" | "question" = "idle";
 
   constructor(
     private readonly io: Server,
     readonly matchId: string,
-    entries: Array<{ socketId: string; name: string; playerSessionId: string }>,
+    entries: MatchSeatInput[],
     readonly gameMode: GameMode,
     private readonly studySubcategoryKey: string | null = null,
     private readonly difficultyMode: DifficultyMode = "mix",
@@ -154,14 +202,31 @@ export class Match {
       studyPhaseMsOverride?: number;
     },
     private readonly lessonPlayback: LessonPlaybackPayload | null = null,
+    privateRuntime: MatchPrivateRuntimeOptions | null = null,
   ) {
     this.room = `match_${matchId}`;
     this.isSoloMatch = entries.length === 1;
+    this.privateRuntime = privateRuntime;
+    const teamsCfg = privateRuntime?.teams;
+    if (teamsCfg?.teams?.length) {
+      for (const t of teamsCfg.teams) {
+        this.teamSnapshots.set(t.teamId, {
+          ...t,
+          memberParticipantIds: [...t.memberParticipantIds],
+        });
+        this.teamScores.set(t.teamId, 0);
+      }
+    }
+    const hp = (privateRuntime?.heartsPerPlayer ?? 3) as PrivateRoomHeartsPerPlayer;
+    this.heartsFromAnswersDisabled = hp === 0;
+    const initialHearts = this.heartsFromAnswersDisabled ? 3 : hp;
     for (const e of entries) {
-      this.players.set(e.socketId, {
+      this.players.set(e.participantId, {
+        currentSocketId: e.connectionSocketId,
+        userId: e.userId,
         playerSessionId: e.playerSessionId,
         name: e.name,
-        hearts: 3,
+        hearts: initialHearts,
         eliminated: false,
         isSpectator: false,
         skillPoints: 0,
@@ -169,15 +234,28 @@ export class Match {
         keys: 0,
         correctStreak: 0,
         skillBoostStacks: 0,
+        teamId: e.teamId ?? null,
+        isCaptain: Boolean(e.isCaptain),
       });
-      this.playerSessionToSocket.set(e.playerSessionId, e.socketId);
-      this.socketToPlayerSession.set(e.socketId, e.playerSessionId);
+      this.resumeSecretsByParticipant.set(e.participantId, randomBytes(32));
     }
   }
 
+  private clearPerQuestionTeamState(): void {
+    this.teamRoundSubmissions.clear();
+    this.captainRoundVotes.clear();
+    this.captainAwaitingSecondOn.clear();
+    this.lastTeamVoteWireKey.clear();
+  }
+
+  private isTeamSubmissionLocked(teamId: string): boolean {
+    return this.teamRoundSubmissions.has(teamId);
+  }
+
   private snapshotPlayers(): MatchPlayerPublic[] {
-    return [...this.players.entries()].map(([socketId, p]) => ({
-      socketId,
+    return [...this.players.entries()].map(([participantId, p]) => ({
+      participantId,
+      userId: p.userId,
       name: p.name,
       hearts: p.hearts,
       eliminated: p.eliminated,
@@ -186,11 +264,377 @@ export class Match {
       lastAward: p.lastAward,
       keys: p.keys,
       skillBoostStacks: p.skillBoostStacks,
+      teamId: p.teamId,
+      isCaptain: p.isCaptain,
     }));
+  }
+
+  private hasPrivateTeams(): boolean {
+    return this.teamSnapshots.size > 0;
+  }
+
+  private privateTeamPlayMode(): PrivateRoomTeamPlayMode | null {
+    return this.privateRuntime?.teams ? this.privateRuntime.teams.teamPlayMode : null;
+  }
+
+  /** جاهزية المذاكرة/الجولة: يتفق مع وضع الفرق عند تعطيل القلوب (لا يعتمد على hearts<=0 فقط). */
+  private isParticipantActiveForStudyRound(p: MatchPlayerState): boolean {
+    if (p.eliminated || p.isSpectator) return false;
+    if (this.hasPrivateTeams() && this.heartsFromAnswersDisabled) return true;
+    return p.hearts > 0;
+  }
+
+  private emitPlayerEliminated(
+    participantId: string,
+    name: string,
+    reason: "hearts" | "disconnect",
+  ): void {
+    const pl = this.players.get(participantId);
+    const payload: {
+      participantId: string;
+      name: string;
+      reason: "hearts" | "disconnect";
+      teamId?: string;
+    } = { participantId, name, reason };
+    if (this.hasPrivateTeams() && pl?.teamId) payload.teamId = pl.teamId;
+    this.io.to(this.room).emit("player_eliminated", payload);
+  }
+
+  private emitTeamVoteUpdateIfChanged(teamId: string, votes: Map<string, number>): void {
+    const awaiting = this.captainAwaitingSecondOn.get(teamId) ?? null;
+    const wireKey = JSON.stringify({
+      a: awaiting,
+      v: [...votes.entries()].sort((x, y) => x[0].localeCompare(y[0])),
+    });
+    if (this.lastTeamVoteWireKey.get(teamId) === wireKey) return;
+    this.lastTeamVoteWireKey.set(teamId, wireKey);
+    this.io.to(this.room).emit("team_vote_update", {
+      teamId,
+      votes: Object.fromEntries(votes),
+      captainAwaitingSecondOn: awaiting,
+    });
+  }
+
+  private snapshotTeamScoresPayload(): Array<{ teamId: string; teamScore: number }> {
+    return [...this.teamScores.entries()].map(([teamId, teamScore]) => ({ teamId, teamScore }));
+  }
+
+  private reassignCaptainAfterMemberLeft(leftParticipantId: string): void {
+    if (!this.hasPrivateTeams()) return;
+    const p = this.players.get(leftParticipantId);
+    if (!p?.teamId) return;
+    const tid = p.teamId;
+    const snap = this.teamSnapshots.get(tid);
+    if (!snap || snap.captainParticipantId !== leftParticipantId) return;
+    const votes = this.captainRoundVotes.get(tid);
+    votes?.delete(leftParticipantId);
+    this.captainAwaitingSecondOn.delete(tid);
+    this.lastTeamVoteWireKey.delete(tid);
+    const next = snap.memberParticipantIds.find((pid) => {
+      if (pid === leftParticipantId) return false;
+      const pl = this.players.get(pid);
+      return pl && this.isParticipantActiveForTeam(pl);
+    });
+    if (!next) {
+      if (votes && this.privateTeamPlayMode() === "teams_captain_approval") {
+        this.emitTeamVoteUpdateIfChanged(tid, votes);
+      }
+      return;
+    }
+    snap.captainParticipantId = next;
+    for (const pid of snap.memberParticipantIds) {
+      const pl = this.players.get(pid);
+      if (pl) pl.isCaptain = pid === next;
+    }
+    this.io.to(this.room).emit("team_captain_changed", { teamId: tid, captainParticipantId: next });
+    if (votes && this.privateTeamPlayMode() === "teams_captain_approval") {
+      this.emitTeamVoteUpdateIfChanged(tid, votes);
+    }
+  }
+
+  private runTeamRoundScoring(
+    results: Array<{
+      participantId: string;
+      correct: boolean;
+      skipped?: boolean;
+      choiceIndex?: number | null;
+      pointsAward: number;
+      hearts: number;
+      eliminated: boolean;
+    }>,
+    correctIndex: number,
+  ): void {
+    const tmode = this.privateTeamPlayMode();
+    if (!tmode) return;
+    const totalWindow = Math.max(1, this.answerDeadline - this.questionStartedAt);
+
+    for (const [teamId, snap] of this.teamSnapshots) {
+      const submission = this.teamRoundSubmissions.get(teamId);
+      const votes = this.captainRoundVotes.get(teamId) ?? new Map<string, number>();
+      const teamChoice = submission?.choiceIndex ?? null;
+      const answeredTeam = submission != null;
+      const teamCorrect = answeredTeam && teamChoice === correctIndex;
+      const answeredAt = submission?.at ?? this.answerDeadline;
+      const progress = Math.min(1, Math.max(0, (answeredAt - this.questionStartedAt) / totalWindow));
+      const base = Math.round(100 - progress * 99);
+      const submitter = submission ? this.players.get(submission.byParticipantId) : undefined;
+      const stacks =
+        submission?.skillBoostStacksAtLock ?? submitter?.skillBoostStacks ?? 0;
+      let teamPointsAward = 0;
+      if (teamCorrect) {
+        teamPointsAward = this.applySkillBoostToAward(base, stacks);
+        this.teamScores.set(teamId, (this.teamScores.get(teamId) ?? 0) + teamPointsAward);
+      }
+
+      if (tmode === "teams_first_answer") {
+        if (answeredTeam && !teamCorrect && submission) {
+          const lp = this.players.get(submission.byParticipantId);
+          if (lp) this.damageHeart(submission.byParticipantId, lp, { skipIfHeartsDisabled: true });
+        }
+      } else if (answeredTeam && !teamCorrect && submission) {
+        const cap = this.players.get(submission.byParticipantId);
+        if (cap) this.damageHeart(submission.byParticipantId, cap, { skipIfHeartsDisabled: true });
+        const wrongIdx = teamChoice;
+        if (wrongIdx != null) {
+          for (const pid of snap.memberParticipantIds) {
+            if (pid === submission.byParticipantId) continue;
+            if (votes.get(pid) === wrongIdx) {
+              const pl = this.players.get(pid);
+              if (pl) this.damageHeart(pid, pl, { skipIfHeartsDisabled: true });
+            }
+          }
+        }
+      }
+
+      for (const pid of snap.memberParticipantIds) {
+        const p = this.players.get(pid);
+        if (!p) continue;
+        if (this.skipParticipantsForQuestion.has(pid)) {
+          p.lastAward = 0;
+          results.push({
+            participantId: pid,
+            correct: false,
+            skipped: true,
+            choiceIndex: null,
+            pointsAward: 0,
+            hearts: p.hearts,
+            eliminated: p.eliminated,
+          });
+          continue;
+        }
+        if (p.eliminated || (!this.heartsFromAnswersDisabled && p.hearts <= 0)) continue;
+
+        const choiceIndexForResult: number | null =
+          tmode === "teams_captain_approval"
+            ? (votes.has(pid) ? (votes.get(pid) ?? null) : null)
+            : submission?.byParticipantId === pid
+              ? teamChoice
+              : null;
+
+        let pointsAward = 0;
+        let correct = false;
+
+        if (tmode === "teams_first_answer") {
+          if (teamCorrect && submission && pid === submission.byParticipantId) {
+            correct = true;
+            p.correctStreak += 1;
+            this.applyKeyGrants(p);
+            pointsAward = teamPointsAward;
+            p.skillPoints += teamPointsAward;
+            p.lastAward = pointsAward;
+          } else {
+            p.correctStreak = 0;
+            p.lastAward = 0;
+          }
+        } else if (teamCorrect && submission && votes.get(pid) === correctIndex) {
+          correct = true;
+          p.correctStreak += 1;
+          this.applyKeyGrants(p);
+          pointsAward = teamPointsAward;
+          p.skillPoints += teamPointsAward;
+          p.lastAward = pointsAward;
+        } else {
+          p.correctStreak = 0;
+          p.lastAward = 0;
+        }
+
+        results.push({
+          participantId: pid,
+          correct,
+          choiceIndex: choiceIndexForResult,
+          pointsAward,
+          hearts: p.hearts,
+          eliminated: p.eliminated,
+        });
+      }
+    }
   }
 
   isFinished(): boolean {
     return this.finished;
+  }
+
+  getParticipantIds(): readonly string[] {
+    return [...this.players.keys()];
+  }
+
+  /** تحديث عنوان المقبس للمقعد (نقطة إعادة الربط عند تنفيذ reconnect لاحقًا). */
+  syncParticipantSocket(participantId: string, connectionSocketId: string): void {
+    const p = this.players.get(participantId);
+    if (p) p.currentSocketId = connectionSocketId;
+  }
+
+  /** التحقق من رمز الاستئناف (مقارنة ثابتة الزمن). */
+  verifyResumeSecret(participantId: string, secret: string): boolean {
+    const raw = this.resumeSecretsByParticipant.get(participantId);
+    if (!raw) return false;
+    try {
+      const incoming = Buffer.from(String(secret).trim(), "base64url");
+      if (incoming.length !== raw.length) return false;
+      return timingSafeEqual(incoming, raw);
+    } catch {
+      return false;
+    }
+  }
+
+  /** يُستدعى بعد أول استئناف ناجح لتضييق نافذة الرمز السابق. */
+  rotateResumeSecret(participantId: string): string | null {
+    if (this.finished || !this.players.has(participantId)) return null;
+    const buf = randomBytes(32);
+    this.resumeSecretsByParticipant.set(participantId, buf);
+    return buf.toString("base64url");
+  }
+
+  canContinueAsSpectator(participantId: string): boolean {
+    const p = this.players.get(participantId);
+    return Boolean(p && p.eliminated && p.isSpectator);
+  }
+
+  /** إعادة بث تصويت الكابتن للغرفة بعد استئناف زميل (لا يعتمد على لقطة العميل فقط). */
+  emitCaptainTeamVoteResyncToRoom(): void {
+    if (!this.hasPrivateTeams() || this.privateTeamPlayMode() !== "teams_captain_approval") return;
+    for (const [teamId, votes] of this.captainRoundVotes.entries()) {
+      if (votes.size === 0) continue;
+      this.lastTeamVoteWireKey.delete(teamId);
+      this.emitTeamVoteUpdateIfChanged(teamId, votes);
+    }
+  }
+
+  emitKeysRoomStateToSocketForParticipant(targetSocketId: string, participantId: string): void {
+    const p = this.players.get(participantId);
+    if (!p) return;
+    const players = this.snapshotPlayers();
+    const abilityCosts = this.snapshotAbilityCosts();
+    const abilityToggles = this.snapshotAbilityToggles();
+    this.io.to(targetSocketId).emit("keys_room_state", {
+      revealKeysActive: this.hasRevealFor(participantId),
+      macroRound: this.macroRound,
+      players,
+      abilityCosts,
+      abilityToggles,
+      keysAttacksEnabled: abilityToggles.heartAttack,
+    });
+  }
+
+  /** هل يُسمح بربط مقبس جديد لهذا المقعد (مباراة جارية، غير منتهية كمقعد خارج). */
+  canResumeTransport(participantId: string): boolean {
+    if (this.finished) return false;
+    const p = this.players.get(participantId);
+    if (!p) return false;
+    if (!p.eliminated) return true;
+    return p.isSpectator;
+  }
+
+  /**
+   * لقطة مزامنة للمقعد بعد استئناف النقل (حد أدنى من الحقول؛ يُوسَّع لاحقًا).
+   */
+  buildMatchStateSnapshot(forParticipantId: string): Record<string, unknown> | null {
+    if (this.finished || !this.players.has(forParticipantId)) return null;
+    const serverNow = Date.now();
+    const abilityCosts = this.snapshotAbilityCosts();
+    const abilityToggles = this.snapshotAbilityToggles();
+    const players = this.snapshotPlayers();
+    const gameStarted = {
+      matchId: this.matchId,
+      gameMode: this.gameMode,
+      teamPlayMode: this.privateRuntime?.teamPlayMode,
+      subcategoryKey: this.studySubcategoryKey ?? undefined,
+      difficultyMode: this.difficultyMode,
+      players,
+      revealKeysActive: false,
+      keysAttacksEnabled: abilityToggles.heartAttack,
+      abilityCosts,
+      abilityToggles,
+    };
+    const keysRoomState = {
+      revealKeysActive: this.hasRevealFor(forParticipantId),
+      macroRound: this.macroRound,
+      players,
+      abilityCosts,
+      abilityToggles,
+      keysAttacksEnabled: abilityToggles.heartAttack,
+    };
+
+    let question: Record<string, unknown> | null = null;
+    if (
+      this.currentQuestionId != null &&
+      !this.roundClosed &&
+      this.currentQuestionPrompt != null &&
+      this.currentQuestionOptions != null
+    ) {
+      question = {
+        questionId: this.currentQuestionId,
+        prompt: this.currentQuestionPrompt,
+        options: this.currentQuestionOptions,
+        endsAt: this.answerDeadline,
+        abilityGraceEndsAt: this.answerDeadline + ABILITY_GRACE_MS,
+        serverNow,
+        round: this.round,
+        macroRound: this.macroRound,
+        keysAttacksEnabled: abilityToggles.heartAttack,
+        abilityCosts,
+        abilityToggles,
+        revealKeysActive: this.hasRevealFor(forParticipantId),
+      };
+    }
+
+    let study: Record<string, unknown> | null = null;
+    if (this.studyResyncBundle) {
+      study = {
+        study_phase: this.studyResyncBundle.study_phase,
+        round_ready_window: this.studyResyncBundle.round_ready_window,
+        round_ready_state: {
+          roundToken: this.activeRoundToken,
+          macroRound: this.macroRound,
+          readyParticipantIds: [...this.roundReady],
+          totalActive: this.countActiveForStudyRound(),
+        },
+      };
+    }
+
+    let teamVoteResync: Array<{
+      teamId: string;
+      votes: Record<string, number>;
+      captainAwaitingSecondOn: number | null;
+    }> | null = null;
+    if (this.hasPrivateTeams() && this.privateTeamPlayMode() === "teams_captain_approval") {
+      teamVoteResync = [...this.captainRoundVotes.entries()].map(([teamId, votes]) => ({
+        teamId,
+        votes: Object.fromEntries(votes),
+        captainAwaitingSecondOn: this.captainAwaitingSecondOn.get(teamId) ?? null,
+      }));
+    }
+
+    return {
+      serverNow,
+      reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
+      matchPhaseHint: this.matchPhaseHint,
+      gameStarted,
+      keysRoomState,
+      question,
+      study,
+      teamVoteResync,
+    };
   }
 
   /** تكاليف القدرات للعميل (مزامنة مع الإدارة). */
@@ -239,11 +683,11 @@ export class Match {
     return toggles.reveal;
   }
 
-  private hasRevealFor(socketId: string): boolean {
-    const rem = this.revealRemainingBySocket.get(socketId) ?? 0;
+  private hasRevealFor(participantId: string): boolean {
+    const rem = this.revealRemainingByParticipant.get(participantId) ?? 0;
     if (rem <= 0) return false;
     if (this.gameMode === "study_then_quiz" || this.gameMode === "lesson") {
-      const mr = this.revealMacroRoundBySocket.get(socketId);
+      const mr = this.revealMacroRoundByParticipant.get(participantId);
       return mr === this.macroRound;
     }
     return true;
@@ -253,9 +697,9 @@ export class Match {
     const players = this.snapshotPlayers();
     const abilityCosts = this.snapshotAbilityCosts();
     const abilityToggles = this.snapshotAbilityToggles();
-    for (const socketId of this.players.keys()) {
-      this.io.to(socketId).emit("keys_room_state", {
-        revealKeysActive: this.hasRevealFor(socketId),
+    for (const [participantId, p] of this.players) {
+      this.io.to(p.currentSocketId).emit("keys_room_state", {
+        revealKeysActive: this.hasRevealFor(participantId),
         macroRound: this.macroRound,
         players,
         abilityCosts,
@@ -263,6 +707,12 @@ export class Match {
         keysAttacksEnabled: abilityToggles.heartAttack,
       });
     }
+  }
+
+  private isParticipantActiveForTeam(p: MatchPlayerState): boolean {
+    if (p.eliminated || p.isSpectator) return false;
+    if (this.heartsFromAnswersDisabled) return true;
+    return p.hearts > 0;
   }
 
   private countActive(): number {
@@ -273,20 +723,50 @@ export class Match {
     return n;
   }
 
+  private teamHasActiveMember(teamId: string): boolean {
+    const snap = this.teamSnapshots.get(teamId);
+    if (!snap) return false;
+    return snap.memberParticipantIds.some((pid) => {
+      const p = this.players.get(pid);
+      return p && this.isParticipantActiveForTeam(p);
+    });
+  }
+
+  private countActiveTeams(): number {
+    let n = 0;
+    for (const tid of this.teamSnapshots.keys()) {
+      if (this.teamHasActiveMember(tid)) n++;
+    }
+    return n;
+  }
+
   private hasEnoughActivePlayersForQuestions(): boolean {
+    if (this.hasPrivateTeams()) {
+      return this.countActiveTeams() > 1;
+    }
     const active = this.countActive();
     return this.isSoloMatch ? active > 0 : active > 1;
   }
 
   private shouldDeclareWinnerForActiveCount(): boolean {
+    if (this.hasPrivateTeams()) {
+      return this.countActiveTeams() <= 1;
+    }
     const active = this.countActive();
     return this.isSoloMatch ? active <= 0 : active <= 1;
   }
 
   private allActiveAnswered(): boolean {
-    for (const [id, p] of this.players) {
+    if (this.hasPrivateTeams()) {
+      for (const teamId of this.teamSnapshots.keys()) {
+        if (!this.teamHasActiveMember(teamId)) continue;
+        if (!this.teamRoundSubmissions.has(teamId)) return false;
+      }
+      return true;
+    }
+    for (const [participantId, p] of this.players) {
       if (p.eliminated || p.hearts <= 0) continue;
-      if (!this.pendingAnswers.has(id)) return false;
+      if (!this.pendingAnswers.has(participantId)) return false;
     }
     return true;
   }
@@ -314,10 +794,10 @@ export class Match {
 
   private clearRevealIfNewMacro(): void {
     let changed = false;
-    for (const [socketId, mr] of this.revealMacroRoundBySocket.entries()) {
+    for (const [participantId, mr] of this.revealMacroRoundByParticipant.entries()) {
       if (mr !== null && this.macroRound > mr) {
-        this.revealMacroRoundBySocket.delete(socketId);
-        this.revealRemainingBySocket.delete(socketId);
+        this.revealMacroRoundByParticipant.delete(participantId);
+        this.revealRemainingByParticipant.delete(participantId);
         changed = true;
       }
     }
@@ -347,30 +827,27 @@ export class Match {
     return Math.round(base * (1 + mult));
   }
 
-  private damageHeart(socketId: string, p: MatchPlayerState): void {
+  private damageHeart(participantId: string, p: MatchPlayerState, opts?: { skipIfHeartsDisabled?: boolean }): void {
+    if (opts?.skipIfHeartsDisabled && this.heartsFromAnswersDisabled) return;
     p.hearts = Math.max(0, p.hearts - 1);
     if (p.hearts === 0) {
-      this.revealRemainingBySocket.delete(socketId);
-      this.revealMacroRoundBySocket.delete(socketId);
+      this.revealRemainingByParticipant.delete(participantId);
+      this.revealMacroRoundByParticipant.delete(participantId);
       p.eliminated = true;
       p.isSpectator = true;
-      this.io.to(this.room).emit("player_eliminated", {
-        socketId,
-        name: p.name,
-        reason: "hearts",
-      });
-      this.io.to(socketId).emit("spectator_offer", {
-        socketId,
+      this.emitPlayerEliminated(participantId, p.name, "hearts");
+      this.io.to(p.currentSocketId).emit("spectator_offer", {
+        participantId,
         reason: "hearts",
       });
     }
   }
 
-  markRoundReady(socketId: string): void {
+  markRoundReady(participantId: string): void {
     if (this.finished || (this.gameMode !== "study_then_quiz" && this.gameMode !== "lesson")) return;
-    const p = this.players.get(socketId);
-    if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) return;
-    this.roundReady.add(socketId);
+    const p = this.players.get(participantId);
+    if (!p || !this.isParticipantActiveForStudyRound(p)) return;
+    this.roundReady.add(participantId);
     this.emitRoundReadyState();
     if (this.allActiveReadyForRound()) {
       this.clearRoundReadyWait();
@@ -378,19 +855,28 @@ export class Match {
   }
 
   private allActiveReadyForRound(): boolean {
-    for (const [socketId, p] of this.players) {
-      if (p.eliminated || p.hearts <= 0 || p.isSpectator) continue;
-      if (!this.roundReady.has(socketId)) return false;
+    for (const [participantId, p] of this.players) {
+      if (!this.isParticipantActiveForStudyRound(p)) continue;
+      if (!this.roundReady.has(participantId)) return false;
     }
     return true;
   }
 
+  private countActiveForStudyRound(): number {
+    let n = 0;
+    for (const p of this.players.values()) {
+      if (this.isParticipantActiveForStudyRound(p)) n++;
+    }
+    return n;
+  }
+
   private emitRoundReadyState(): void {
+    const readyParticipantIds = [...this.roundReady];
     this.io.to(this.room).emit("round_ready_state", {
       roundToken: this.activeRoundToken,
       macroRound: this.macroRound,
-      readySocketIds: [...this.roundReady],
-      totalActive: this.countActive(),
+      readyParticipantIds,
+      totalActive: this.countActiveForStudyRound(),
     });
   }
 
@@ -413,16 +899,84 @@ export class Match {
     this.studyPhaseResolve = null;
   }
 
-  recordAnswer(socketId: string, questionId: number, choiceIndex: number): void {
+  recordAnswer(participantId: string, questionId: number, choiceIndex: number): void {
     if (this.finished || this.roundClosed) return;
     if (this.currentQuestionId !== questionId) return;
     if (Date.now() > this.answerDeadline) return;
-    if (this.skipSocketsForQuestion.has(socketId)) return;
-    const p = this.players.get(socketId);
-    if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) return;
-    if (this.pendingAnswers.has(socketId)) return;
-    this.pendingAnswers.set(socketId, choiceIndex);
-    this.answerTimes.set(socketId, Date.now());
+    if (this.skipParticipantsForQuestion.has(participantId)) return;
+    const p = this.players.get(participantId);
+    if (!p || p.eliminated || p.isSpectator) return;
+    if (!this.isParticipantActiveForTeam(p)) return;
+
+    const tMode = this.privateTeamPlayMode();
+    if (tMode === "teams_first_answer") {
+      if (!p.teamId) return;
+      const tid = p.teamId;
+      if (this.isTeamSubmissionLocked(tid)) return;
+      const skillBoostStacksAtLock = p.skillBoostStacks;
+      this.teamRoundSubmissions.set(tid, {
+        byParticipantId: participantId,
+        choiceIndex,
+        at: Date.now(),
+        skillBoostStacksAtLock,
+      });
+      this.pendingAnswers.set(participantId, choiceIndex);
+      this.answerTimes.set(participantId, Date.now());
+      this.io.to(this.room).emit("team_answer_locked", {
+        teamId: tid,
+        participantId,
+        choiceIndex,
+        mode: "teams_first_answer",
+      });
+      if (this.allActiveAnswered()) {
+        this.clearQuestionTimers();
+        this.finishRound();
+      }
+      return;
+    }
+    if (tMode === "teams_captain_approval") {
+      if (!p.teamId) return;
+      const tid = p.teamId;
+      if (this.isTeamSubmissionLocked(tid)) return;
+      if (!this.captainRoundVotes.has(tid)) this.captainRoundVotes.set(tid, new Map());
+      const votes = this.captainRoundVotes.get(tid)!;
+      if (p.isCaptain) {
+        const awaiting = this.captainAwaitingSecondOn.get(tid) ?? null;
+        if (awaiting === choiceIndex) {
+          const stacksAtLock = p.skillBoostStacks;
+          this.teamRoundSubmissions.set(tid, {
+            byParticipantId: participantId,
+            choiceIndex,
+            at: Date.now(),
+            skillBoostStacksAtLock: stacksAtLock,
+          });
+          votes.set(participantId, choiceIndex);
+          this.captainAwaitingSecondOn.delete(tid);
+          this.lastTeamVoteWireKey.delete(tid);
+          this.io.to(this.room).emit("team_submitted", {
+            teamId: tid,
+            captainParticipantId: participantId,
+            choiceIndex,
+          });
+          if (this.allActiveAnswered()) {
+            this.clearQuestionTimers();
+            this.finishRound();
+          }
+        } else {
+          votes.set(participantId, choiceIndex);
+          this.captainAwaitingSecondOn.set(tid, choiceIndex);
+          this.emitTeamVoteUpdateIfChanged(tid, votes);
+        }
+      } else {
+        votes.set(participantId, choiceIndex);
+        this.emitTeamVoteUpdateIfChanged(tid, votes);
+      }
+      return;
+    }
+
+    if (this.pendingAnswers.has(participantId)) return;
+    this.pendingAnswers.set(participantId, choiceIndex);
+    this.answerTimes.set(participantId, Date.now());
     if (this.allActiveAnswered()) {
       this.clearQuestionTimers();
       this.finishRound();
@@ -436,21 +990,23 @@ export class Match {
     return Number.isInteger(choiceIndex) && choiceIndex >= 0 && choiceIndex < optionsCount;
   }
 
-  handleDisconnect(socketId: string): void {
-    const p = this.players.get(socketId);
+  handleDisconnect(participantId: string): void {
+    if (this.finished) return;
+    const p = this.players.get(participantId);
     if (!p || p.eliminated) return;
-    this.playerSessionToSocket.delete(p.playerSessionId);
-    this.socketToPlayerSession.delete(socketId);
-    this.revealRemainingBySocket.delete(socketId);
-    this.revealMacroRoundBySocket.delete(socketId);
+    if (p.teamId && this.privateTeamPlayMode() === "teams_captain_approval") {
+      const votes = this.captainRoundVotes.get(p.teamId);
+      if (votes?.delete(participantId)) {
+        this.emitTeamVoteUpdateIfChanged(p.teamId, votes);
+      }
+    }
+    this.reassignCaptainAfterMemberLeft(participantId);
+    this.revealRemainingByParticipant.delete(participantId);
+    this.revealMacroRoundByParticipant.delete(participantId);
     p.hearts = 0;
     p.eliminated = true;
     p.isSpectator = false;
-    this.io.to(this.room).emit("player_eliminated", {
-      socketId,
-      name: p.name,
-      reason: "disconnect",
-    });
+    this.emitPlayerEliminated(participantId, p.name, "disconnect");
     if (this.shouldDeclareWinnerForActiveCount() && !this.finished) {
       this.clearQuestionTimers();
       this.clearStudyWait();
@@ -477,7 +1033,7 @@ export class Match {
     const readyEndsAt = readyStartsAt + (readyWindowMs || DEFAULT_ROUND_READY_MS);
     const studyEndsAt = studyStartsAt + this.studyPhaseMs;
 
-    this.io.to(this.room).emit("study_phase", {
+    const studyPhasePayload = {
       cards,
       roundToken: this.activeRoundToken,
       startsAt: studyStartsAt,
@@ -485,15 +1041,22 @@ export class Match {
       serverNow: now,
       macroRound: this.macroRound,
       scope: "match_start",
-    });
-
-    this.io.to(this.room).emit("round_ready_window", {
+    };
+    const roundReadyPayload = {
       roundToken: this.activeRoundToken,
       startsAt: readyStartsAt,
       endsAt: readyEndsAt,
       serverNow: now,
       macroRound: this.macroRound,
-    });
+    };
+    this.studyResyncBundle = {
+      study_phase: { ...studyPhasePayload },
+      round_ready_window: { ...roundReadyPayload },
+    };
+    this.matchPhaseHint = "study";
+    this.io.to(this.room).emit("study_phase", studyPhasePayload);
+
+    this.io.to(this.room).emit("round_ready_window", roundReadyPayload);
     this.emitRoundReadyState();
 
     const waitReady = new Promise<void>((resolve) => {
@@ -531,6 +1094,7 @@ export class Match {
       studyEndsAt,
       serverNow: Date.now(),
     });
+    this.matchPhaseHint = "between";
   }
 
   private async loadRuntimeSettings(): Promise<void> {
@@ -622,6 +1186,7 @@ export class Match {
     this.io.to(this.room).emit("game_started", {
       matchId: this.matchId,
       gameMode: this.gameMode,
+      teamPlayMode: this.privateRuntime?.teamPlayMode,
       subcategoryKey: this.studySubcategoryKey ?? undefined,
       difficultyMode: this.difficultyMode,
       players: this.snapshotPlayers(),
@@ -630,6 +1195,17 @@ export class Match {
       abilityCosts: this.snapshotAbilityCosts(),
       abilityToggles: this.snapshotAbilityToggles(),
     });
+    for (const [pid, pl] of this.players) {
+      const resumeSecret = this.resumeSecretsByParticipant.get(pid)?.toString("base64url");
+      if (resumeSecret) {
+        this.io.to(pl.currentSocketId).emit("match_resume_token", {
+          matchId: this.matchId,
+          participantId: pid,
+          resumeSecret,
+          reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
+        });
+      }
+    }
     console.debug(`[matchmaking] runtime_settings_loaded_ms=${loadRuntimeMs} match=${this.matchId} mode=${this.gameMode}`);
     this.emitKeysRoomState();
 
@@ -695,24 +1271,31 @@ export class Match {
     const readyEndsAt = readyStartsAt + (readyWindowMs || DEFAULT_ROUND_READY_MS);
     const studyEndsAt = studyStartsAt + phaseMs;
 
-    this.io.to(this.room).emit("study_phase", {
+    const studyPhasePayload = {
       cards,
       roundToken: this.activeRoundToken,
       startsAt: studyStartsAt,
       endsAt: studyEndsAt,
       serverNow: now,
       macroRound: this.macroRound,
-      scope: "lesson",
+      scope: "lesson" as const,
       ...sectionMeta,
-    });
-
-    this.io.to(this.room).emit("round_ready_window", {
+    };
+    const roundReadyPayload = {
       roundToken: this.activeRoundToken,
       startsAt: readyStartsAt,
       endsAt: readyEndsAt,
       serverNow: now,
       macroRound: this.macroRound,
-    });
+    };
+    this.studyResyncBundle = {
+      study_phase: { ...studyPhasePayload },
+      round_ready_window: { ...roundReadyPayload },
+    };
+    this.matchPhaseHint = "study";
+    this.io.to(this.room).emit("study_phase", studyPhasePayload);
+
+    this.io.to(this.room).emit("round_ready_window", roundReadyPayload);
     this.emitRoundReadyState();
 
     const waitReady = new Promise<void>((resolve) => {
@@ -751,6 +1334,7 @@ export class Match {
       serverNow: Date.now(),
       ...sectionMeta,
     });
+    this.matchPhaseHint = "between";
   }
 
   private async runLessonMatchLoop(pool: ReturnType<typeof getPool>): Promise<void> {
@@ -761,8 +1345,8 @@ export class Match {
       return;
     }
     this.lessonAnswerHistory.clear();
-    for (const sid of this.players.keys()) {
-      this.lessonAnswerHistory.set(sid, []);
+    for (const participantId of this.players.keys()) {
+      this.lessonAnswerHistory.set(participantId, []);
     }
 
     const sections =
@@ -891,6 +1475,8 @@ export class Match {
   }
 
   private emitNoQuestions(): void {
+    this.studyResyncBundle = null;
+    this.matchPhaseHint = "idle";
     const rm = this.resultMessages ?? {
       winner: "",
       loser: "",
@@ -907,20 +1493,23 @@ export class Match {
     this.finished = true;
   }
 
-  private async playOneQuestion(
-    pool: ReturnType<typeof getPool>,
-    q: QuestionRow,
-    answerMsOverride?: number,
-  ): Promise<void> {
-    void pool;
+  /**
+   * يضبط حقول بداية السؤال الحي (يُصفّر حزمة المذاكرة هنا فقط بعد انتقال واضح إلى السؤال).
+   * @returns مدة نافذة الإجابة بالمللي ثانية.
+   */
+  private beginLiveQuestionState(q: QuestionRow, answerMsOverride?: number): number {
     this.clearQuestionTimers();
     this.usedQuestionIds.push(q.id);
     this.round++;
     this.roundClosed = false;
-    this.skipSocketsForQuestion.clear();
+    this.skipParticipantsForQuestion.clear();
     this.currentQuestionId = q.id;
     this.currentCorrectIndex = q.correct_index;
     this.currentOptionsCount = q.options.length;
+    this.currentQuestionPrompt = q.prompt;
+    this.currentQuestionOptions = [...q.options];
+    this.studyResyncBundle = null;
+    this.matchPhaseHint = "question";
     this.questionStartedAt = Date.now();
     const windowMs = Math.min(
       120_000,
@@ -929,6 +1518,17 @@ export class Match {
     this.answerDeadline = Date.now() + windowMs;
     this.pendingAnswers.clear();
     this.answerTimes.clear();
+    this.clearPerQuestionTeamState();
+    return windowMs;
+  }
+
+  private async playOneQuestion(
+    pool: ReturnType<typeof getPool>,
+    q: QuestionRow,
+    answerMsOverride?: number,
+  ): Promise<void> {
+    void pool;
+    const windowMs = this.beginLiveQuestionState(q, answerMsOverride);
 
     const waitRound = new Promise<void>((resolve) => {
       this.resolveRound = resolve;
@@ -949,10 +1549,10 @@ export class Match {
       abilityCosts,
       abilityToggles,
     };
-    for (const socketId of this.players.keys()) {
-      this.io.to(socketId).emit("question", {
+    for (const [participantId, p] of this.players) {
+      this.io.to(p.currentSocketId).emit("question", {
         ...baseQuestionPayload,
-        revealKeysActive: this.hasRevealFor(socketId),
+        revealKeysActive: this.hasRevealFor(participantId),
       });
     }
 
@@ -971,6 +1571,10 @@ export class Match {
     }
   }
 
+  /**
+   * يُجمّع نتائج السؤال ويُغلق الجولة؛ يُستدعى عادةً بعد انتهاء المؤقت أو اكتمال الإجابات.
+   * مسارات أخرى (مثل انقطاع يُقصي اللاعبين) قد تستدعي declareWinner دون المرور بكل جولة إن انتهى النشاط.
+   */
   private finishRound(): void {
     if (this.roundClosed || this.finished) return;
     this.roundClosed = true;
@@ -981,9 +1585,11 @@ export class Match {
     this.currentQuestionId = null;
     this.currentCorrectIndex = null;
     this.currentOptionsCount = null;
+    this.currentQuestionPrompt = null;
+    this.currentQuestionOptions = null;
 
     const results: Array<{
-      socketId: string;
+      participantId: string;
       correct: boolean;
       skipped?: boolean;
       choiceIndex?: number | null;
@@ -992,85 +1598,87 @@ export class Match {
       eliminated: boolean;
     }> = [];
 
-    for (const [socketId, p] of this.players) {
-      if (p.eliminated || p.hearts <= 0) continue;
+    if (this.hasPrivateTeams()) {
+      this.runTeamRoundScoring(results, correctIndex);
+    } else {
+      for (const [participantId, p] of this.players) {
+        if (p.eliminated || (!this.heartsFromAnswersDisabled && p.hearts <= 0)) continue;
 
-      if (this.skipSocketsForQuestion.has(socketId)) {
-        p.lastAward = 0;
-        results.push({
-          socketId,
-          correct: false,
-          skipped: true,
-          choiceIndex: null,
-          pointsAward: 0,
-          hearts: p.hearts,
-          eliminated: p.eliminated,
-        });
-        continue;
-      }
-
-      const choice = this.pendingAnswers.get(socketId);
-      const answered = choice !== undefined;
-      const choiceIndexForResult: number | null = answered ? choice! : null;
-      const correct = answered && choice === correctIndex;
-      let pointsAward = 0;
-
-      if (correct) {
-        p.correctStreak += 1;
-        this.applyKeyGrants(p);
-        const answeredAt = this.answerTimes.get(socketId) ?? this.answerDeadline;
-        const totalWindow = Math.max(1, this.answerDeadline - this.questionStartedAt);
-        const progress = Math.min(
-          1,
-          Math.max(0, (answeredAt - this.questionStartedAt) / totalWindow),
-        );
-        const base = Math.round(100 - progress * 99);
-        pointsAward = this.applySkillBoostToAward(base, p.skillBoostStacks);
-        p.skillPoints += pointsAward;
-      } else {
-        p.correctStreak = 0;
-        p.lastAward = 0;
-        p.hearts = Math.max(0, p.hearts - 1);
-        if (p.hearts === 0) {
-          p.eliminated = true;
-          p.isSpectator = true;
-          this.io.to(this.room).emit("player_eliminated", {
-            socketId,
-            name: p.name,
-            reason: "hearts",
+        if (this.skipParticipantsForQuestion.has(participantId)) {
+          p.lastAward = 0;
+          results.push({
+            participantId,
+            correct: false,
+            skipped: true,
+            choiceIndex: null,
+            pointsAward: 0,
+            hearts: p.hearts,
+            eliminated: p.eliminated,
           });
-          this.io.to(socketId).emit("spectator_offer", {
-            socketId,
-            reason: "hearts",
-          });
+          continue;
         }
+
+        const choice = this.pendingAnswers.get(participantId);
+        const answered = choice !== undefined;
+        const choiceIndexForResult: number | null = answered ? choice! : null;
+        const correct = answered && choice === correctIndex;
+        let pointsAward = 0;
+
+        if (correct) {
+          p.correctStreak += 1;
+          this.applyKeyGrants(p);
+          const answeredAt = this.answerTimes.get(participantId) ?? this.answerDeadline;
+          const totalWindow = Math.max(1, this.answerDeadline - this.questionStartedAt);
+          const progress = Math.min(
+            1,
+            Math.max(0, (answeredAt - this.questionStartedAt) / totalWindow),
+          );
+          const base = Math.round(100 - progress * 99);
+          pointsAward = this.applySkillBoostToAward(base, p.skillBoostStacks);
+          p.skillPoints += pointsAward;
+        } else {
+          p.correctStreak = 0;
+          p.lastAward = 0;
+          if (!this.heartsFromAnswersDisabled) {
+            p.hearts = Math.max(0, p.hearts - 1);
+            if (p.hearts === 0) {
+              p.eliminated = true;
+              p.isSpectator = true;
+              this.emitPlayerEliminated(participantId, p.name, "hearts");
+              this.io.to(p.currentSocketId).emit("spectator_offer", {
+                participantId,
+                reason: "hearts",
+              });
+            }
+          }
+          results.push({
+            participantId,
+            correct: false,
+            choiceIndex: choiceIndexForResult,
+            pointsAward: 0,
+            hearts: p.hearts,
+            eliminated: p.eliminated,
+          });
+          continue;
+        }
+
+        p.lastAward = pointsAward;
         results.push({
-          socketId,
-          correct: false,
+          participantId,
+          correct: true,
           choiceIndex: choiceIndexForResult,
-          pointsAward: 0,
+          pointsAward,
           hearts: p.hearts,
           eliminated: p.eliminated,
         });
-        continue;
       }
-
-      p.lastAward = pointsAward;
-      results.push({
-        socketId,
-        correct: true,
-        choiceIndex: choiceIndexForResult,
-        pointsAward,
-        hearts: p.hearts,
-        eliminated: p.eliminated,
-      });
     }
 
     if (this.gameMode === "lesson" && questionId != null && this.lessonPlayback) {
       const step = this.lessonPlayback.steps.find((s) => s.questionId === questionId);
       if (step) {
         for (const r of results) {
-          const list = this.lessonAnswerHistory.get(r.socketId);
+          const list = this.lessonAnswerHistory.get(r.participantId);
           if (!list) continue;
           list.push({
             questionId,
@@ -1084,14 +1692,14 @@ export class Match {
       }
     }
 
-    for (const [socketId, rem] of this.revealRemainingBySocket.entries()) {
+    for (const [participantId, rem] of this.revealRemainingByParticipant.entries()) {
       if (rem <= 0) continue;
       const next = rem - 1;
       if (next <= 0) {
-        this.revealRemainingBySocket.delete(socketId);
-        this.revealMacroRoundBySocket.delete(socketId);
+        this.revealRemainingByParticipant.delete(participantId);
+        this.revealMacroRoundByParticipant.delete(participantId);
       } else {
-        this.revealRemainingBySocket.set(socketId, next);
+        this.revealRemainingByParticipant.set(participantId, next);
       }
     }
 
@@ -1107,11 +1715,12 @@ export class Match {
       keysAttacksEnabled: abilityToggles.heartAttack,
       abilityCosts,
       abilityToggles,
+      ...(this.hasPrivateTeams() ? { teamScores: this.snapshotTeamScoresPayload() } : {}),
     };
-    for (const socketId of this.players.keys()) {
-      this.io.to(socketId).emit("question_result", {
+    for (const [participantId, p] of this.players) {
+      this.io.to(p.currentSocketId).emit("question_result", {
         ...baseResultPayload,
-        revealKeysActive: this.hasRevealFor(socketId),
+        revealKeysActive: this.hasRevealFor(participantId),
       });
     }
 
@@ -1125,10 +1734,10 @@ export class Match {
 
   private emitFinishedGameOver(payload: Record<string, unknown>): void {
     if (this.gameMode === "lesson") {
-      for (const socketId of this.players.keys()) {
-        this.io.to(socketId).emit("game_over", {
+      for (const [participantId, p] of this.players) {
+        this.io.to(p.currentSocketId).emit("game_over", {
           ...payload,
-          lessonReview: this.lessonAnswerHistory.get(socketId) ?? [],
+          lessonReview: this.lessonAnswerHistory.get(participantId) ?? [],
         });
       }
       return;
@@ -1136,15 +1745,152 @@ export class Match {
     this.io.to(this.room).emit("game_over", payload);
   }
 
-  private declareWinner(): void {
+  /** نجوم المباراة: الرتب 1–3 مع من يتساوون في أي منها (لا يُقتطع عند 3 صفوف فقط). */
+  private buildStarsOfTheMatch(): Array<{
+    rank: number;
+    participantId: string;
+    userId: string | null;
+    name: string;
+    individualPoints: number;
+    teamId: string | null;
+  }> {
+    const rows = [...this.players.entries()]
+      .map(([participantId, pl]) => ({
+        participantId,
+        userId: pl.userId,
+        name: pl.name,
+        skillPoints: pl.skillPoints,
+        teamId: pl.teamId,
+      }))
+      .sort((a, b) => b.skillPoints - a.skillPoints);
+    if (rows.length === 0) return [];
+    let rank = 0;
+    let lastScore: number | null = null;
+    const ranked = rows.map((row, idx) => {
+      if (lastScore === null || row.skillPoints !== lastScore) {
+        rank = idx + 1;
+        lastScore = row.skillPoints;
+      }
+      return { ...row, rank };
+    });
+    return ranked
+      .filter((r) => r.rank <= 3)
+      .map((r) => ({
+        rank: r.rank,
+        participantId: r.participantId,
+        userId: r.userId,
+        name: r.name,
+        individualPoints: r.skillPoints,
+        teamId: r.teamId,
+      }));
+  }
+
+  private declareTeamMatchEnd(): void {
     if (this.finished) return;
     this.finished = true;
+    this.studyResyncBundle = null;
+    this.matchPhaseHint = "idle";
+    this.clearStudyWait();
+    this.clearQuestionTimers();
+
+    const byTeam = [...this.teamScores.entries()]
+      .map(([teamId, teamScore]) => {
+        const snap = this.teamSnapshots.get(teamId);
+        return {
+          teamId,
+          displayName: snap?.displayName ?? teamId,
+          teamScore,
+        };
+      })
+      .sort((a, b) => b.teamScore - a.teamScore);
+
+    let rankCounter = 0;
+    let lastScore: number | null = null;
+    const teamLeaderboard = byTeam.map((row, idx) => {
+      if (lastScore === null || row.teamScore !== lastScore) {
+        rankCounter = idx + 1;
+        lastScore = row.teamScore;
+      }
+      const medal =
+        rankCounter === 1 ? "gold" : rankCounter === 2 ? "silver" : rankCounter === 3 ? "bronze" : null;
+      return {
+        rank: rankCounter,
+        teamId: row.teamId,
+        displayName: row.displayName,
+        teamScore: row.teamScore,
+        medal,
+      };
+    });
+
+    const starsOfTheMatch = this.buildStarsOfTheMatch();
+
+    const top = byTeam[0]?.teamScore ?? 0;
+    const winningTeams = top > 0 ? byTeam.filter((t) => t.teamScore === top) : [];
+
+    const bySkillDesc = [...this.players.entries()]
+      .map(([participantId, p]) => ({
+        participantId,
+        userId: p.userId,
+        name: p.name,
+        skillPoints: p.skillPoints,
+        hearts: p.hearts,
+        eliminated: p.eliminated,
+      }))
+      .sort((a, b) => b.skillPoints - a.skillPoints);
+    let lr = 0;
+    let ls: number | null = null;
+    const leaderboard = bySkillDesc.map((row, idx) => {
+      if (ls === null || row.skillPoints !== ls) {
+        lr = idx + 1;
+        ls = row.skillPoints;
+      }
+      const medal =
+        lr === 1 ? "gold" : lr === 2 ? "silver" : lr === 3 ? "bronze" : null;
+      return {
+        participantId: row.participantId,
+        userId: row.userId,
+        name: row.name,
+        skillPoints: row.skillPoints,
+        rank: lr,
+        medal,
+      };
+    });
+
+    const rm = this.resultMessages ?? {
+      winner: "",
+      loser: "",
+      tie: "",
+    };
+    this.emitFinishedGameOver({
+      reason: "finished",
+      outcomeType: "team_match",
+      teamLeaderboard,
+      starsOfTheMatch,
+      winningTeams,
+      winner: null,
+      winners: [],
+      players: this.snapshotPlayers(),
+      resultMessages: rm,
+      leaderboard,
+    });
+  }
+
+  private declareWinner(): void {
+    if (this.finished) return;
+    if (this.hasPrivateTeams()) {
+      this.declareTeamMatchEnd();
+      return;
+    }
+    this.finished = true;
+    this.studyResyncBundle = null;
+    this.matchPhaseHint = "idle";
     this.clearStudyWait();
     this.clearQuestionTimers();
 
     const bySkillDesc = [...this.players.entries()]
-      .map(([socketId, p]) => ({
-        socketId,
+      .map(([participantId, p]) => ({
+        participantId,
+        userId: p.userId,
         name: p.name,
         skillPoints: p.skillPoints,
         hearts: p.hearts,
@@ -1169,7 +1915,8 @@ export class Match {
         tie: "",
       };
       const leaderboard = bySkillDesc.map((row, idx) => ({
-        socketId: row.socketId,
+        participantId: row.participantId,
+        userId: row.userId,
         name: row.name,
         skillPoints: row.skillPoints,
         rank: idx + 1,
@@ -1198,7 +1945,8 @@ export class Match {
 
     if (alivePlayers.length === 1) {
       const winner = {
-        socketId: alivePlayers[0].socketId,
+        participantId: alivePlayers[0].participantId,
+        userId: alivePlayers[0].userId,
         name: alivePlayers[0].name,
       };
       const rm = this.resultMessages ?? {
@@ -1214,7 +1962,8 @@ export class Match {
         players: this.snapshotPlayers(),
         resultMessages: rm,
         leaderboard: bySkillDesc.map((row, idx) => ({
-          socketId: row.socketId,
+          participantId: row.participantId,
+          userId: row.userId,
           name: row.name,
           skillPoints: row.skillPoints,
           rank: idx + 1,
@@ -1229,10 +1978,21 @@ export class Match {
       topSkillPoints > 0
         ? bySkillDesc
             .filter((row) => row.skillPoints === topSkillPoints)
-            .map((row) => ({ socketId: row.socketId, name: row.name }))
+            .map((row) => ({
+              participantId: row.participantId,
+              userId: row.userId,
+              name: row.name,
+            }))
         : [];
 
-    const winner = winners.length === 1 ? winners[0] : null;
+    const winner =
+      winners.length === 1
+        ? {
+            participantId: winners[0].participantId,
+            userId: winners[0].userId,
+            name: winners[0].name,
+          }
+        : null;
     const outcomeType: "single_winner" | "shared_winners" | "tie_all_zero" =
       winners.length === 0
         ? "tie_all_zero"
@@ -1278,11 +2038,11 @@ export class Match {
     });
   }
 
-  tryAbilitySkillBoost(socketId: string): AbilityAck {
+  tryAbilitySkillBoost(participantId: string): AbilityAck {
     if (this.isSoloMatch) return { ok: false, error: "solo_abilities_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityEnabled("skill_boost")) return { ok: false, error: "ability_disabled" };
-    const p = this.players.get(socketId);
+    const p = this.players.get(participantId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
       return { ok: false, error: "not_eligible" };
     }
@@ -1294,32 +2054,32 @@ export class Match {
     return { ok: true, keys: p.keys, skillBoostStacks: p.skillBoostStacks };
   }
 
-  tryAbilitySkipQuestion(socketId: string): AbilityAck {
+  tryAbilitySkipQuestion(participantId: string): AbilityAck {
     if (this.isSoloMatch) return { ok: false, error: "solo_abilities_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityEnabled("skip")) return { ok: false, error: "ability_disabled" };
-    const p = this.players.get(socketId);
+    const p = this.players.get(participantId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
       return { ok: false, error: "not_eligible" };
     }
     if (!this.isAbilityWindowOpen()) return { ok: false, error: "question_closed" };
-    if (this.pendingAnswers.has(socketId)) return { ok: false, error: "already_answered" };
-    if (this.skipSocketsForQuestion.has(socketId)) return { ok: false, error: "already_skipped" };
+    if (this.pendingAnswers.has(participantId)) return { ok: false, error: "already_answered" };
+    if (this.skipParticipantsForQuestion.has(participantId)) return { ok: false, error: "already_skipped" };
     if (p.keys < 1) return { ok: false, error: "not_enough_keys" };
     p.keys -= 1;
-    this.skipSocketsForQuestion.add(socketId);
+    this.skipParticipantsForQuestion.add(participantId);
     this.emitKeysRoomState();
     return { ok: true, keys: p.keys };
   }
 
-  tryAbilityHeartAttack(attackerId: string, victimId: string): AbilityAck {
+  tryAbilityHeartAttack(attackerParticipantId: string, victimParticipantId: string): AbilityAck {
     if (this.isSoloMatch) return { ok: false, error: "solo_abilities_disabled" };
     if (!this.isAbilityEnabled("attack")) return { ok: false, error: "ability_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityWindowOpen()) return { ok: false, error: "question_closed" };
-    if (attackerId === victimId) return { ok: false, error: "invalid_target" };
-    const attacker = this.players.get(attackerId);
-    const victim = this.players.get(victimId);
+    if (attackerParticipantId === victimParticipantId) return { ok: false, error: "invalid_target" };
+    const attacker = this.players.get(attackerParticipantId);
+    const victim = this.players.get(victimParticipantId);
     if (!attacker || !victim) return { ok: false, error: "invalid_target" };
     if (attacker.eliminated || attacker.hearts <= 0 || attacker.isSpectator) {
       return { ok: false, error: "not_eligible" };
@@ -1337,13 +2097,15 @@ export class Match {
       victim.keys -= this.keysShieldCost;
       outcome = "blocked";
     } else {
-      this.damageHeart(victimId, victim);
+      this.damageHeart(victimParticipantId, victim);
     }
 
     this.io.to(this.room).emit("ability_heart_resolved", {
-      attackerSocketId: attackerId,
+      attackerParticipantId,
+      attackerUserId: attacker.userId,
       attackerName: attacker.name,
-      victimSocketId: victimId,
+      victimParticipantId,
+      victimUserId: victim.userId,
       victimName: victim.name,
       outcome,
       shieldCost: this.keysShieldCost,
@@ -1356,11 +2118,11 @@ export class Match {
     return { ok: true, keys: attacker.keys };
   }
 
-  tryAbilityRevealKeys(socketId: string): AbilityAck {
+  tryAbilityRevealKeys(participantId: string): AbilityAck {
     if (this.isSoloMatch) return { ok: false, error: "solo_abilities_disabled" };
     if (this.finished) return { ok: false, error: "match_finished" };
     if (!this.isAbilityEnabled("reveal")) return { ok: false, error: "ability_disabled" };
-    const p = this.players.get(socketId);
+    const p = this.players.get(participantId);
     if (!p || p.eliminated || p.hearts <= 0 || p.isSpectator) {
       return { ok: false, error: "not_eligible" };
     }
@@ -1370,24 +2132,27 @@ export class Match {
     if (this.gameMode === "study_then_quiz" || this.gameMode === "lesson") {
       if (this.macroRound <= 0) return { ok: false, error: "reveal_not_available" };
       if (this.keysRevealQuestionsStudy <= 0) return { ok: false, error: "reveal_not_available" };
-      if (this.hasRevealFor(socketId) && this.revealMacroRoundBySocket.get(socketId) === this.macroRound) {
+      if (
+        this.hasRevealFor(participantId) &&
+        this.revealMacroRoundByParticipant.get(participantId) === this.macroRound
+      ) {
         return { ok: false, error: "reveal_already_active" };
       }
       p.keys -= this.keysRevealCost;
       revealQuestions = this.keysRevealQuestionsStudy;
-      this.revealRemainingBySocket.set(socketId, revealQuestions);
-      this.revealMacroRoundBySocket.set(socketId, this.macroRound);
+      this.revealRemainingByParticipant.set(participantId, revealQuestions);
+      this.revealMacroRoundByParticipant.set(participantId, this.macroRound);
     } else {
       if (this.keysRevealQuestionsDirect <= 0) {
         return { ok: false, error: "reveal_disabled_direct" };
       }
-      if (this.hasRevealFor(socketId)) {
+      if (this.hasRevealFor(participantId)) {
         return { ok: false, error: "reveal_already_active" };
       }
       p.keys -= this.keysRevealCost;
       revealQuestions = this.keysRevealQuestionsDirect;
-      this.revealRemainingBySocket.set(socketId, revealQuestions);
-      this.revealMacroRoundBySocket.set(socketId, null);
+      this.revealRemainingByParticipant.set(participantId, revealQuestions);
+      this.revealMacroRoundByParticipant.set(participantId, null);
     }
 
     this.emitKeysRoomState();

@@ -564,7 +564,11 @@ body {
 
 .option-btn {
   width: 100%;
-  text-align: right;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  text-align: start;
   border-radius: 0.95rem;
   border: 1px solid rgba(148, 163, 184, 0.3);
   background: linear-gradient(145deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.95));
@@ -1695,6 +1699,68 @@ body {
   100% {
     transform: scale(1);
     box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.option-btn__label {
+  flex: 1;
+  min-width: 0;
+}
+
+.option-btn__vote-count {
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+  background: rgba(251, 191, 36, 0.18);
+  color: #fde68a;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  transition: opacity 0.15s ease;
+}
+
+#status.status--team-lock {
+  color: var(--state-warning);
+  font-weight: 700;
+}
+
+#status.status--team-votes {
+  color: var(--state-info);
+  font-weight: 600;
+}
+
+.res-team-block {
+  margin-bottom: 1rem;
+}
+
+.res-team-block--stars {
+  animation: res-fade-in 0.35s ease-out;
+}
+
+.res-team-block__title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #fde68a;
+  margin-bottom: 0.35rem;
+  letter-spacing: 0.02em;
+}
+
+.res-team-block__panel {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.45);
+}
+
+@keyframes res-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
