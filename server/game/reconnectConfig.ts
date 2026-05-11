@@ -1,2 +1,2 @@
 /** نافذة السماح بعد انقطاع المقبس أثناء مباراة نشطة (قبل إقصاء المقعد). */
-export const MATCH_RECONNECT_GRACE_MS = 45_000;
+export const MATCH_RECONNECT_GRACE_MS = 20_000;

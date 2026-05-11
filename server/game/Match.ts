@@ -634,6 +634,7 @@ export class Match {
     return {
       serverNow,
       reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
+      reconnectExpiresAt: serverNow + MATCH_RECONNECT_GRACE_MS,
       matchPhaseHint: this.matchPhaseHint,
       gameStarted,
       keysRoomState,
@@ -1205,11 +1206,13 @@ export class Match {
       for (const [pid, pl] of this.players) {
         const resumeSecret = this.resumeSecretsByParticipant.get(pid)?.toString("base64url");
         if (resumeSecret) {
+          const expiresAt = Date.now() + MATCH_RECONNECT_GRACE_MS;
           this.io.to(pl.currentSocketId).emit("match_resume_token", {
             matchId: this.matchId,
             participantId: pid,
             resumeSecret,
             reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
+            expiresAt,
           });
         }
       }

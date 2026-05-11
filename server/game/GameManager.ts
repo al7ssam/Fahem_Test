@@ -176,6 +176,8 @@ export type PrivateRoomState = {
   /** غير null عند teamPlayMode !== "individual" */
   teamsLobby: PrivateRoomTeamsLobbyState | null;
   lastActivityAt: number;
+  /** بعد انتهاء المباراة: نافذة بقاء قصيرة للغرفة حتى لو لم يبقَ أعضاء متصلون. */
+  postMatchExpiresAt: number | null;
   /** true أثناء تشغيل مباراة انطلقت من هذه الغرفة (يمنع مسح الغرفة بالخطأ). */
   privateRoomMatchRunning: boolean;
 };
@@ -281,6 +283,11 @@ export class GameManager {
       for (const [code, room] of [...this.privateRooms.entries()]) {
         if (room.members.size > 0) continue;
         if (room.matchStartTimer != null || room.privateRoomMatchRunning) continue;
+        if (room.postMatchExpiresAt != null) {
+          if (now < room.postMatchExpiresAt) continue;
+          this.privateRooms.delete(code);
+          continue;
+        }
         if (now - room.lastActivityAt < idlePrivateRoomMs) continue;
         this.privateRooms.delete(code);
       }
@@ -530,6 +537,9 @@ export class GameManager {
     const room = this.privateRooms.get(roomCode);
     if (!room) return;
     room.lastActivityAt = Date.now();
+    if (room.members.size > 0) {
+      room.postMatchExpiresAt = null;
+    }
     const countdownSecondsRemaining =
       room.countdownEndsAt != null
         ? Math.max(1, Math.ceil((room.countdownEndsAt - Date.now()) / 1000))
@@ -1031,11 +1041,13 @@ export class GameManager {
         match.emitCaptainTeamVoteResyncToRoom();
         const newSecret = match.rotateResumeSecret(participantId);
         if (newSecret && match.allowsTransportReconnect()) {
+          const expiresAt = Date.now() + MATCH_RECONNECT_GRACE_MS;
           socket.emit("match_resume_token", {
             matchId: match.matchId,
             participantId,
             resumeSecret: newSecret,
             reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
+            expiresAt,
           });
         }
         const snapshot = match.buildMatchStateSnapshot(participantId);
@@ -1128,6 +1140,9 @@ export class GameManager {
         if (nextEntry) room.hostParticipantId = nextEntry.participantId;
         room.roomVersion += 1;
       } else {
+        if (room.postMatchExpiresAt != null && Date.now() < room.postMatchExpiresAt) {
+          return;
+        }
         if (room.matchStartTimer) {
           clearTimeout(room.matchStartTimer);
           room.matchStartTimer = null;
@@ -1322,10 +1337,12 @@ export class GameManager {
     room.roomVersion += 1;
     this.runningMatches.set(matchId, match);
     room.privateRoomMatchRunning = true;
+    room.postMatchExpiresAt = null;
     this.emitPrivateLobbyState(roomCode);
     try {
       await match.run();
     } finally {
+      const postMatchKeepAliveMs = 5 * 60 * 1000;
       room.privateRoomMatchRunning = false;
       for (const p of participants) {
         const s = this.io.sockets.sockets.get(p.socketId);
@@ -1363,20 +1380,22 @@ export class GameManager {
       }
       room.lockedParticipantIds = [];
       room.countdownEndsAt = null;
+      this.runningMatches.delete(matchId);
+      this.unregisterMatchRoutingForMatch(match);
       if (![...room.members.values()].some((m) => m.participantId === room.hostParticipantId)) {
         const nextPid = room.members.keys().next().value as string | undefined;
         if (nextPid) {
           const nextEntry = room.members.get(nextPid);
           if (nextEntry) room.hostParticipantId = nextEntry.participantId;
         } else {
-          this.privateRooms.delete(roomCode);
-          this.runningMatches.delete(matchId);
+          room.postMatchExpiresAt = Date.now() + postMatchKeepAliveMs;
+          room.lastActivityAt = Date.now();
+          room.roomVersion += 1;
           return;
         }
       }
       room.roomVersion += 1;
-      this.runningMatches.delete(matchId);
-      this.unregisterMatchRoutingForMatch(match);
+      room.postMatchExpiresAt = room.members.size === 0 ? Date.now() + postMatchKeepAliveMs : null;
       this.emitPrivateLobbyState(roomCode);
     }
   }

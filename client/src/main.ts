@@ -175,6 +175,14 @@ let privateRoomUnassignedIds: string[] = [];
 let matchTeamPlayMode: "individual" | "teams_first_answer" | "teams_captain_approval" | null = null;
 /** تخزين/قبول رموز استئناف النقل فقط أثناء مباراة متعددة اللاعبين على الخادم (غرفة خاصة أو ≥2 لاعب). */
 let reconnectRuntimeActive = false;
+/** أثناء محاولة resume الصريحة نسمح بقبول token حتى قبل game_started. */
+let reconnectAttemptInFlight = false;
+/** Prompt reconnect الصريح عند الإقلاع. */
+let reconnectPromptState: {
+  matchId: string;
+  participantId: string;
+  expiresAt: number;
+} | null = null;
 let teamRoundUiLocked = false;
 let teamRoundCaptainSubmitted = false;
 let captainTapPendingIndex: number | null = null;
@@ -781,6 +789,7 @@ const RESULT_VIDEO_SRC = {
   lose: "/videos/lose.mp4",
   tie: "/videos/tie.mp4",
 } as const;
+const CLIENT_RECONNECT_GRACE_MS = 20_000;
 
 type ResultScreenKind = "win" | "lose" | "tie" | "empty";
 
@@ -855,6 +864,22 @@ function getRoomCodeFromUrl(): string | null {
   } catch {
     return null;
   }
+}
+
+function removeRoomQueryParamFromUrl(): void {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("room");
+    history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearInviteIntentState(): void {
+  pendingJoinRoomCode = "";
+  privateEntryAutoJoinTried = false;
+  removeRoomQueryParamFromUrl();
 }
 
 async function ensurePrivateQrDataUrl(inviteUrl: string): Promise<void> {
@@ -1233,6 +1258,9 @@ function applyPrivateLobbyJoinAck(joinKind: JoinKind, ack: PrivateLobbyJoinAck):
     joinKind === "private_create"
       ? "تم إنشاء الغرفة الخاصة بنجاح."
       : "تم الانضمام للغرفة الخاصة.";
+  if (joinKind === "private_join") {
+    clearInviteIntentState();
+  }
   clearReconnectMultiplayerRuntime();
   render();
 }
@@ -1285,6 +1313,31 @@ function returnToHomeFromSearch(): void {
   render();
 }
 
+function startReconnectFromPrompt(): void {
+  const name = getEffectivePlayerName(playerNameDraft);
+  storePlayerName(name);
+  playerNameDraft = name;
+  phase = "matchmaking";
+  soloLearningPending = false;
+  isPrivateRoomSession = false;
+  lobbyNotice = "جاري محاولة استعادة المباراة…";
+  render();
+  connectSocket(name, "direct", null, "mix", "public", undefined, null, null, "resume_only");
+}
+
+function cancelReconnectPrompt(): void {
+  clearReconnectMultiplayerRuntime();
+  reconnectPromptState = null;
+  render();
+}
+
+function cancelInvitePrompt(): void {
+  clearInviteIntentState();
+  phase = "name";
+  nameFlowStep = "mode";
+  render();
+}
+
 function isCurrentStudyRound(token?: string | null, macroRound?: number): boolean {
   if (!token || !activeStudyRoundToken) return false;
   if (token !== activeStudyRoundToken) return false;
@@ -1320,9 +1373,15 @@ function render(): void {
   app.innerHTML = "";
 
   if (phase === "name") {
-    const isPrivateEntryFlow = Boolean(pendingJoinRoomCode);
-    const renderModePicker = !isPrivateEntryFlow && nameFlowStep === "mode";
-    const renderDifficultyPicker = !isPrivateEntryFlow && nameFlowStep === "difficulty";
+    const hasReconnectPrompt =
+      reconnectPromptState != null && Number.isFinite(reconnectPromptState.expiresAt) && Date.now() < reconnectPromptState.expiresAt;
+    if (!hasReconnectPrompt && reconnectPromptState) {
+      reconnectPromptState = null;
+    }
+    const isReconnectEntryFlow = Boolean(reconnectPromptState);
+    const isPrivateEntryFlow = !isReconnectEntryFlow && Boolean(pendingJoinRoomCode);
+    const renderModePicker = !isPrivateEntryFlow && !isReconnectEntryFlow && nameFlowStep === "mode";
+    const renderDifficultyPicker = !isPrivateEntryFlow && !isReconnectEntryFlow && nameFlowStep === "difficulty";
     const selectedMain = categoriesState.find((c) => c.id === selectedMainCategoryId) ?? null;
     const subItems = selectedMain?.subcategories ?? [];
     const mainCards = categoriesState
@@ -1389,7 +1448,9 @@ function render(): void {
                 </button>
               </div>
               <p class="text-sm text-slate-400 text-right m-0">${
-                isPrivateEntryFlow
+                isReconnectEntryFlow
+                  ? "لديك مباراة متعددة اللاعبين قيد التنفيذ."
+                  : isPrivateEntryFlow
                   ? `الانضمام للغرفة الخاصة (${pendingJoinRoomCode})`
                   : renderModePicker
                   ? "اختر نمط اللعب"
@@ -1401,10 +1462,21 @@ function render(): void {
               }</p>
               <div class="mode-picker-grid" role="group" aria-label="اختيارات">
                 ${
-                  isPrivateEntryFlow
+                  isReconnectEntryFlow
+                    ? `
+                <div class="app-card p-3 text-right space-y-2">
+                  <p class="text-sm text-slate-300 m-0">يوجد اتصال قابل للاستعادة خلال مهلة قصيرة. هل تريد استعادة المباراة الآن؟</p>
+                  <div class="flex gap-2">
+                    <button id="reconnect-cancel-btn" type="button" class="ui-btn ui-btn--ghost w-full py-2 text-sm">إلغاء</button>
+                    <button id="reconnect-confirm-btn" type="button" class="ui-btn ui-btn--cta w-full py-2 text-sm">استعادة المباراة</button>
+                  </div>
+                </div>
+                `
+                    : isPrivateEntryFlow
                     ? `
                 <div class="app-card p-3 text-right">
-                  <p class="text-sm text-slate-300 m-0">سيتم الانضمام مباشرة إلى الغرفة الخاصة عبر الرابط/الباركود.</p>
+                  <p class="text-sm text-slate-300 m-0">تم اكتشاف دعوة لغرفة خاصة عبر الرابط/الباركود. لن يتم الانضمام تلقائيًا.</p>
+                  <button id="private-entry-cancel-btn" type="button" class="ui-btn ui-btn--ghost w-full py-2 text-sm mt-2">تجاهل الدعوة</button>
                 </div>
                 `
                     : renderModePicker
@@ -1446,9 +1518,11 @@ function render(): void {
                   renderModePicker || isPrivateEntryFlow ? "hidden" : ""
                 }">رجوع</button>
                 <button id="join-btn" class="ui-btn ui-btn--cta w-full py-3 text-lg ${
-                  isPrivateEntryFlow || renderDifficultyPicker ? "" : "hidden"
+                  isPrivateEntryFlow || isReconnectEntryFlow || renderDifficultyPicker ? "" : "hidden"
                 }">${
-                  isPrivateEntryFlow
+                  isReconnectEntryFlow
+                    ? "استعادة المباراة"
+                    : isPrivateEntryFlow
                     ? "انضمام للغرفة"
                     : renderDifficultyPicker
                       ? "ابدأ التحدي"
@@ -1689,6 +1763,10 @@ function render(): void {
         connectSocket(name, "direct", null, "mix", "private_join", pendingJoinRoomCode);
         return;
       }
+      if (isReconnectEntryFlow) {
+        startReconnectFromPrompt();
+        return;
+      }
       btn.textContent = "جاري الدخول...";
       phase = "matchmaking";
       if (selectedModeInName === "direct") {
@@ -1765,23 +1843,19 @@ function render(): void {
       render();
       connectSocket(name, selectedModeInName, null, selectedDifficultyMode, "private_join", roomCode);
     });
-    if (
-      isPrivateEntryFlow &&
-      storedName &&
-      !privateEntryAutoJoinTried
-    ) {
-      if (input) input.value = storedName;
-      playerNameDraft = storedName;
-      privateEntryAutoJoinTried = true;
-      phase = "matchmaking";
-      soloLearningPending = false;
-      privateRoomCodeState = pendingJoinRoomCode;
-      privateRoomInviteUrl = null;
-      isPrivateRoomSession = true;
-      lobbyNotice = "جاري الانضمام التلقائي للغرفة الخاصة...";
-      render();
-      connectSocket(resolveJoinDisplayName(), "direct", null, "mix", "private_join", pendingJoinRoomCode);
-    }
+    app.querySelector<HTMLButtonElement>("#reconnect-confirm-btn")?.addEventListener("click", () => {
+      err.textContent = "";
+      syncDraftFromGuestInput();
+      startReconnectFromPrompt();
+    });
+    app.querySelector<HTMLButtonElement>("#reconnect-cancel-btn")?.addEventListener("click", () => {
+      err.textContent = "";
+      cancelReconnectPrompt();
+    });
+    app.querySelector<HTMLButtonElement>("#private-entry-cancel-btn")?.addEventListener("click", () => {
+      err.textContent = "";
+      cancelInvitePrompt();
+    });
     return;
   }
 
@@ -4526,6 +4600,7 @@ type StoredMatchResume = {
   resumeSecret: string;
   reconnectGraceMs: number;
   storedAt: number;
+  expiresAt: number;
 };
 
 function readStoredMatchResume(): StoredMatchResume | null {
@@ -4535,7 +4610,8 @@ function readStoredMatchResume(): StoredMatchResume | null {
     const o = JSON.parse(t) as StoredMatchResume;
     if (!o?.matchId || !o?.participantId || !o?.resumeSecret) return null;
     if (typeof o.storedAt !== "number") o.storedAt = Date.now();
-    if (typeof o.reconnectGraceMs !== "number") o.reconnectGraceMs = 45_000;
+    if (typeof o.reconnectGraceMs !== "number") o.reconnectGraceMs = CLIENT_RECONNECT_GRACE_MS;
+    if (typeof o.expiresAt !== "number") o.expiresAt = o.storedAt + o.reconnectGraceMs;
     return o;
   } catch {
     return null;
@@ -4548,7 +4624,8 @@ function writeStoredMatchResume(
   const row: StoredMatchResume = {
     ...r,
     storedAt: r.storedAt ?? Date.now(),
-    reconnectGraceMs: r.reconnectGraceMs ?? 45_000,
+    reconnectGraceMs: r.reconnectGraceMs ?? CLIENT_RECONNECT_GRACE_MS,
+    expiresAt: r.expiresAt ?? ((r.storedAt ?? Date.now()) + (r.reconnectGraceMs ?? CLIENT_RECONNECT_GRACE_MS)),
   };
   sessionStorage.setItem(FAHEM_MATCH_RESUME_KEY, JSON.stringify(row));
 }
@@ -4562,12 +4639,32 @@ function clearStoredMatchResume(): void {
 }
 
 function canUseReconnect(): boolean {
-  return reconnectRuntimeActive;
+  return reconnectRuntimeActive || reconnectAttemptInFlight;
 }
 
 function clearReconnectMultiplayerRuntime(): void {
   reconnectRuntimeActive = false;
+  reconnectAttemptInFlight = false;
+  reconnectPromptState = null;
   clearStoredMatchResume();
+}
+
+function refreshReconnectPromptStateFromStorage(): void {
+  const raw = readStoredMatchResume();
+  if (!raw) {
+    reconnectPromptState = null;
+    return;
+  }
+  if (Date.now() > raw.expiresAt) {
+    clearReconnectMultiplayerRuntime();
+    reconnectPromptState = null;
+    return;
+  }
+  reconnectPromptState = {
+    matchId: raw.matchId,
+    participantId: raw.participantId,
+    expiresAt: raw.expiresAt,
+  };
 }
 
 function applyTeamVoteBadgesToOptionButtons(): void {
@@ -4970,54 +5067,61 @@ function sleepMs(ms: number): Promise<void> {
 async function tryResumeMatchAfterConnect(s: Socket, flowToken: number): Promise<boolean> {
   const raw = readStoredMatchResume();
   if (!raw) return false;
-  const maxAge = raw.reconnectGraceMs + 120_000;
-  if (Date.now() - raw.storedAt > maxAge) {
+  if (Date.now() > raw.expiresAt) {
     clearReconnectMultiplayerRuntime();
     return false;
   }
-  const backoffMs = [0, 500, 1000, 2000, 2000];
-  for (let attempt = 0; attempt < backoffMs.length; attempt++) {
-    if (attempt > 0) await sleepMs(backoffMs[attempt]!);
-    const outcome = await new Promise<"ok" | "retry" | "fail">((resolve) => {
-      const to = window.setTimeout(() => resolve("retry"), 9000);
-      s.emit(
-        "resume_match",
-        {
-          matchId: raw.matchId,
-          participantId: raw.participantId,
-          resumeSecret: raw.resumeSecret,
-        },
-        (ack: { ok?: boolean; error?: string; snapshot?: Record<string, unknown> | null } | undefined) => {
-          window.clearTimeout(to);
-          if (flowToken !== searchFlowToken) {
-            resolve("fail");
-            return;
-          }
-          if (!ack?.ok) {
-            if (ack?.error === "rate_limited") {
-              resolve("retry");
+  reconnectAttemptInFlight = true;
+  try {
+    const backoffMs = [0, 500, 1000, 2000, 2000];
+    for (let attempt = 0; attempt < backoffMs.length; attempt++) {
+      if (attempt > 0) await sleepMs(backoffMs[attempt]!);
+      const outcome = await new Promise<"ok" | "retry" | "fail">((resolve) => {
+        const to = window.setTimeout(() => resolve("retry"), 9000);
+        s.emit(
+          "resume_match",
+          {
+            matchId: raw.matchId,
+            participantId: raw.participantId,
+            resumeSecret: raw.resumeSecret,
+          },
+          (ack: { ok?: boolean; error?: string; snapshot?: Record<string, unknown> | null } | undefined) => {
+            window.clearTimeout(to);
+            if (flowToken !== searchFlowToken) {
+              resolve("fail");
               return;
             }
-            clearReconnectMultiplayerRuntime();
-            resolve("fail");
-            return;
-          }
-          if (!ack.snapshot || typeof ack.snapshot !== "object") {
-            clearReconnectMultiplayerRuntime();
-            resolve("fail");
-            return;
-          }
-          applyMatchStateSnapshotFromServer(s, ack.snapshot);
-          resolve("ok");
-        },
-      );
-    });
-    if (outcome === "ok") return true;
-    if (outcome === "fail") return false;
+            if (!ack?.ok) {
+              if (ack?.error === "rate_limited") {
+                resolve("retry");
+                return;
+              }
+              clearReconnectMultiplayerRuntime();
+              resolve("fail");
+              return;
+            }
+            if (!ack.snapshot || typeof ack.snapshot !== "object") {
+              clearReconnectMultiplayerRuntime();
+              resolve("fail");
+              return;
+            }
+            reconnectPromptState = null;
+            applyMatchStateSnapshotFromServer(s, ack.snapshot);
+            resolve("ok");
+          },
+        );
+      });
+      if (outcome === "ok") return true;
+      if (outcome === "fail") return false;
+    }
+    clearReconnectMultiplayerRuntime();
+    return false;
+  } finally {
+    reconnectAttemptInFlight = false;
   }
-  clearReconnectMultiplayerRuntime();
-  return false;
 }
+
+type ResumePolicy = "none" | "resume_only";
 
 function connectSocket(
   name: string,
@@ -5028,6 +5132,7 @@ function connectSocket(
   roomCode?: string,
   lessonIdForMatch?: number | null,
   customLessonTokenForMatch?: string | null,
+  resumePolicy: ResumePolicy = "none",
 ): void {
   const playerSessionId = getOrCreatePlayerSessionId();
   const flowToken = ++searchFlowToken;
@@ -5119,26 +5224,19 @@ function connectSocket(
             ? "تم الاتصال بالخادم. جاري الانضمام للغرفة..."
             : "تم الاتصال بالخادم. جاري الدخول إلى البحث...";
     }
-    if (
-      joinKind === "public" &&
-      readStoredMatchResume() &&
-      noticeEl
-    ) {
-      noticeEl.textContent = "جاري محاولة استعادة المباراة…";
-    }
-    const skipResumeForExplicitPrivateJoin =
-      joinKind === "private_join" || joinKind === "private_create";
-    if (
-      joinKind !== "solo" &&
-      !skipResumeForExplicitPrivateJoin &&
-      (await tryResumeMatchAfterConnect(s, flowToken))
-    ) {
-      if (joinAckTimer) {
-        window.clearTimeout(joinAckTimer);
-        joinAckTimer = null;
+    if (resumePolicy === "resume_only") {
+      if (noticeEl) noticeEl.textContent = "جاري محاولة استعادة المباراة…";
+      if (await tryResumeMatchAfterConnect(s, flowToken)) {
+        if (joinAckTimer) {
+          window.clearTimeout(joinAckTimer);
+          joinAckTimer = null;
+        }
+        joinCompleted = true;
+        if (noticeEl) noticeEl.textContent = "تمت استعادة المباراة.";
+        return;
       }
-      joinCompleted = true;
-      if (noticeEl) noticeEl.textContent = "تمت استعادة المباراة.";
+      failBackToName("تعذر استعادة المباراة. انتهت المهلة أو لم تعد الجلسة صالحة.");
+      socket?.disconnect();
       return;
     }
     joinAckTimer = window.setTimeout(() => {
@@ -5520,15 +5618,22 @@ function connectSocket(
       participantId?: string;
       resumeSecret?: string;
       reconnectGraceMs?: number;
+      expiresAt?: number;
     }) => {
       if (!p.matchId || !p.participantId || !p.resumeSecret) return;
       if (!canUseReconnect()) return;
+      const reconnectGraceMs =
+        typeof p.reconnectGraceMs === "number" ? p.reconnectGraceMs : CLIENT_RECONNECT_GRACE_MS;
+      const expiresAt =
+        typeof p.expiresAt === "number" ? p.expiresAt : Date.now() + reconnectGraceMs;
       writeStoredMatchResume({
         matchId: p.matchId,
         participantId: p.participantId,
         resumeSecret: p.resumeSecret,
-        reconnectGraceMs: typeof p.reconnectGraceMs === "number" ? p.reconnectGraceMs : 45_000,
+        reconnectGraceMs,
+        expiresAt,
       });
+      refreshReconnectPromptStateFromStorage();
     },
   );
 
@@ -6225,6 +6330,7 @@ if (pendingJoinRoomCode) {
   nameFlowStep = "mode";
   privateEntryAutoJoinTried = false;
 }
+refreshReconnectPromptStateFromStorage();
 subscribeAuthState(() => {
   void refreshCustomLessonPromptServerOverrideFlag();
   if (phase === "name") render();
@@ -6233,6 +6339,11 @@ window.addEventListener("fahem:profile-cache-updated", () => {
   if (phase === "name") render();
 });
 window.addEventListener("popstate", () => {
+  pendingJoinRoomCode = getRoomCodeFromUrl() ?? "";
+  if (pendingJoinRoomCode) {
+    privateEntryAutoJoinTried = false;
+  }
+  refreshReconnectPromptStateFromStorage();
   const pathOnly = window.location.pathname.replace(/\/$/, "") || "/";
   if (pathOnly === "/profile") {
     openAccountProfileModal();

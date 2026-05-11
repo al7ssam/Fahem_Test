@@ -182,6 +182,7 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
           heartsPerPlayer: 3,
           teamsLobby: null,
           lastActivityAt: Date.now(),
+          postMatchExpiresAt: null,
           privateRoomMatchRunning: false,
         };
         g.privateRooms.set(roomCode, room);
@@ -225,6 +226,17 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
           cb?.({ ok: false, error: "room_not_found", message: "الغرفة غير موجودة." });
           return;
         }
+        if (
+          room.members.size === 0 &&
+          room.matchStartTimer == null &&
+          !room.privateRoomMatchRunning &&
+          typeof room.postMatchExpiresAt === "number" &&
+          Date.now() >= room.postMatchExpiresAt
+        ) {
+          g.privateRooms.delete(roomCode);
+          cb?.({ ok: false, error: "room_not_found", message: "انتهت صلاحية الغرفة الخاصة." });
+          return;
+        }
         g.evictDuplicatePrivateMember(room, socket, playerSessionId);
         g.leaveMatchForSocket(socket.id);
         g.leaveLobbyEverywhere(socket.id);
@@ -246,6 +258,10 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
           roomCode,
         };
         room.members.set(participantId, entry);
+        if (room.members.size === 1) {
+          room.hostParticipantId = participantId;
+        }
+        room.postMatchExpiresAt = null;
         room.roomVersion += 1;
         g.socketToPrivateRoomCode.set(socket.id, roomCode);
         g.socketToPrivateParticipantId.set(socket.id, participantId);
