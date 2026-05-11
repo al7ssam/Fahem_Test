@@ -3014,6 +3014,7 @@ function render(): void {
 
   if (phase === "matchmaking") {
     const isPrivateLobby = Boolean(privateRoomCodeState);
+    const meReadyMm = Boolean(lobbyPlayersList.find((p) => playerIsMe(p))?.ready);
     app.append(
       el(`
         <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full">
@@ -3028,9 +3029,10 @@ function render(): void {
             <p id="lobby-notice" class="text-center text-amber-200 text-sm min-h-[1.25rem] max-w-md"></p>
             <div class="${isPrivateLobby ? "w-full app-card private-room-card p-4 space-y-3 text-right" : "hidden"}">
               <p class="text-sm text-slate-300 m-0">كود الغرفة: <b id="private-room-code">${privateRoomCodeState ?? ""}</b></p>
+              <p id="private-lobby-flow-status" class="text-center text-slate-200 text-sm font-medium m-0 mt-2 px-1 leading-relaxed">${escapeHtml(getPrivateRoomFlowStatusText())}</p>
               <div class="private-room-actions flex gap-2">
                 <button id="copy-private-link-btn" type="button" class="ui-btn ui-btn--ghost w-full py-2 text-sm">نسخ الرابط</button>
-                <button id="private-ready-btn" type="button" class="ui-btn ui-btn--cta w-full py-2 text-sm">جاهز</button>
+                <button id="private-ready-btn" type="button" class="ui-btn ui-btn--cta w-full py-2 text-sm">${isPrivateLobby ? (privateReadyPending ? "جارٍ الإرسال..." : meReadyMm ? "إلغاء الجاهزية" : "جاهز") : "جاهز"}</button>
               </div>
               <img id="private-qr-img" class="w-40 h-40 mx-auto rounded-lg bg-white p-2" alt="QR الغرفة" />
               <div class="space-y-2 ${isPrivateRoomHost() ? "" : "hidden"}">
@@ -3091,12 +3093,19 @@ function render(): void {
         if (n) n.textContent = lobbyNotice;
       });
       app.querySelector<HTMLButtonElement>("#private-ready-btn")?.addEventListener("click", () => {
-        socket?.emit("private_room_set_ready", { ready: true }, (ack?: { ok?: boolean }) => {
+        if (privateReadyPending) return;
+        const me = lobbyPlayersList.find((p) => playerIsMe(p));
+        const nextReady = !Boolean(me?.ready);
+        privateReadyPending = true;
+        render();
+        socket?.emit("private_room_set_ready", { ready: nextReady }, (ack?: { ok?: boolean }) => {
+          privateReadyPending = false;
           if (!ack?.ok) {
             lobbyNotice = "تعذر تغيير حالة الجاهزية.";
             const n = app.querySelector<HTMLParagraphElement>("#lobby-notice");
             if (n) n.textContent = lobbyNotice;
           }
+          render();
         });
       });
       app.querySelector<HTMLButtonElement>("#private-save-settings-btn")?.addEventListener("click", () => {
@@ -3135,6 +3144,7 @@ function render(): void {
           <p id="lobby-mode" class="text-right text-sm text-slate-400 mb-2"></p>
           <div class="app-card private-room-card p-4 space-y-3 text-right">
             <p class="text-sm text-slate-300 m-0">كود الغرفة: <b id="private-room-code">${privateRoomCodeState ?? ""}</b></p>
+            <p id="private-lobby-flow-status" class="text-center text-slate-200 text-sm font-medium m-0 mt-2 px-1 leading-relaxed">${escapeHtml(getPrivateRoomFlowStatusText())}</p>
             <div class="private-room-actions flex gap-2">
               <button id="copy-private-link-btn" type="button" class="ui-btn ui-btn--ghost w-full py-2 text-sm">نسخ الرابط</button>
               <button id="private-ready-btn" type="button" class="ui-btn ui-btn--cta w-full py-2 text-sm">${privateReadyPending ? "جارٍ الإرسال..." : meReady ? "إلغاء الجاهزية" : "جاهز"}</button>
@@ -3227,10 +3237,14 @@ function render(): void {
   }
 
   if (phase === "countdown") {
+    const cdSubtitle =
+      isPrivateRoomSession || Boolean(lastPrivateRoomCode)
+        ? "جاري بدء الجولة في غرفتك الخاصة…"
+        : "تم العثور على منافسين. جاري اكتمال المجموعة…";
     app.append(
       el(`
         <div class="app-screen min-h-screen text-white flex flex-col items-center justify-center p-6 text-center">
-          <p id="cd-subtitle" class="text-emerald-200/95 text-base max-w-md mb-3 leading-relaxed">تم العثور على منافسين. جاري اكتمال المجموعة…</p>
+          <p id="cd-subtitle" class="text-emerald-200/95 text-base max-w-md mb-3 leading-relaxed">${escapeHtml(cdSubtitle)}</p>
           <p class="text-slate-300 mb-4">تبدأ المباراة خلال</p>
           <div id="cd" class="text-7xl font-black text-amber-300 tabular-nums">3</div>
         </div>
@@ -3366,6 +3380,7 @@ function render(): void {
           </details>
           <div id="q-card" class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0">
             <p id="q-text" class="text-right text-xl font-semibold leading-relaxed min-h-[4rem]"></p>
+            <p id="captain-mode-hint" class="hidden text-center text-amber-200/90 text-xs m-0 leading-relaxed px-1" role="note"></p>
             <div id="opts" class="options-grid grid"></div>
           </div>
           <p id="status" class="status-line text-center text-sm min-h-[1.25rem]"></p>
@@ -3394,6 +3409,19 @@ function render(): void {
     refreshKeysBadge();
     startQuestionTimer();
     if (socket) bindPlayingAbilityUi(socket);
+    const capHint = app.querySelector<HTMLParagraphElement>("#captain-mode-hint");
+    if (capHint) {
+      if (spectatorFollowing || matchTeamPlayMode !== "teams_captain_approval") {
+        capHint.classList.add("hidden");
+        capHint.textContent = "";
+      } else {
+        capHint.classList.remove("hidden");
+        const me = findMeInPlayers(currentMatchPlayers);
+        capHint.textContent = me?.isCaptain
+          ? "وضع الكابتن: اختر خيارًا ثم اضغطه مرتين لتأكيد إجابة الفريق."
+          : "وضع الكابتن: صوّت لخيار واحد؛ يؤكد الكابتن الإجابة بلمسة ثانية على نفس الخيار.";
+      }
+    }
     return;
   }
 
@@ -3549,28 +3577,40 @@ function updateConnectionBadge(): void {
   }
 }
 
+/** حالة الجاهزية/الفرق للغرفة الخاصة — تُعرض في اللوبي وفي شاشة المطابقة عند وجود كود غرفة. */
+function getPrivateRoomFlowStatusText(): string {
+  const teamBlocking =
+    privateRoomTeamPlayModeState !== "individual" &&
+    Boolean(privateRoomTeamsLobbyState) &&
+    privateRoomUnassignedIds.length > 0;
+  if (teamBlocking) {
+    return "وضع الفرق: عيّن كل اللاعبين في فرق قبل بدء العد التنازلي.";
+  }
+  const allReady = lobbyPlayersList.length > 0 && lobbyPlayersList.every((p) => p.ready);
+  return allReady
+    ? "الجميع جاهزون. جاري بدء الجولة..."
+    : "بانتظار جاهزية جميع اللاعبين في الغرفة...";
+}
+
+function updatePrivateLobbyFlowStatusDom(): void {
+  const el = app.querySelector<HTMLParagraphElement>("#private-lobby-flow-status");
+  if (!el) return;
+  el.textContent = getPrivateRoomFlowStatusText();
+}
+
 function syncMatchmakingStatusText(): void {
   const el = app.querySelector<HTMLParagraphElement>("#mm-status");
-  if (!el) return;
   if (soloLearningPending) {
-    el.textContent = "جاري تجهيز جولتك الفردية…";
+    if (el) el.textContent = "جاري تجهيز جولتك الفردية…";
     return;
   }
   if (privateRoomCodeState) {
-    const teamBlocking =
-      privateRoomTeamPlayModeState !== "individual" &&
-      Boolean(privateRoomTeamsLobbyState) &&
-      privateRoomUnassignedIds.length > 0;
-    if (teamBlocking) {
-      el.textContent = "وضع الفرق: عيّن كل اللاعبين في فرق قبل بدء العد التنازلي.";
-      return;
-    }
-    const allReady = lobbyPlayersList.length > 0 && lobbyPlayersList.every((p) => p.ready);
-    el.textContent = allReady
-      ? "الجميع جاهزون. جاري بدء الجولة..."
-      : "بانتظار جاهزية جميع اللاعبين في الغرفة...";
+    const text = getPrivateRoomFlowStatusText();
+    if (el) el.textContent = text;
+    updatePrivateLobbyFlowStatusDom();
     return;
   }
+  if (!el) return;
   const readyCount = lobbyPlayersList.filter((p) => p.ready).length;
   el.textContent =
     readyCount < 2
@@ -4103,6 +4143,25 @@ function showGameToast(message: string): void {
   window.setTimeout(() => {
     t.remove();
   }, 3200);
+}
+
+/** رسالة انقطاع/استئناف مرئية أثناء اللعب أو المذاكرة (لا يعتمد على #lobby-notice وحده). */
+function surfaceGameplayConnectionMessage(message: string): void {
+  if (phase === "playing") {
+    const st = app.querySelector<HTMLParagraphElement>("#status");
+    if (st) st.textContent = message;
+    showGameToast(message);
+    return;
+  }
+  if (phase === "studying") {
+    const el = app.querySelector<HTMLParagraphElement>("#study-ready-state");
+    if (el) el.textContent = message;
+    showGameToast(message);
+    return;
+  }
+  if (phase === "countdown" || phase === "match_lesson_review") {
+    showGameToast(message);
+  }
 }
 
 function mergeKeysFromServerList(
@@ -4744,8 +4803,6 @@ function applyGameStartedClientPayload(payload: {
 }
 
 function applyMatchStateSnapshotFromServer(s: Socket, snap: Record<string, unknown>): void {
-  const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
-  if (noticeEl) noticeEl.textContent = "تم استعادة الجلسة.";
   const sn = snap.serverNow;
   if (typeof sn === "number") syncClock(sn);
   const gs = snap.gameStarted as Parameters<typeof applyGameStartedClientPayload>[0] | undefined;
@@ -4795,6 +4852,17 @@ function applyMatchStateSnapshotFromServer(s: Socket, snap: Record<string, unkno
     }
   }
   render();
+  if (
+    phase === "playing" ||
+    phase === "studying" ||
+    phase === "countdown" ||
+    phase === "match_lesson_review"
+  ) {
+    surfaceGameplayConnectionMessage("تم استعادة الجلسة.");
+  } else {
+    const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
+    if (noticeEl) noticeEl.textContent = "تم استعادة الجلسة.";
+  }
 }
 
 function sleepMs(ms: number): Promise<void> {
@@ -5060,20 +5128,24 @@ function connectSocket(
     updateConnectionBadge();
     const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
     const resume = readStoredMatchResume();
-    if (noticeEl) {
-      if (
-        resume &&
-        (phase === "playing" ||
-          phase === "studying" ||
-          phase === "countdown" ||
-          phase === "match_lesson_review")
-      ) {
-        noticeEl.textContent = "انقطع الاتصال. جاري استعادة الاتصال بالمباراة…";
-      } else if (resume) {
-        noticeEl.textContent = "انقطع الاتصال. جاري استعادة الاتصال بالمباراة…";
-      } else {
-        noticeEl.textContent = "انقطع الاتصال مؤقتًا... جاري إعادة الاتصال";
-      }
+    const msg =
+      resume &&
+      (phase === "playing" ||
+        phase === "studying" ||
+        phase === "countdown" ||
+        phase === "match_lesson_review")
+        ? "انقطع الاتصال. جاري استعادة الاتصال بالمباراة…"
+        : resume
+          ? "انقطع الاتصال. جاري استعادة الاتصال بالمباراة…"
+          : "انقطع الاتصال مؤقتًا... جاري إعادة الاتصال";
+    if (noticeEl) noticeEl.textContent = msg;
+    if (
+      phase === "playing" ||
+      phase === "studying" ||
+      phase === "countdown" ||
+      phase === "match_lesson_review"
+    ) {
+      surfaceGameplayConnectionMessage(msg);
     }
   });
 
