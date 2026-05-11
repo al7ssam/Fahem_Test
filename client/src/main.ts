@@ -267,24 +267,22 @@ function resetPrivateRoomTeamLobbyClientState(): void {
 function renderPrivateRoomTeamsSection(): void {
   const root = app.querySelector<HTMLDivElement>("#private-teams-root");
   if (!root) return;
-  if (privateRoomTeamPlayModeState === "individual" || !privateRoomTeamsLobbyState) {
-    root.innerHTML = "";
-    return;
-  }
-  const tls = privateRoomTeamsLobbyState;
+
   const host = isPrivateRoomHost();
-  const locked = tls.teamsLocked;
+  const tls = privateRoomTeamsLobbyState;
+  const teamModeActive =
+    privateRoomTeamPlayModeState !== "individual" && tls != null;
+  const locked = Boolean(tls?.teamsLocked);
+
   const modeLabel =
-    privateRoomTeamPlayModeState === "teams_first_answer"
-      ? "أول إجابة في الفريق"
-      : "تصويت + موافقة الكابتن (نقرتان للكابتن)";
-  const unassignedHtml =
-    privateRoomUnassignedIds.length === 0
-      ? ""
-      : `<p class="text-amber-200/90 text-xs m-0 mt-2">لم يُعيَّن بعد: ${privateRoomUnassignedIds
-          .map((id) => escapeHtml(participantDisplayName(id)))
-          .join("، ")}</p>`;
-  const adminHtml = host
+    privateRoomTeamPlayModeState === "individual"
+      ? "فردي"
+      : privateRoomTeamPlayModeState === "teams_first_answer"
+        ? "أول إجابة في الفريق"
+        : "تصويت + موافقة الكابتن (نقرتان للكابتن)";
+
+  /** يظهر دائماً للمضيف حتى في «فردي» حتى يمكن التبديل إلى وضع الفرق (بدون حلقة مفرغة). */
+  const hostBaseAdminHtml = host
     ? `<div class="rounded-lg border border-white/10 p-3 space-y-2 bg-white/5 text-right">
         <p class="text-xs text-slate-400 m-0">إعدادات المضيف — ${escapeHtml(modeLabel)}</p>
         <div class="flex flex-wrap gap-2 items-center justify-end">
@@ -308,6 +306,13 @@ function renderPrivateRoomTeamsSection(): void {
           </select>
           <button type="button" id="private-admin-apply-hearts" class="ui-btn ui-btn--ghost py-1 px-2 text-xs">تطبيق</button>
         </div>
+      </div>`
+    : "";
+
+  const hostTeamManagementHtml =
+    host && teamModeActive && tls
+      ? `<div class="rounded-lg border border-white/10 p-3 space-y-2 bg-white/5 text-right mt-2">
+        <p class="text-xs text-slate-500 m-0">إدارة الفرق</p>
         <div class="flex flex-wrap gap-2 items-center justify-end">
           <label class="text-xs text-slate-400">عدد الفرق</label>
           <input id="private-admin-team-count" type="number" min="2" max="12" class="app-input w-20 px-2 py-1 text-sm text-center" value="${tls.desiredTeamCount}" />
@@ -319,30 +324,49 @@ function renderPrivateRoomTeamsSection(): void {
           <button type="button" id="private-admin-lock-teams" class="ui-btn ui-btn--primary py-1 px-2 text-xs">${locked ? "إلغاء قفل الفرق" : "قفل الفرق"}</button>
         </div>
       </div>`
-    : `<p class="text-xs text-slate-400 text-right m-0">${escapeHtml(modeLabel)} · القلوب لكل لاعب: ${privateRoomHeartsPerPlayerState}</p>`;
-  const cards = tls.teams
-    .map((t) => {
-      const members = t.memberParticipantIds
-        .map((pid) => {
-          const isCap = pid === t.captainParticipantId;
-          const isMe = myParticipantId === pid;
-          return `<li class="text-xs ${isMe ? "text-amber-200" : "text-slate-200"}">${escapeHtml(participantDisplayName(pid))}${isCap ? " · كابتن" : ""}${isMe ? " (أنت)" : ""}</li>`;
-        })
-        .join("");
-      const myTeam = myParticipantId && t.memberParticipantIds.includes(myParticipantId);
-      const imCaptain = myParticipantId === t.captainParticipantId;
-      const joinBtn =
-        !locked && !myTeam
-          ? `<button type="button" class="ui-btn ui-btn--cta py-1 px-2 text-xs mt-2" data-join-team="${escapeHtml(t.teamId)}">انضمام</button>`
-          : "";
-      const leaveBtn =
-        !locked && myTeam ? `<button type="button" class="ui-btn ui-btn--ghost py-1 px-2 text-xs mt-2" data-leave-team="1">مغادرة الفريق</button>` : "";
-      const nameRow = imCaptain
-        ? `<div class="flex gap-1 mt-1"><input type="text" maxlength="48" class="app-input flex-1 px-2 py-1 text-xs" data-team-name-input="${escapeHtml(t.teamId)}" value="${escapeHtml(t.displayName)}" /><button type="button" class="ui-btn ui-btn--ghost py-1 px-2 text-xs" data-save-team-name="${escapeHtml(t.teamId)}">حفظ الاسم</button></div>`
-        : `<p class="text-sm font-semibold text-amber-100/95 m-0">${escapeHtml(t.displayName)}</p>`;
-      const captainPick =
-        host && t.memberParticipantIds.length > 0
-          ? `<div class="mt-1 flex flex-wrap gap-1 items-center justify-end">
+      : "";
+
+  const guestModeHint =
+    !host && privateRoomTeamPlayModeState === "individual"
+      ? ""
+      : !host
+        ? `<p class="text-xs text-slate-400 text-right m-0 mt-2">${escapeHtml(modeLabel)} · القلوب لكل لاعب: ${privateRoomHeartsPerPlayerState}</p>`
+        : "";
+
+  const unassignedHtml =
+    teamModeActive && privateRoomUnassignedIds.length > 0
+      ? `<p class="text-amber-200/90 text-xs m-0 mt-2">لم يُعيَّن بعد: ${privateRoomUnassignedIds
+          .map((id) => escapeHtml(participantDisplayName(id)))
+          .join("، ")}</p>`
+      : "";
+
+  const cards =
+    teamModeActive && tls
+      ? tls.teams
+          .map((t) => {
+            const members = t.memberParticipantIds
+              .map((pid) => {
+                const isCap = pid === t.captainParticipantId;
+                const isMe = myParticipantId === pid;
+                return `<li class="text-xs ${isMe ? "text-amber-200" : "text-slate-200"}">${escapeHtml(participantDisplayName(pid))}${isCap ? " · كابتن" : ""}${isMe ? " (أنت)" : ""}</li>`;
+              })
+              .join("");
+            const myTeam = myParticipantId && t.memberParticipantIds.includes(myParticipantId);
+            const imCaptain = myParticipantId === t.captainParticipantId;
+            const joinBtn =
+              !locked && !myTeam
+                ? `<button type="button" class="ui-btn ui-btn--cta py-1 px-2 text-xs mt-2" data-join-team="${escapeHtml(t.teamId)}">انضمام</button>`
+                : "";
+            const leaveBtn =
+              !locked && myTeam
+                ? `<button type="button" class="ui-btn ui-btn--ghost py-1 px-2 text-xs mt-2" data-leave-team="1">مغادرة الفريق</button>`
+                : "";
+            const nameRow = imCaptain
+              ? `<div class="flex gap-1 mt-1"><input type="text" maxlength="48" class="app-input flex-1 px-2 py-1 text-xs" data-team-name-input="${escapeHtml(t.teamId)}" value="${escapeHtml(t.displayName)}" /><button type="button" class="ui-btn ui-btn--ghost py-1 px-2 text-xs" data-save-team-name="${escapeHtml(t.teamId)}">حفظ الاسم</button></div>`
+              : `<p class="text-sm font-semibold text-amber-100/95 m-0">${escapeHtml(t.displayName)}</p>`;
+            const captainPick =
+              host && t.memberParticipantIds.length > 0
+                ? `<div class="mt-1 flex flex-wrap gap-1 items-center justify-end">
               <span class="text-[10px] text-slate-400">كابتن:</span>
               <select class="app-input px-1 py-0.5 text-[10px]" data-captain-select="${escapeHtml(t.teamId)}">
                 ${t.memberParticipantIds
@@ -354,21 +378,27 @@ function renderPrivateRoomTeamsSection(): void {
               </select>
               <button type="button" class="ui-btn ui-btn--ghost py-0.5 px-1 text-[10px]" data-apply-captain="${escapeHtml(t.teamId)}">تعيين</button>
             </div>`
-          : "";
-      const removeEmpty =
-        host && t.memberParticipantIds.length === 0 && tls.teams.length > 2
-          ? `<button type="button" class="ui-btn ui-btn--ghost py-0.5 px-1 text-[10px] mt-1" data-remove-team="${escapeHtml(t.teamId)}">حذف فريق فارغ</button>`
-          : "";
-      return `<div class="rounded-lg border border-amber-500/20 p-3 bg-slate-900/40 text-right" data-team-card="${escapeHtml(t.teamId)}">
+                : "";
+            const removeEmpty =
+              host && t.memberParticipantIds.length === 0 && tls.teams.length > 2
+                ? `<button type="button" class="ui-btn ui-btn--ghost py-0.5 px-1 text-[10px] mt-1" data-remove-team="${escapeHtml(t.teamId)}">حذف فريق فارغ</button>`
+                : "";
+            return `<div class="rounded-lg border border-amber-500/20 p-3 bg-slate-900/40 text-right" data-team-card="${escapeHtml(t.teamId)}">
         ${nameRow}
         <ul class="list-none m-0 mt-2 p-0 space-y-1">${members || '<li class="text-xs text-slate-500">لا أعضاء بعد</li>'}</ul>
         ${captainPick}
         <div class="flex flex-wrap gap-2 justify-end">${joinBtn}${leaveBtn}</div>
         ${removeEmpty}
       </div>`;
-    })
-    .join("");
-  root.innerHTML = `<div class="space-y-3 mt-2">${adminHtml}${unassignedHtml}<div class="grid gap-2 sm:grid-cols-2">${cards}</div></div>`;
+          })
+          .join("")
+      : "";
+
+  const teamsGridHtml = cards
+    ? `<div class="grid gap-2 sm:grid-cols-2 mt-2">${cards}</div>`
+    : "";
+
+  root.innerHTML = `<div class="space-y-3 mt-2">${hostBaseAdminHtml}${hostTeamManagementHtml}${guestModeHint}${unassignedHtml}${teamsGridHtml}</div>`;
 
   root.querySelector("#private-admin-apply-mode")?.addEventListener("click", () => {
     const sel = root.querySelector<HTMLSelectElement>("#private-admin-play-mode");
