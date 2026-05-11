@@ -995,6 +995,11 @@ export class GameManager {
           cb?.({ ok: false, error: "no_match" });
           return;
         }
+        if (!match.allowsTransportReconnect()) {
+          this.logReconnectEvent({ ...logBase, participantId, matchId, ok: false, error: "solo_no_transport_reconnect" });
+          cb?.({ ok: false, error: "solo_no_transport_reconnect" });
+          return;
+        }
         if (this.participantIdToMatch.get(participantId) !== match) {
           this.logReconnectEvent({ ...logBase, participantId, matchId, ok: false, error: "seat_not_in_match" });
           cb?.({ ok: false, error: "seat_not_in_match" });
@@ -1025,7 +1030,7 @@ export class GameManager {
         await socket.join(match.room);
         match.emitCaptainTeamVoteResyncToRoom();
         const newSecret = match.rotateResumeSecret(participantId);
-        if (newSecret) {
+        if (newSecret && match.allowsTransportReconnect()) {
           socket.emit("match_resume_token", {
             matchId: match.matchId,
             participantId,

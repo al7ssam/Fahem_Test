@@ -173,6 +173,8 @@ let privateRoomTeamsLobbyState: {
 let privateRoomUnassignedIds: string[] = [];
 /** وضع الفرق أثناء المباراة الحالية (null = فردي/لوبي عام). */
 let matchTeamPlayMode: "individual" | "teams_first_answer" | "teams_captain_approval" | null = null;
+/** تخزين/قبول رموز استئناف النقل فقط أثناء مباراة متعددة اللاعبين على الخادم (غرفة خاصة أو ≥2 لاعب). */
+let reconnectRuntimeActive = false;
 let teamRoundUiLocked = false;
 let teamRoundCaptainSubmitted = false;
 let captainTapPendingIndex: number | null = null;
@@ -1151,6 +1153,7 @@ function disconnectSearchSocket(): void {
   privateReadyPending = false;
   privateQrDataUrl = null;
   isPrivateRoomSession = false;
+  clearReconnectMultiplayerRuntime();
 }
 
 function returnToDifficultyFromSearch(): void {
@@ -4482,6 +4485,15 @@ function clearStoredMatchResume(): void {
   }
 }
 
+function canUseReconnect(): boolean {
+  return reconnectRuntimeActive;
+}
+
+function clearReconnectMultiplayerRuntime(): void {
+  reconnectRuntimeActive = false;
+  clearStoredMatchResume();
+}
+
 function applyTeamVoteBadgesToOptionButtons(): void {
   const opts = app.querySelector<HTMLDivElement>("#opts");
   if (!opts) return;
@@ -4712,7 +4724,9 @@ function applyStudyBundleFromServer(study: Record<string, unknown>): void {
     studyStartsAt = Number(rrw.startsAt) || Number(rrw.serverNow) || nowSynced();
     studyDurationMs = Math.max(1000, studyEndsAt - studyStartsAt);
   }
-  if (!app.querySelector("#study-cards")) render();
+  if (sp || rrw) {
+    render();
+  }
   const readyBtn = app.querySelector<HTMLButtonElement>("#round-ready-btn");
   const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
   if (readyBtn && rrw) {
@@ -4770,6 +4784,14 @@ function applyGameStartedClientPayload(payload: {
       isCaptain: Boolean(p.isCaptain),
     }));
     syncMyParticipantIdFromPlayers(payload.players);
+    const playerCount = payload.players.length;
+    reconnectRuntimeActive = isPrivateRoomSession || playerCount >= 2;
+    if (!reconnectRuntimeActive) {
+      clearStoredMatchResume();
+    }
+  } else {
+    reconnectRuntimeActive = false;
+    clearStoredMatchResume();
   }
   soloLearningPending = false;
   privateRoomCodeState = null;
@@ -4874,7 +4896,7 @@ async function tryResumeMatchAfterConnect(s: Socket, flowToken: number): Promise
   if (!raw) return false;
   const maxAge = raw.reconnectGraceMs + 120_000;
   if (Date.now() - raw.storedAt > maxAge) {
-    clearStoredMatchResume();
+    clearReconnectMultiplayerRuntime();
     return false;
   }
   const backoffMs = [0, 500, 1000, 2000, 2000];
@@ -4900,11 +4922,16 @@ async function tryResumeMatchAfterConnect(s: Socket, flowToken: number): Promise
               resolve("retry");
               return;
             }
-            clearStoredMatchResume();
+            clearReconnectMultiplayerRuntime();
             resolve("fail");
             return;
           }
-          if (ack.snapshot) applyMatchStateSnapshotFromServer(s, ack.snapshot);
+          if (!ack.snapshot || typeof ack.snapshot !== "object") {
+            clearReconnectMultiplayerRuntime();
+            resolve("fail");
+            return;
+          }
+          applyMatchStateSnapshotFromServer(s, ack.snapshot);
           resolve("ok");
         },
       );
@@ -4912,7 +4939,7 @@ async function tryResumeMatchAfterConnect(s: Socket, flowToken: number): Promise
     if (outcome === "ok") return true;
     if (outcome === "fail") return false;
   }
-  clearStoredMatchResume();
+  clearReconnectMultiplayerRuntime();
   return false;
 }
 
@@ -4931,6 +4958,7 @@ function connectSocket(
   const joinFlowStartMs = performance.now();
   socket?.removeAllListeners();
   socket?.disconnect();
+  reconnectRuntimeActive = false;
 
   currentGameMode = mode;
   if (joinKind === "public" || joinKind === "solo") {
@@ -4942,7 +4970,9 @@ function connectSocket(
   const s = createAuthedSocket();
   socket = s;
   myParticipantId = null;
-  if (joinKind === "solo") clearStoredMatchResume();
+  if (joinKind === "solo" || joinKind === "private_join" || joinKind === "private_create") {
+    clearReconnectMultiplayerRuntime();
+  }
   let joinAckTimer: number | null = null;
   let joinCompleted = false;
 
@@ -5010,7 +5040,13 @@ function connectSocket(
             ? "تم الاتصال بالخادم. جاري الانضمام للغرفة..."
             : "تم الاتصال بالخادم. جاري الدخول إلى البحث...";
     }
-    if (joinKind !== "solo" && (await tryResumeMatchAfterConnect(s, flowToken))) {
+    const skipResumeForExplicitPrivateJoin =
+      joinKind === "private_join" || joinKind === "private_create";
+    if (
+      joinKind !== "solo" &&
+      !skipResumeForExplicitPrivateJoin &&
+      (await tryResumeMatchAfterConnect(s, flowToken))
+    ) {
       if (joinAckTimer) {
         window.clearTimeout(joinAckTimer);
         joinAckTimer = null;
@@ -5021,7 +5057,7 @@ function connectSocket(
     }
     joinAckTimer = window.setTimeout(() => {
       if (joinCompleted) return;
-      failBackToName("تأخر الاتصال. تحقق من الشبكة ثم حاول مرة أخرى.");
+      failBackToName("انتهت مهلة انتظار رد الخادم على طلب الانضمام. تحقق من الشبكة ثم أعد المحاولة.");
       socket?.disconnect();
     }, 8000);
     const payload = {
@@ -5076,8 +5112,8 @@ function connectSocket(
           || (joinKind === "solo"
             ? "تعذر بدء التعلم الفردي. حاول مرة أخرى."
             : joinKind === "private_create" || joinKind === "private_join"
-              ? "تعذر الدخول إلى الغرفة الخاصة."
-              : "تعذر الدخول. حاول مرة أخرى."),
+              ? "رفض الخادم طلب الغرفة الخاصة (تحقق من الكود أو الصلاحيات)."
+              : "رفض الخادم طلب الدخول إلى البحث."),
         );
         return;
       }
@@ -5121,7 +5157,7 @@ function connectSocket(
 
   s.on("connect_error", () => {
     if (joinCompleted) return;
-    failBackToName("تعذر الاتصال بالخادم. حاول مرة أخرى.");
+    failBackToName("فشل اتصال المقبس (شبكة أو خادم). تحقق من الإنترنت ثم أعد المحاولة.");
   });
 
   s.on("disconnect", () => {
@@ -5412,6 +5448,7 @@ function connectSocket(
       reconnectGraceMs?: number;
     }) => {
       if (!p.matchId || !p.participantId || !p.resumeSecret) return;
+      if (!canUseReconnect()) return;
       writeStoredMatchResume({
         matchId: p.matchId,
         participantId: p.participantId,
@@ -5742,7 +5779,7 @@ function connectSocket(
         studyBody: string | null;
       }>;
     }) => {
-      clearStoredMatchResume();
+      clearReconnectMultiplayerRuntime();
       if (cdInterval) {
         window.clearInterval(cdInterval);
         cdInterval = null;

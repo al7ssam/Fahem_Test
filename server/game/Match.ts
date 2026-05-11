@@ -474,6 +474,11 @@ export class Match {
     return this.finished;
   }
 
+  /** استئناف النقل عبر المقبس لمباريات متعددة اللاعبين فقط (لا للتعلم الفردي). */
+  allowsTransportReconnect(): boolean {
+    return !this.isSoloMatch;
+  }
+
   getParticipantIds(): readonly string[] {
     return [...this.players.keys()];
   }
@@ -538,6 +543,7 @@ export class Match {
 
   /** هل يُسمح بربط مقبس جديد لهذا المقعد (مباراة جارية، غير منتهية كمقعد خارج). */
   canResumeTransport(participantId: string): boolean {
+    if (!this.allowsTransportReconnect()) return false;
     if (this.finished) return false;
     const p = this.players.get(participantId);
     if (!p) return false;
@@ -1195,15 +1201,17 @@ export class Match {
       abilityCosts: this.snapshotAbilityCosts(),
       abilityToggles: this.snapshotAbilityToggles(),
     });
-    for (const [pid, pl] of this.players) {
-      const resumeSecret = this.resumeSecretsByParticipant.get(pid)?.toString("base64url");
-      if (resumeSecret) {
-        this.io.to(pl.currentSocketId).emit("match_resume_token", {
-          matchId: this.matchId,
-          participantId: pid,
-          resumeSecret,
-          reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
-        });
+    if (this.allowsTransportReconnect()) {
+      for (const [pid, pl] of this.players) {
+        const resumeSecret = this.resumeSecretsByParticipant.get(pid)?.toString("base64url");
+        if (resumeSecret) {
+          this.io.to(pl.currentSocketId).emit("match_resume_token", {
+            matchId: this.matchId,
+            participantId: pid,
+            resumeSecret,
+            reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
+          });
+        }
       }
     }
     console.debug(`[matchmaking] runtime_settings_loaded_ms=${loadRuntimeMs} match=${this.matchId} mode=${this.gameMode}`);
