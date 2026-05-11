@@ -1235,6 +1235,16 @@ export class GameManager {
       this.emitPrivateLobbyState(roomCode);
       return;
     }
+    if (room.teamPlayMode !== "individual" && !room.teamsLobby) {
+      room.lockedParticipantIds = [];
+      room.roomVersion += 1;
+      this.emitPrivateLobbyState(roomCode);
+      this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+        reason: "teams_lobby_missing",
+        message: "وضع الفرق غير مكتمل. اضبط الفرق من اللوبي ثم أعد المحاولة.",
+      });
+      return;
+    }
     if (room.teamPlayMode !== "individual" && room.teamsLobby) {
       const snaps = nonEmptyTeamSnapshots(room.teamsLobby);
       if (snaps.length < 2) {

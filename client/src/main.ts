@@ -601,6 +601,9 @@ let customLessonMsg = "";
 let customLessonClientId = "";
 /** يظهر لصق JSON وأزرار الأدوات الخارجية بعد نسخ البرومبت (أو استعادة مسودة) */
 let customLessonShowJsonPanel = false;
+/** تحميل شاشة الدرس المخصص بعد الانتقال (بدون حجب الخيط قبل أول رسمة). */
+type CustomLessonShellBoot = "idle" | "loading" | "ready" | "error";
+let customLessonShellBoot: CustomLessonShellBoot = "idle";
 let savedLessonsRows: SavedLessonSummary[] = [];
 let savedLessonsLoading = false;
 let savedLessonsLibraryErr = "";
@@ -631,6 +634,59 @@ async function refreshCustomLessonPromptServerOverrideFlag(): Promise<void> {
   }
   const r = await fetchMeCustomLessonPromptParams();
   customLessonPromptHasServerOverride = Boolean(r.ok && r.params != null);
+}
+
+async function bootstrapCustomLessonShell(): Promise<void> {
+  try {
+    await Promise.all([fetchLessonAiPromptPublicConfig(), refreshCustomLessonPromptServerOverrideFlag()]);
+    const base = defaultCustomPromptParams();
+    const d = loadCustomLessonDraft();
+    const localPrefs = loadCustomLessonPromptPrefs();
+    let promptResolved = base;
+    if (getAuthState().status === "authenticated") {
+      const me = await fetchMeCustomLessonPromptParams();
+      if (me.ok && me.params != null) {
+        promptResolved = mergeUserPromptParamsWithSiteDefaults(base, me.params);
+        customLessonPromptHasServerOverride = true;
+      } else if (localPrefs) {
+        promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
+      } else if (d?.promptParams) {
+        promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
+      }
+    } else if (localPrefs) {
+      promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
+    } else if (d?.promptParams) {
+      promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
+    }
+    customLessonPromptParams = promptResolved;
+    if (d) {
+      customLessonClientId = d.clientLessonId;
+      customLessonLearningIntent = d.learningIntent;
+      customLessonJsonText = d.jsonText;
+      customLessonSessionToken = d.lastSessionToken ?? null;
+      customLessonShowJsonPanel =
+        d.showJsonPanel === true ||
+        (String(d.jsonText ?? "").trim().length > 0 && d.showJsonPanel !== false);
+    } else {
+      customLessonClientId = "";
+      customLessonLearningIntent = "";
+      customLessonJsonText = "";
+      customLessonSessionToken = null;
+      customLessonShowJsonPanel = false;
+    }
+    customLessonValidatedBody = null;
+    customLessonPreviewLesson = null;
+    customLessonErr = "";
+    customLessonMsg = "";
+    customLessonShellBoot = "ready";
+  } catch {
+    customLessonShellBoot = "error";
+    customLessonErr = "تعذر تحميل الإعدادات.";
+    customLessonMsg = "";
+  }
+  if (phase === "custom_lesson") {
+    render();
+  }
 }
 
 async function fetchLessonAiPromptPublicConfig(): Promise<void> {
@@ -1136,6 +1192,51 @@ function nowSynced(): number {
   return Date.now() + clockOffsetMs;
 }
 
+/** تصفير مزامنة إصدار الغرفة عند نية اتصال خاصة جديدة (لا يمسح اسم اللاعب). */
+function resetPrivateRoomSyncStateForNewSocketIntent(): void {
+  privateRoomVersionState = 0;
+  privateQrDataUrl = null;
+}
+
+type PrivateLobbyJoinAck = {
+  roomCode?: string;
+  inviteUrl?: string;
+  hostParticipantId?: string;
+  mode?: GameMode;
+  subcategoryKey?: string | null;
+  difficultyMode?: DifficultyMode;
+  roomVersion?: number;
+  roomSettings?: { questionMs?: number; studyPhaseMs?: number };
+};
+
+/** تطبيق نتيجة إنشاء/انضمام غرفة خاصة بعد ack ناجح — انتقال UI واحد. */
+function applyPrivateLobbyJoinAck(joinKind: JoinKind, ack: PrivateLobbyJoinAck): void {
+  if (joinKind !== "private_create" && joinKind !== "private_join") return;
+  if (ack.roomCode) privateRoomCodeState = ack.roomCode;
+  if (ack.inviteUrl) privateRoomInviteUrl = ack.inviteUrl;
+  if (ack.hostParticipantId) privateRoomHostParticipantId = ack.hostParticipantId;
+  if (typeof ack.roomVersion === "number") privateRoomVersionState = ack.roomVersion;
+  if (ack.roomSettings?.questionMs) privateRoomQuestionMs = ack.roomSettings.questionMs;
+  if (ack.roomSettings?.studyPhaseMs) privateRoomStudyPhaseMs = ack.roomSettings.studyPhaseMs;
+  if (ack.mode) currentGameMode = ack.mode;
+  if (ack.subcategoryKey !== undefined) selectedSubcategoryKey = ack.subcategoryKey;
+  if (ack.difficultyMode) selectedDifficultyMode = ack.difficultyMode;
+  if (ack.roomCode) lastPrivateRoomCode = ack.roomCode;
+  isPrivateRoomSession = true;
+  if (privateRoomInviteUrl) {
+    void ensurePrivateQrDataUrl(privateRoomInviteUrl);
+  }
+  if (phase !== "countdown") {
+    phase = "private_room_lobby";
+  }
+  lobbyNotice =
+    joinKind === "private_create"
+      ? "تم إنشاء الغرفة الخاصة بنجاح."
+      : "تم الانضمام للغرفة الخاصة.";
+  clearReconnectMultiplayerRuntime();
+  render();
+}
+
 function disconnectSearchSocket(): void {
   searchFlowToken += 1;
   socket?.removeAllListeners();
@@ -1468,51 +1569,12 @@ function render(): void {
           }
           if (b.dataset.flow === "custom_lesson") {
             err.textContent = "";
-            void (async () => {
-              await fetchLessonAiPromptPublicConfig();
-              await refreshCustomLessonPromptServerOverrideFlag();
-              const base = defaultCustomPromptParams();
-              const d = loadCustomLessonDraft();
-              const localPrefs = loadCustomLessonPromptPrefs();
-              let promptResolved = base;
-              if (getAuthState().status === "authenticated") {
-                const me = await fetchMeCustomLessonPromptParams();
-                if (me.ok && me.params != null) {
-                  promptResolved = mergeUserPromptParamsWithSiteDefaults(base, me.params);
-                  customLessonPromptHasServerOverride = true;
-                } else if (localPrefs) {
-                  promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
-                } else if (d?.promptParams) {
-                  promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
-                }
-              } else if (localPrefs) {
-                promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
-              } else if (d?.promptParams) {
-                promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
-              }
-              customLessonPromptParams = promptResolved;
-              if (d) {
-                customLessonClientId = d.clientLessonId;
-                customLessonLearningIntent = d.learningIntent;
-                customLessonJsonText = d.jsonText;
-                customLessonSessionToken = d.lastSessionToken ?? null;
-                customLessonShowJsonPanel =
-                  d.showJsonPanel === true ||
-                  (String(d.jsonText ?? "").trim().length > 0 && d.showJsonPanel !== false);
-              } else {
-                customLessonClientId = "";
-                customLessonLearningIntent = "";
-                customLessonJsonText = "";
-                customLessonSessionToken = null;
-                customLessonShowJsonPanel = false;
-              }
-              customLessonValidatedBody = null;
-              customLessonPreviewLesson = null;
-              customLessonErr = "";
-              customLessonMsg = "";
-              phase = "custom_lesson";
-              render();
-            })();
+            customLessonShellBoot = "loading";
+            customLessonErr = "";
+            customLessonMsg = "";
+            phase = "custom_lesson";
+            render();
+            void bootstrapCustomLessonShell();
             return;
           }
           selectedModeInName =
@@ -1768,6 +1830,11 @@ function render(): void {
             </div>
             <h1 class="text-xl font-extrabold text-amber-300 text-center m-0">درس مخصص</h1>
           </div>
+          ${
+            customLessonShellBoot === "loading"
+              ? `<p class="text-amber-200 text-sm m-0" role="status">جاري تحميل الإعدادات…</p>`
+              : ""
+          }
           <p class="text-slate-400 text-sm m-0">اكتب ما تريد تعلّمه، انسخ البرومبت إلى ChatGPT أو Gemini، ثم الصق JSON هنا. بعد «إضافة الدرس» يمكنك حفظ نسخة في «مكتبة دروسي» عند تسجيل الدخول.</p>
           <label class="text-slate-300 text-sm">ماذا تريد أن تتعلّم؟</label>
           <textarea id="cl-intent" rows="4" class="app-input w-full px-3 py-2 text-sm" placeholder="مادة، موضوع، أو ملخّص لما تريد أن يغطيه الدرس...">${escapeHtml(customLessonLearningIntent)}</textarea>
@@ -1881,6 +1948,7 @@ function render(): void {
     });
     app.querySelector("#cl-back")?.addEventListener("click", () => {
       persistPromptPrefs();
+      customLessonShellBoot = "idle";
       phase = "name";
       nameFlowStep = "mode";
       render();
@@ -2064,8 +2132,12 @@ function render(): void {
         persistPromptPrefs();
         storePlayerName(name);
         playerNameDraft = name;
-        phase = "matchmaking";
+        phase = "private_room_lobby";
         soloLearningPending = false;
+        privateRoomCodeState = null;
+        privateRoomInviteUrl = null;
+        privateQrDataUrl = null;
+        isPrivateRoomSession = true;
         currentGameMode = "lesson";
         lobbyNotice = "جاري إنشاء الغرفة الخاصة للدرس المخصص…";
         render();
@@ -2252,8 +2324,12 @@ function render(): void {
         customLessonSessionToken = data.token;
         storePlayerName(name);
         playerNameDraft = name;
-        phase = "matchmaking";
+        phase = "private_room_lobby";
         soloLearningPending = false;
+        privateRoomCodeState = null;
+        privateRoomInviteUrl = null;
+        privateQrDataUrl = null;
+        isPrivateRoomSession = true;
         currentGameMode = "lesson";
         lobbyNotice = "جاري إنشاء الغرفة الخاصة للدرس المحفوظ…";
         render();
@@ -4966,11 +5042,14 @@ function connectSocket(
     lastPrivateRoomCode = null;
     privateRoomHostParticipantId = null;
   }
+  if (joinKind === "private_create" || joinKind === "private_join") {
+    resetPrivateRoomSyncStateForNewSocketIntent();
+  }
 
   const s = createAuthedSocket();
   socket = s;
   myParticipantId = null;
-  if (joinKind === "solo" || joinKind === "private_join" || joinKind === "private_create") {
+  if (joinKind === "solo" || joinKind === "private_create") {
     clearReconnectMultiplayerRuntime();
   }
   let joinAckTimer: number | null = null;
@@ -5039,6 +5118,13 @@ function connectSocket(
           : joinKind === "private_join"
             ? "تم الاتصال بالخادم. جاري الانضمام للغرفة..."
             : "تم الاتصال بالخادم. جاري الدخول إلى البحث...";
+    }
+    if (
+      joinKind === "public" &&
+      readStoredMatchResume() &&
+      noticeEl
+    ) {
+      noticeEl.textContent = "جاري محاولة استعادة المباراة…";
     }
     const skipResumeForExplicitPrivateJoin =
       joinKind === "private_join" || joinKind === "private_create";
@@ -5117,38 +5203,20 @@ function connectSocket(
         );
         return;
       }
-      if (joinKind === "private_create" || joinKind === "private_join") {
-        if (ack.roomCode) privateRoomCodeState = ack.roomCode;
-        if (ack.inviteUrl) privateRoomInviteUrl = ack.inviteUrl;
-        if (ack.hostParticipantId) privateRoomHostParticipantId = ack.hostParticipantId;
-        if (typeof ack.roomVersion === "number") privateRoomVersionState = ack.roomVersion;
-        if (ack.roomSettings?.questionMs) privateRoomQuestionMs = ack.roomSettings.questionMs;
-        if (ack.roomSettings?.studyPhaseMs) privateRoomStudyPhaseMs = ack.roomSettings.studyPhaseMs;
-        if (ack.mode) currentGameMode = ack.mode;
-        if (ack.subcategoryKey !== undefined) selectedSubcategoryKey = ack.subcategoryKey;
-        if (ack.difficultyMode) selectedDifficultyMode = ack.difficultyMode;
-        if (ack.roomCode) lastPrivateRoomCode = ack.roomCode;
-        isPrivateRoomSession = true;
-        if (privateRoomInviteUrl) {
-          void ensurePrivateQrDataUrl(privateRoomInviteUrl);
-        }
-      }
       console.debug("[join-flow] connect->join_ack_ms", Math.round(performance.now() - joinFlowStartMs));
+      if (joinKind === "private_create" || joinKind === "private_join") {
+        applyPrivateLobbyJoinAck(joinKind, ack);
+        return;
+      }
       if (phase !== "matchmaking" && phase !== "private_room_lobby") {
-        phase = joinKind === "private_create" || joinKind === "private_join"
-          ? "private_room_lobby"
-          : "matchmaking";
+        phase = "matchmaking";
         render();
       } else {
         const noticeEl2 = app.querySelector<HTMLParagraphElement>("#lobby-notice");
         if (noticeEl2) {
           noticeEl2.textContent = joinKind === "solo"
             ? "تم إنشاء الجولة الفردية. جاري البدء..."
-            : joinKind === "private_create"
-              ? "تم إنشاء الغرفة الخاصة بنجاح."
-              : joinKind === "private_join"
-                ? "تم الانضمام للغرفة الخاصة."
-                : "تم الدخول بنجاح. جاري البحث عن منافسين...";
+            : "تم الدخول بنجاح. جاري البحث عن منافسين...";
         }
       }
       },
@@ -5218,6 +5286,10 @@ function connectSocket(
       };
       unassignedParticipantIds?: string[];
     }) => {
+      const prevRoomCode = privateRoomCodeState;
+      if (prevRoomCode !== null && prevRoomCode !== payload.roomCode) {
+        resetPrivateRoomSyncStateForNewSocketIntent();
+      }
       if (payload.roomVersion < privateRoomVersionState) return;
       privateRoomVersionState = payload.roomVersion;
       privateRoomCodeState = payload.roomCode;
@@ -5400,7 +5472,9 @@ function connectSocket(
         ? payload.message || "لا توجد أسئلة كافية في مستوى الصعوبة هذا أو هذا التصنيف."
         : payload?.reason === "not_enough_teams"
           ? payload.message || "يجب أن يكون هناك فريقان على الأقل بأعضاء لبدء وضع الفرق."
-          : payload?.reason === "lesson_not_found" || payload?.reason === "lesson_invalid"
+          : payload?.reason === "teams_lobby_missing"
+            ? payload.message || "وضع الفرق غير مكتمل. اضبط الفرق من اللوبي ثم أعد المحاولة."
+            : payload?.reason === "lesson_not_found" || payload?.reason === "lesson_invalid"
             ? payload?.message || "تعذر بدء مباراة الدرس."
             : LOBBY_MSG_CANCELLED;
     if (phase === "matchmaking" || phase === "private_room_lobby") render();

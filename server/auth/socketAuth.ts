@@ -21,7 +21,8 @@ export async function authenticateSocket(socket: Socket, next: (err?: Error) => 
   try {
     const token = readSocketBearer(socket);
     if (!token) {
-      next(new Error("unauthorized"));
+      delete (socket.data as { auth?: SocketAuthContext }).auth;
+      next();
       return;
     }
     const user = await authService.verifyAccessToken(token);
