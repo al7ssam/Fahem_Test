@@ -273,8 +273,15 @@ export class Match {
     return this.teamSnapshots.size > 0;
   }
 
+  /** وضع الفريق الفعلي للمباراة: يقرأ من كائن الفرق أو من الحقل العلوي (مصدر حق لـ game_started). */
   private privateTeamPlayMode(): PrivateRoomTeamPlayMode | null {
-    return this.privateRuntime?.teams ? this.privateRuntime.teams.teamPlayMode : null;
+    const pr = this.privateRuntime;
+    if (!pr) return null;
+    const nested = pr.teams?.teamPlayMode;
+    if (nested === "teams_first_answer" || nested === "teams_captain_approval") return nested;
+    const top = pr.teamPlayMode;
+    if (top === "teams_first_answer" || top === "teams_captain_approval") return top;
+    return null;
   }
 
   /** جاهزية المذاكرة/الجولة: يتفق مع وضع الفرق عند تعطيل القلوب (لا يعتمد على hearts<=0 فقط). */
@@ -564,6 +571,7 @@ export class Match {
       matchId: this.matchId,
       gameMode: this.gameMode,
       teamPlayMode: this.privateRuntime?.teamPlayMode,
+      heartsPerPlayer: this.privateRuntime?.heartsPerPlayer,
       subcategoryKey: this.studySubcategoryKey ?? undefined,
       difficultyMode: this.difficultyMode,
       players,
@@ -1194,6 +1202,7 @@ export class Match {
       matchId: this.matchId,
       gameMode: this.gameMode,
       teamPlayMode: this.privateRuntime?.teamPlayMode,
+      heartsPerPlayer: this.privateRuntime?.heartsPerPlayer,
       subcategoryKey: this.studySubcategoryKey ?? undefined,
       difficultyMode: this.difficultyMode,
       players: this.snapshotPlayers(),

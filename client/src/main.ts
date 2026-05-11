@@ -173,6 +173,8 @@ let privateRoomTeamsLobbyState: {
 let privateRoomUnassignedIds: string[] = [];
 /** وضع الفرق أثناء المباراة الحالية (null = فردي/لوبي عام). */
 let matchTeamPlayMode: "individual" | "teams_first_answer" | "teams_captain_approval" | null = null;
+/** إعداد القلوب من غرفة خاصة (0–5) كما أرسله الخادم مع game_started؛ null = لوبي عام (عرض 3 خانات). */
+let matchHeartsPerPlayerSetting: number | null = null;
 /** تخزين/قبول رموز استئناف النقل فقط أثناء مباراة متعددة اللاعبين على الخادم (غرفة خاصة أو ≥2 لاعب). */
 let reconnectRuntimeActive = false;
 /** أثناء محاولة resume الصريحة نسمح بقبول token حتى قبل game_started. */
@@ -3661,6 +3663,7 @@ function render(): void {
       studyCards = [];
       lobbyPlayersList = [];
       matchTeamPlayMode = null;
+      matchHeartsPerPlayerSetting = null;
       resetPrivateRoomTeamLobbyClientState();
       render();
     });
@@ -4920,6 +4923,8 @@ function applyStudyBundleFromServer(study: Record<string, unknown>): void {
 function applyGameStartedClientPayload(payload: {
   gameMode?: GameMode;
   teamPlayMode?: "individual" | "teams_first_answer" | "teams_captain_approval";
+  /** إعداد المضيف في الغرفة الخاصة؛ يحدد عدد رموز القلب في الواجهة. */
+  heartsPerPlayer?: number;
   revealKeysActive?: boolean;
   keysAttacksEnabled?: boolean;
   abilityCosts?: Partial<AbilityCostsPayload> | null;
@@ -4942,6 +4947,8 @@ function applyGameStartedClientPayload(payload: {
   if (payload.gameMode) currentGameMode = payload.gameMode;
   matchTeamPlayMode =
     payload.teamPlayMode && payload.teamPlayMode !== "individual" ? payload.teamPlayMode : null;
+  matchHeartsPerPlayerSetting =
+    typeof payload.heartsPerPlayer === "number" ? payload.heartsPerPlayer : null;
   revealKeysActiveState = Boolean(payload.revealKeysActive);
   keysAttacksEnabledState = payload.keysAttacksEnabled !== false;
   applyAbilityTogglesPayload(payload.abilityToggles ?? null);
@@ -5179,6 +5186,7 @@ function connectSocket(
       isPrivateRoomSession = false;
       resetPrivateRoomTeamLobbyClientState();
       matchTeamPlayMode = null;
+      matchHeartsPerPlayerSetting = null;
     }
     phase = "name";
     render();
@@ -5584,6 +5592,7 @@ function connectSocket(
       matchId?: string;
       gameMode?: GameMode;
       teamPlayMode?: "individual" | "teams_first_answer" | "teams_captain_approval";
+      heartsPerPlayer?: number;
       revealKeysActive?: boolean;
       keysAttacksEnabled?: boolean;
       abilityCosts?: Partial<AbilityCostsPayload> | null;
@@ -5959,6 +5968,7 @@ function connectSocket(
       }>;
     }) => {
       clearReconnectMultiplayerRuntime();
+      matchHeartsPerPlayerSetting = null;
       if (cdInterval) {
         window.clearInterval(cdInterval);
         cdInterval = null;
@@ -6272,11 +6282,20 @@ function connectSoloSocket(
   connectSocket(name, mode, subcategoryKey, difficultyMode, "solo", undefined, lessonIdForMatch);
 }
 
+/** عدد خانات القلب في الشريط العلوي يطابق إعداد المضيف في الغرفة الخاصة (وإلا 3 للّوبي العام). */
+function heartsUiSlotCount(): number {
+  const cfg = matchHeartsPerPlayerSetting;
+  if (cfg === null) return 3;
+  if (cfg === 0) return 3;
+  return Math.min(5, Math.max(1, cfg));
+}
+
 function renderHearts(n: number): void {
   const h = app.querySelector<HTMLDivElement>("#hearts");
   if (!h) return;
+  const slots = heartsUiSlotCount();
   h.innerHTML = "";
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < slots; i++) {
     const span = document.createElement("span");
     span.textContent = i < n ? "❤️" : "🖤";
     h.appendChild(span);
