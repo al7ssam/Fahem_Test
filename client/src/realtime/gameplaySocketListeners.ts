@@ -37,11 +37,18 @@ export type GameplaySocketDeps = {
   render: () => void;
   applyResultScreenPresentation: (kind: "win" | "lose" | "tie" | "empty", emoji: string) => void;
   onGameOver: (payload: unknown) => void;
+  // DOM element accessors — replace app().querySelector calls
+  getOptsContainer: () => HTMLDivElement | null;
+  getStatusElement: () => HTMLParagraphElement | null;
+  getResTitleElement: () => HTMLHeadingElement | null;
+  getResBodyElement: () => HTMLParagraphElement | null;
+  getResKickerElement: () => HTMLParagraphElement | null;
+  getResStatsElement: () => HTMLDivElement | null;
+  getContinueWatchButton: () => HTMLButtonElement | null;
+  getStudyReadyStateElement: () => HTMLParagraphElement | null;
 };
 
 export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDeps): void {
-  const app = deps.getApp;
-
   s.on("question", (q: SnapshotQuestionArg) => {
     deps.bindQuestionOptionsUi(s, q);
   });
@@ -65,7 +72,7 @@ export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDep
       }
       deps.setTeamVoteCountsByChoice(next);
       deps.applyTeamVoteBadgesToOptionButtons();
-      const st = app().querySelector<HTMLParagraphElement>("#status");
+      const st = deps.getStatusElement();
       if (st && deps.getMatchTeamPlayMode() === "teams_captain_approval") {
         const n = Object.keys(votes).length;
         st.textContent = `تصويت الفريق: ${n} عضو سجّل اختيارًا للآن.`;
@@ -81,8 +88,8 @@ export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDep
     if (!me?.teamId || payload.teamId !== me.teamId) return;
     if (payload.participantId && deps.getMyParticipantId() && payload.participantId !== deps.getMyParticipantId()) {
       deps.setTeamRoundUiLocked(true);
-      const optsEl = app().querySelector<HTMLDivElement>("#opts");
-      const st = app().querySelector<HTMLParagraphElement>("#status");
+      const optsEl = deps.getOptsContainer();
+      const st = deps.getStatusElement();
       if (optsEl) {
         optsEl.querySelectorAll("button").forEach((btn) => {
           const htmlBtn = btn as HTMLButtonElement;
@@ -102,7 +109,7 @@ export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDep
     const me = deps.findMeInPlayers(deps.getCurrentMatchPlayers());
     if (!me?.teamId || payload.teamId !== me.teamId) return;
     deps.setTeamRoundCaptainSubmitted(true);
-    const optsEl = app().querySelector<HTMLDivElement>("#opts");
+    const optsEl = deps.getOptsContainer();
     if (optsEl) {
       optsEl.querySelectorAll("button").forEach((btn) => {
         const htmlBtn = btn as HTMLButtonElement;
@@ -110,7 +117,7 @@ export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDep
         htmlBtn.classList.add("option-btn--disabled");
       });
     }
-    const st = app().querySelector<HTMLParagraphElement>("#status");
+    const st = deps.getStatusElement();
     if (st) {
       st.textContent = "أُرسلت إجابة الفريق — انتظر نتيجة السؤال.";
       st.classList.add("status--team-lock");
@@ -215,7 +222,7 @@ export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDep
       );
       deps.refreshKeysBadge();
       deps.renderPlayingPlayersPanel();
-      const status = app().querySelector<HTMLParagraphElement>("#status");
+      const status = deps.getStatusElement();
       if (status) status.textContent = "جاري السؤال التالي…";
     },
   );
@@ -300,7 +307,7 @@ export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDep
         }),
       );
       deps.renderPlayingPlayersPanel();
-      const status = app().querySelector<HTMLParagraphElement>("#status");
+      const status = deps.getStatusElement();
       if (status && deps.getPhase() === "playing") {
         const teamHint = p.teamId && deps.getMatchTeamPlayMode() ? " (فريق)" : "";
         status.textContent =
@@ -317,11 +324,11 @@ export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDep
     deps.setSpectatorEligible(true);
     deps.setPhase("result");
     deps.render();
-    const title = app().querySelector<HTMLHeadingElement>("#res-title");
-    const body = app().querySelector<HTMLParagraphElement>("#res-body");
-    const kicker = app().querySelector<HTMLParagraphElement>("#res-kicker");
-    const stats = app().querySelector<HTMLDivElement>("#res-stats");
-    const continueWatch = app().querySelector<HTMLButtonElement>("#continue-watch");
+    const title = deps.getResTitleElement();
+    const body = deps.getResBodyElement();
+    const kicker = deps.getResKickerElement();
+    const stats = deps.getResStatsElement();
+    const continueWatch = deps.getContinueWatchButton();
     if (kicker) kicker.hidden = true;
     if (title) title.textContent = "خرجت من الجولة";
     if (body) body.textContent = "يمكنك متابعة المباراة كمشاهد حتى النهاية.";
@@ -342,7 +349,7 @@ export function attachGameplaySocketListeners(s: Socket, deps: GameplaySocketDep
       totalActive: number;
     }) => {
       if (!deps.isCurrentStudyRound(p.roundToken, p.macroRound)) return;
-      const readyStateEl = app().querySelector<HTMLParagraphElement>("#study-ready-state");
+      const readyStateEl = deps.getStudyReadyStateElement();
       if (readyStateEl && deps.getPhase() === "studying") {
         const n = p.readyParticipantIds?.length ?? 0;
         readyStateEl.textContent = `جاهزية اللاعبين: ${n}/${p.totalActive}`;

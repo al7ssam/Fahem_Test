@@ -27,7 +27,6 @@ import {
 } from "./customLessonPromptPrefsApi";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
-import { coerceReconnectSnapshotForUi } from "./realtime/matchReconnect";
 import { attachServerDrainingListener } from "./realtime/socketBindings";
 import { createLobbyCountdownController } from "./realtime/lobbyCountdown";
 import { tryResumeMatchAfterConnect } from "./realtime/resumeMatchAfterConnect";
@@ -41,6 +40,13 @@ import type {
   PrivateRoomStateClientPayload,
   PrivateTeamLobbyTeamPayload,
 } from "./realtime/privateRoomFlow";
+import { renderCountdownScreen } from "./screens/CountdownScreen";
+import { renderLessonDoneScreen } from "./screens/LessonDoneScreen";
+import { renderLessonReviewScreen } from "./screens/LessonReviewScreen";
+import { renderMatchLessonReviewScreen } from "./screens/MatchLessonReviewScreen";
+import { renderResultScreen } from "./screens/ResultScreen";
+import { renderSavedLessonsLibraryScreen } from "./screens/SavedLessonsLibraryScreen";
+import { renderSavedLessonEditScreen } from "./screens/SavedLessonEditScreen";
 import {
   cleanupEmailLinkLandingUrl,
   completeGoogleRedirectLogin,
@@ -74,59 +80,25 @@ import {
   storePlayerName,
 } from "./playerDisplayName";
 
-type GameMode = "direct" | "study_then_quiz" | "lesson";
-type DifficultyMode = "mix" | "easy" | "medium" | "hard";
-type Phase =
-  | "name"
-  | "custom_lesson"
-  | "saved_lessons_library"
-  | "saved_lesson_detail"
-  | "saved_lesson_edit"
-  | "lesson_menu"
-  | "lesson_study"
-  | "lesson_quiz"
-  | "lesson_done"
-  | "lesson_review"
-  | "match_lesson_review"
-  | "matchmaking"
-  | "private_room_lobby"
-  | "countdown"
-  | "studying"
-  | "playing"
-  | "result";
-
-type LessonPlaybackStep = {
-  sortOrder: number;
-  questionId: number;
-  prompt: string;
-  options: string[];
-  correctIndex: number;
-  studyBody: string | null;
-  effectiveAnswerMs: number;
-  effectiveStudyCardMs: number;
-};
-
-type LessonPlaybackSection = {
-  id: number;
-  sortOrder: number;
-  titleAr: string | null;
-  /** زمن طور المذاكرة الإجمالي للقسم (مللي)، يعبّئه الخادم عند تقسيم effectiveStudyCardMs */
-  studyPhaseMs?: number;
-  steps: LessonPlaybackStep[];
-};
-
-type LessonPlaybackPayload = {
-  id: number;
-  title: string;
-  slug: string | null;
-  description: string | null;
-  defaultAnswerMs: number;
-  category: { id: number; nameAr: string; icon: string } | null;
-  sections?: LessonPlaybackSection[];
-  steps: LessonPlaybackStep[];
-};
-type NameFlowStep = "mode" | "main_categories" | "sub_categories" | "difficulty";
-type JoinKind = "public" | "solo" | "private_create" | "private_join";
+// ── Extracted foundations (Phase 1) ──────────────────────────────────────────
+import type {
+  GameMode, DifficultyMode, Phase, NameFlowStep, JoinKind,
+  LessonPlaybackSection, LessonPlaybackPayload,
+  ResultScreenKind, ResumePolicy,
+  AbilityCostsPayload, AbilityTogglesPayload, IncomingQuestionPayload,
+} from "./types";
+import { escapeHtml, el } from "./utils";
+import {
+  DEFAULT_RESULT_MESSAGES, PLAYER_SESSION_STORAGE_KEY,
+  RELEASE_VERSION_QUERY_KEY, RELEASE_WATCH_FOREGROUND_INTERVAL_MS,
+  RELEASE_WATCH_FOREGROUND_MAX_MS, RELEASE_WATCH_BACKGROUND_INTERVAL_MS,
+  RELEASE_WATCH_BACKGROUND_MAX_MS, RELEASE_WATCH_MAX_FAILURE_BACKOFF_STEP,
+  RESULT_VIDEO_SRC, CLIENT_RECONNECT_GRACE_MS,
+  LOBBY_MSG_WAIT_NEXT, LOBBY_MSG_CANCELLED,
+  LESSON_BROWSE_UNCATEGORIZED, FAHEM_MATCH_RESUME_KEY,
+  FAHEM_ADMIN_LESSON_PREVIEW_KEY,
+  NavState, ReleaseWatchState, SavedLessonsState,
+} from "./state";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -200,7 +172,6 @@ let captainTapPendingIndex: number | null = null;
 let teamVoteCountsByChoice: Record<number, number> = {};
 let privateReadyPending = false;
 let privateQrDataUrl: string | null = null;
-let privateEntryAutoJoinTried = false;
 let isPrivateRoomSession = false;
 let lastPrivateRoomCode: string | null = null;
 let categoriesState: Array<{
@@ -216,10 +187,6 @@ let categoriesState: Array<{
   }>;
 }> = [];
 let lobbyNotice = "";
-const LOBBY_MSG_WAIT_NEXT =
-  "مباراة جارية الآن بين مجموعة أخرى. أنت في قائمة انتظار الجولة التالية.";
-const LOBBY_MSG_CANCELLED =
-  "تم إلغاء بدء المباراة — لا يوجد الآن عدد كافٍ من اللاعبين الجاهزين.";
 let lobbyPlayersList: Array<{
   participantId?: string;
   userId?: string | null;
@@ -552,18 +519,6 @@ function findServerPlayerRow<T extends { participantId?: string }>(
 let revealKeysActiveState = false;
 let keysAttacksEnabledState = true;
 
-type AbilityCostsPayload = {
-  skillBoost: number;
-  skipQuestion: number;
-  heartAttack: number;
-  reveal: number;
-};
-type AbilityTogglesPayload = {
-  skillBoost: boolean;
-  skipQuestion: boolean;
-  heartAttack: boolean;
-  reveal: boolean;
-};
 let abilityCostsState: AbilityCostsPayload = {
   skillBoost: 1,
   skipQuestion: 1,
@@ -605,7 +560,6 @@ type LessonBrowseStep = "categories" | "lessons" | "lesson_hub";
 let lessonBrowseStep: LessonBrowseStep = "categories";
 /** في خطوة `lessons`: `null` = كل الدروس، `LESSON_BROWSE_UNCATEGORIZED` = بلا تصنيف، وإلا `id` التصنيف */
 let lessonBrowseSelectedCategoryId: number | null = null;
-const LESSON_BROWSE_UNCATEGORIZED = -1;
 let lessonBrowseMsg = "";
 let lessonPlayback: LessonPlaybackPayload | null = null;
 /** درس مخصص: جسم JSON المُتحقق منه (لإنشاء جلسة سيرفر) */
@@ -751,7 +705,6 @@ let lessonStudyIdx = 0;
 let lessonStudySegmentEndAt = 0;
 /** نهاية زمن مذاكرة القسم كاملاً — العداد الظاهر لا يُعاد من الصفر عند «التالي» */
 let lessonStudySectionDeadlineAt = 0;
-let lessonQuizIdx = 0;
 let lessonQuizIdxInSection = 0;
 let lessonSectionIdx = 0;
 let lessonQuizCorrect = 0;
@@ -762,21 +715,6 @@ let lessonQuizRoundResolved = false;
 let lessonRestChoiceByQuestionId = new Map<number, number | null>();
 let lessonReviewIndex = 0;
 
-const DEFAULT_RESULT_MESSAGES = {
-  winnerTitle: "فزت!",
-  loserTitle: "لقد خسرت يا فاشل",
-  tieTitle: "تعادل كامل",
-  winner: "أحسنت — بقيت حتى النهاية.",
-  loser: "انتهت الجولة لصالح لاعب آخر.",
-  tie: "تعادل أو لا فائز — حاول مرة أخرى!",
-} as const;
-const PLAYER_SESSION_STORAGE_KEY = "fahem.playerSessionId";
-const RELEASE_VERSION_QUERY_KEY = "v";
-const RELEASE_WATCH_FOREGROUND_INTERVAL_MS = 30_000;
-const RELEASE_WATCH_FOREGROUND_MAX_MS = 60_000;
-const RELEASE_WATCH_BACKGROUND_INTERVAL_MS = 3 * 60_000;
-const RELEASE_WATCH_BACKGROUND_MAX_MS = 5 * 60_000;
-const RELEASE_WATCH_MAX_FAILURE_BACKOFF_STEP = 4;
 let releaseWatchHandle: number | null = null;
 let lastKnownReleaseVersion: string | null = null;
 let lastKnownReleaseEtag: string | null = null;
@@ -793,15 +731,6 @@ const releaseWatchMetrics = {
   immediateRefreshes: 0,
   socketRefreshSignals: 0,
 };
-
-const RESULT_VIDEO_SRC = {
-  win: "/videos/win.mp4",
-  lose: "/videos/lose.mp4",
-  tie: "/videos/tie.mp4",
-} as const;
-const CLIENT_RECONNECT_GRACE_MS = 20_000;
-
-type ResultScreenKind = "win" | "lose" | "tie" | "empty";
 
 function getOrCreatePlayerSessionId(): string {
   try {
@@ -888,7 +817,6 @@ function removeRoomQueryParamFromUrl(): void {
 
 function clearInviteIntentState(): void {
   pendingJoinRoomCode = "";
-  privateEntryAutoJoinTried = false;
   removeRoomQueryParamFromUrl();
 }
 
@@ -940,6 +868,15 @@ function setReleaseWatchMetricsToWindow(): void {
       releaseWatchDeferredVersion,
       releaseWatchDeferredReason,
     };
+    // Sync to AppState for debug snapshot
+    ReleaseWatchState.handle = releaseWatchHandle;
+    ReleaseWatchState.lastKnownVersion = lastKnownReleaseVersion;
+    ReleaseWatchState.lastKnownEtag = lastKnownReleaseEtag;
+    ReleaseWatchState.inFlight = releaseWatchInFlight;
+    ReleaseWatchState.failureCount = releaseWatchFailureCount;
+    ReleaseWatchState.deferredVersion = releaseWatchDeferredVersion;
+    ReleaseWatchState.deferredReason = releaseWatchDeferredReason;
+    Object.assign(ReleaseWatchState.metrics, releaseWatchMetrics);
   } catch {
     /* ignore metrics exposure failures */
   }
@@ -1319,7 +1256,6 @@ function returnToHomeFromSearch(): void {
   lastPrivateRoomCode = null;
   isPrivateRoomSession = false;
   pendingJoinRoomCode = "";
-  privateEntryAutoJoinTried = false;
   render();
 }
 
@@ -1353,12 +1289,6 @@ function isCurrentStudyRound(token?: string | null, macroRound?: number): boolea
   if (token !== activeStudyRoundToken) return false;
   if (typeof macroRound === "number" && macroRound !== activeStudyMacroRound) return false;
   return true;
-}
-
-function el(html: string): HTMLElement {
-  const t = document.createElement("template");
-  t.innerHTML = html.trim();
-  return t.content.firstElementChild as HTMLElement;
 }
 
 function clearTimer(): void {
@@ -1766,7 +1696,6 @@ function render(): void {
         soloLearningPending = false;
         privateRoomCodeState = pendingJoinRoomCode;
         privateRoomInviteUrl = null;
-        privateEntryAutoJoinTried = true;
         isPrivateRoomSession = true;
         lobbyNotice = "جاري الانضمام للغرفة الخاصة...";
         render();
@@ -2236,51 +2165,17 @@ function render(): void {
   }
 
   if (phase === "saved_lessons_library") {
-    const rows = savedLessonsRows
-      .map(
-        (row) => `
-        <button type="button" class="app-card rounded-lg border border-slate-600/40 flex flex-row items-center gap-2.5 p-2 min-h-0 w-full text-right touch-manipulation ssl-open-detail transition active:scale-[0.98] hover:border-amber-700/35" data-id="${escapeHtml(row.id)}" aria-label="فتح ${escapeHtml(row.title)}">
-          <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-slate-800/55 border border-slate-600/30 text-2xl leading-none select-none pointer-events-none" aria-hidden="true">${savedLessonLibraryIconDisplay(row.libraryIcon)}</span>
-          <span class="flex min-h-0 min-w-0 flex-1 flex-col items-stretch justify-center gap-0.5 pointer-events-none text-right">
-            <span class="font-semibold text-amber-200 text-[11px] leading-snug line-clamp-2">${escapeHtml(row.title)}</span>
-            <span class="text-slate-500 text-[9px] leading-tight line-clamp-1">${escapeHtml(savedLessonExpiryCaption(row.expiresAt))}</span>
-          </span>
-        </button>`,
-      )
-      .join("");
-    app.append(
-      el(`
-        <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3 text-right">
-          <div class="flex items-center justify-between gap-2">
-            <button type="button" id="ssl-back-custom" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">درس مخصص</button>
-            <h1 class="text-xl font-extrabold text-amber-300 m-0">مكتبة دروسي</h1>
-          </div>
-          <p class="text-slate-400 text-sm m-0">دروسك المحفوظة في حسابك بعد تسجيل الدخول. اضغط على درس لعرض الخيارات.</p>
-          ${savedLessonsLoading ? `<p class="text-slate-400 text-sm m-0">جاري التحميل…</p>` : ""}
-          ${savedLessonsLibraryErr ? `<p class="text-red-400 text-sm m-0">${escapeHtml(savedLessonsLibraryErr)}</p>` : ""}
-          ${
-            !savedLessonsLoading && !savedLessonsLibraryErr && savedLessonsRows.length === 0
-              ? `<p class="text-slate-500 text-sm m-0">لا توجد دروس محفوظة بعد.</p>`
-              : ""
-          }
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 content-start items-start flex-1 overflow-y-auto min-h-0">${rows}</div>
-        </div>
-      `),
-    );
-    app.querySelector("#ssl-back-custom")?.addEventListener("click", () => {
-      phase = "custom_lesson";
-      render();
+    renderSavedLessonsLibraryScreen({
+      getSavedLessonsRows: () => savedLessonsRows,
+      getSavedLessonsLoading: () => savedLessonsLoading,
+      getSavedLessonsLibraryErr: () => savedLessonsLibraryErr,
+      savedLessonLibraryIconDisplay,
+      savedLessonExpiryCaption,
+      setPhase: (p) => { phase = p; },
+      setSavedLessonDetailId: (id) => { savedLessonDetailId = id; },
+      setSavedLessonsLibraryErr: (msg) => { savedLessonsLibraryErr = msg; },
+      render,
     });
-    for (const btn of app.querySelectorAll<HTMLButtonElement>(".ssl-open-detail")) {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.id;
-        if (!id) return;
-        savedLessonDetailId = id;
-        savedLessonsLibraryErr = "";
-        phase = "saved_lesson_detail";
-        render();
-      });
-    }
     return;
   }
 
@@ -2443,121 +2338,29 @@ function render(): void {
   }
 
   if (phase === "saved_lesson_edit") {
-    if (!savedLessonEditingId || !savedLessonEditorPayload) {
-      savedLessonLibraryIcon = null;
-      savedLessonDetailId = null;
-      phase = "saved_lessons_library";
-      render();
-      return;
-    }
-    const markup = renderSavedLessonEditorMarkup(savedLessonEditorPayload, savedLessonLibraryIcon);
-    app.append(
-      el(`
-        <div class="app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3 text-right pb-28">
-          <div class="flex items-center justify-between gap-2">
-            <button type="button" id="sle-back-lib" class="ui-btn ui-btn--ghost py-2 px-3 text-sm">المكتبة</button>
-            <h1 class="text-lg font-extrabold text-amber-300 m-0">تعديل الدرس</h1>
-          </div>
-          ${markup}
-          <p id="sle-editor-msg" class="text-emerald-300 text-sm min-h-[1.25rem] m-0">${escapeHtml(savedLessonEditorMsg)}</p>
-          <p id="sle-editor-err" class="text-red-400 text-sm min-h-[1.25rem] m-0">${escapeHtml(savedLessonEditorErr)}</p>
-          <button type="button" id="sle-save" class="ui-btn ui-btn--cta w-full py-3 shrink-0">حفظ التعديلات</button>
-        </div>
-      `),
-    );
-    app.querySelectorAll<HTMLButtonElement>(".sle-del-sec").forEach((btn) => {
-      btn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        if (!savedLessonEditorPayload) return;
-        const si = Number(btn.dataset.sectionIndex);
-        if (!Number.isFinite(si)) return;
-        if (!window.confirm("حذف هذا القسم وجميع أسئلته؟ يمكنك التراجع قبل الضغط على «حفظ التعديلات».")) {
-          return;
-        }
-        const res = removeSectionFromPayload(savedLessonEditorPayload, si);
-        if (!res.ok) {
-          savedLessonEditorErr = res.error;
-          savedLessonEditorMsg = "";
-          render();
-          return;
-        }
-        savedLessonEditorPayload = res.payload;
-        savedLessonEditorErr = "";
-        savedLessonEditorMsg = "";
-        render();
-      });
-    });
-    app.querySelectorAll<HTMLButtonElement>(".sle-del-q").forEach((btn) => {
-      btn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        if (!savedLessonEditorPayload) return;
-        const si = Number(btn.dataset.sectionIndex);
-        const qi = Number(btn.dataset.itemIndex);
-        if (!Number.isFinite(si) || !Number.isFinite(qi)) return;
-        if (!window.confirm("حذف هذا السؤال؟")) return;
-        const res = removeQuestionFromPayload(savedLessonEditorPayload, si, qi);
-        if (!res.ok) {
-          savedLessonEditorErr = res.error;
-          savedLessonEditorMsg = "";
-          render();
-          return;
-        }
-        savedLessonEditorPayload = res.payload;
-        savedLessonEditorErr = "";
-        savedLessonEditorMsg = "";
-        render();
-      });
-    });
-    const iconInput = app.querySelector<HTMLInputElement>("#sle-library-icon");
-    app.querySelectorAll<HTMLButtonElement>(".sle-lib-icon-preset").forEach((btn) => {
-      btn.addEventListener("click", (ev) => {
-        ev.preventDefault();
-        const ic = btn.dataset.libIcon;
-        if (iconInput && ic != null) iconInput.value = ic;
-      });
-    });
-    app.querySelector("#sle-back-lib")?.addEventListener("click", () => {
-      phase = "saved_lessons_library";
-      savedLessonEditingId = null;
-      savedLessonEditorPayload = null;
-      savedLessonLibraryIcon = null;
-      savedLessonDetailId = null;
-      savedLessonEditorErr = "";
-      savedLessonEditorMsg = "";
-      void (async () => {
-        savedLessonsLoading = true;
-        render();
-        const r = await fetchSavedLessonsList();
-        savedLessonsLoading = false;
-        if (r.ok) savedLessonsRows = r.lessons ?? [];
-        render();
-      })();
-    });
-    app.querySelector("#sle-save")?.addEventListener("click", async () => {
-      const rootEl = app.querySelector("#sle-editor-root");
-      if (!rootEl || !savedLessonEditingId) return;
-      savedLessonEditorErr = "";
-      savedLessonEditorMsg = "";
-      const collected = collectSavedLessonPayloadFromEditor(rootEl as HTMLElement);
-      if (!collected.ok) {
-        savedLessonEditorErr = collected.error;
-        render();
-        return;
-      }
-      const iconVal = readLibraryIconFromEditor(rootEl as HTMLElement);
-      const r = await patchSavedLesson(savedLessonEditingId, {
-        payload: collected.payload,
-        libraryIcon: iconVal,
-      });
-      if (!r.ok) {
-        savedLessonEditorErr = "تعذر حفظ التعديلات.";
-        render();
-        return;
-      }
-      savedLessonEditorPayload = collected.payload;
-      savedLessonLibraryIcon = iconVal;
-      savedLessonEditorMsg = "تم حفظ التعديلات.";
-      render();
+    renderSavedLessonEditScreen({
+      getSavedLessonEditingId: () => savedLessonEditingId,
+      getSavedLessonEditorPayload: () => savedLessonEditorPayload,
+      getSavedLessonLibraryIcon: () => savedLessonLibraryIcon,
+      getSavedLessonEditorErr: () => savedLessonEditorErr,
+      getSavedLessonEditorMsg: () => savedLessonEditorMsg,
+      setSavedLessonLibraryIcon: (v) => { savedLessonLibraryIcon = v; },
+      setSavedLessonDetailId: (v) => { savedLessonDetailId = v; },
+      setSavedLessonEditorPayload: (p) => { savedLessonEditorPayload = p; },
+      setSavedLessonEditorErr: (msg) => { savedLessonEditorErr = msg; },
+      setSavedLessonEditorMsg: (msg) => { savedLessonEditorMsg = msg; },
+      setSavedLessonEditingId: (id) => { savedLessonEditingId = id; },
+      setSavedLessonsLoading: (v) => { savedLessonsLoading = v; },
+      setSavedLessonsRows: (rows) => { savedLessonsRows = rows as typeof savedLessonsRows; },
+      renderSavedLessonEditorMarkup,
+      removeSectionFromPayload,
+      removeQuestionFromPayload,
+      collectSavedLessonPayloadFromEditor,
+      readLibraryIconFromEditor,
+      patchSavedLesson,
+      fetchSavedLessonsList,
+      setPhase: (p) => { phase = p; },
+      render,
     });
     return;
   }
@@ -3002,175 +2805,47 @@ function render(): void {
   }
 
   if (phase === "lesson_done") {
-    const total = lessonPlayback?.steps.length ?? 0;
-    app.append(
-      el(`
-        <div class="app-screen min-h-screen text-white p-6 flex flex-col items-center justify-center max-w-md mx-auto text-center gap-6">
-          <h2 class="text-2xl font-extrabold text-amber-300">أنهيت الدرس</h2>
-          <p class="text-slate-200 text-lg">${escapeHtml(lessonPlayback?.title ?? "")}</p>
-          <p class="text-emerald-300 text-xl font-bold">النتيجة: ${lessonQuizCorrect} / ${total}</p>
-          <button type="button" id="lesson-review-open" class="ui-btn ui-btn--primary w-full py-3 text-lg">مراجعة الإجابات</button>
-          <button type="button" id="lesson-redo" class="ui-btn ui-btn--cta w-full py-3 text-lg">إعادة الدرس</button>
-          <button type="button" id="lesson-done-end-custom" class="ui-btn ui-btn--primary w-full py-3 text-lg">إنهاء الدرس</button>
-          <button type="button" id="lesson-done-home-main" class="ui-btn ui-btn--ghost w-full py-3">العودة للرئيسية</button>
-        </div>
-      `),
-    );
-    app.querySelector("#lesson-review-open")?.addEventListener("click", () => {
-      lessonReviewIndex = 0;
-      phase = "lesson_review";
-      render();
-    });
-    app.querySelector("#lesson-redo")?.addEventListener("click", () => {
-      const snap = lessonPlayback;
-      if (!snap?.steps?.length) return;
-      clearTimer();
-      beginLessonPlayback(snap);
-      render();
-    });
-    app.querySelector("#lesson-done-end-custom")?.addEventListener("click", () => {
-      clearTimer();
-      const fromSavedLibrary = lessonSoloPlaybackReturnTarget === "saved_lessons_library";
-      resetLessonState();
-      lessonSoloPlaybackReturnTarget = "lesson_menu";
-      if (fromSavedLibrary) {
-        openSavedLessonsLibraryScreen();
-        return;
-      }
-      customLessonPreviewLesson = null;
-      customLessonValidatedBody = null;
-      customLessonSessionToken = null;
-      customLessonErr = "";
-      customLessonMsg = "";
-      phase = "custom_lesson";
-      render();
-    });
-    app.querySelector("#lesson-done-home-main")?.addEventListener("click", () => {
-      clearTimer();
-      resetLessonState();
-      returnToHomeFromSearch();
+    renderLessonDoneScreen({
+      getLessonPlayback: () => lessonPlayback,
+      getLessonQuizCorrect: () => lessonQuizCorrect,
+      getLessonSoloPlaybackReturnTarget: () => lessonSoloPlaybackReturnTarget,
+      setPhase: (p) => { phase = p; },
+      setLessonReviewIndex: (v) => { lessonReviewIndex = v; },
+      setLessonSoloPlaybackReturnTarget: (v) => { lessonSoloPlaybackReturnTarget = v as typeof lessonSoloPlaybackReturnTarget; },
+      setCustomLessonPreviewLesson: () => { customLessonPreviewLesson = null; },
+      setCustomLessonValidatedBody: () => { customLessonValidatedBody = null; },
+      setCustomLessonSessionToken: () => { customLessonSessionToken = null; },
+      setCustomLessonErr: (v) => { customLessonErr = v; },
+      setCustomLessonMsg: (v) => { customLessonMsg = v; },
+      clearTimer,
+      resetLessonState,
+      beginLessonPlayback,
+      openSavedLessonsLibraryScreen,
+      returnToHomeFromSearch,
+      render,
     });
     return;
   }
 
   if (phase === "lesson_review") {
-    const items = lessonRestReviewItems();
-    const cur = items[lessonReviewIndex];
-    const n = items.length;
-    app.append(
-      el(`
-        <div class="playing-shell app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
-          <div class="flex items-center justify-between gap-2">
-            <button type="button" id="lesson-review-back" class="ui-btn ui-btn--ghost py-2 text-sm">رجوع للنتيجة</button>
-            <span class="text-slate-400 text-xs">سؤال ${lessonReviewIndex + 1} / ${n}</span>
-          </div>
-          <p class="text-amber-200 text-sm text-right m-0">${escapeHtml(lessonPlayback?.title ?? "")}</p>
-          <div id="lesson-review-root" class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0"></div>
-          <div class="flex gap-2">
-            <button type="button" id="lesson-review-prev" class="ui-btn ui-btn--ghost flex-1 py-2" ${lessonReviewIndex <= 0 ? "disabled" : ""}>السابق</button>
-            <button type="button" id="lesson-review-next" class="ui-btn ui-btn--ghost flex-1 py-2" ${lessonReviewIndex >= n - 1 ? "disabled" : ""}>التالي</button>
-          </div>
-        </div>
-      `),
-    );
-    const root = app.querySelector<HTMLDivElement>("#lesson-review-root");
-    if (root && cur) {
-      const choiceIdx = cur.choiceIndex;
-      const optsHtml = cur.options
-        .map((label, idx) => {
-          const isCorrect = idx === cur.correctIndex;
-          const isWrongPick =
-            choiceIdx != null && choiceIdx !== cur.correctIndex && choiceIdx === idx;
-          let cls = "option-btn option-btn--disabled";
-          if (isCorrect) cls += " option-btn--review-correct";
-          if (isWrongPick) cls += " option-btn--review-wrong";
-          return `<button type="button" disabled class="${cls}">${escapeHtml(label)}</button>`;
-        })
-        .join("");
-      const studyBlock = cur.studyBody?.trim()
-        ? `<div class="study-card study-card--0 mt-2"><p class="study-card__body font-medium whitespace-pre-wrap">${escapeHtml(cur.studyBody)}</p></div>`
-        : "";
-      root.innerHTML = `<p class="text-right text-xl font-semibold leading-relaxed">${escapeHtml(cur.prompt)}</p>
-        <div class="options-grid grid">${optsHtml}</div>${studyBlock}`;
-    }
-    app.querySelector("#lesson-review-back")?.addEventListener("click", () => {
-      phase = "lesson_done";
-      render();
-    });
-    app.querySelector("#lesson-review-prev")?.addEventListener("click", () => {
-      if (lessonReviewIndex > 0) {
-        lessonReviewIndex--;
-        render();
-      }
-    });
-    app.querySelector("#lesson-review-next")?.addEventListener("click", () => {
-      if (lessonReviewIndex < n - 1) {
-        lessonReviewIndex++;
-        render();
-      }
+    renderLessonReviewScreen({
+      getLessonReviewIndex: () => lessonReviewIndex,
+      getLessonPlayback: () => lessonPlayback,
+      lessonRestReviewItems,
+      setPhase: (p) => { phase = p; },
+      setLessonReviewIndex: (v) => { lessonReviewIndex = v; },
+      render,
     });
     return;
   }
 
   if (phase === "match_lesson_review") {
-    const items = matchLessonReviewItems ?? [];
-    const cur = items[matchLessonReviewIndex];
-    const n = items.length;
-    app.append(
-      el(`
-        <div class="playing-shell app-screen min-h-screen text-white p-4 flex flex-col max-w-lg mx-auto w-full gap-3">
-          <div class="flex items-center justify-between gap-2">
-            <button type="button" id="match-lesson-review-back" class="ui-btn ui-btn--ghost py-2 text-sm">رجوع للنتيجة</button>
-            <span class="text-slate-400 text-xs">سؤال ${matchLessonReviewIndex + 1} / ${n}</span>
-          </div>
-          <p class="text-amber-200 text-sm text-right m-0">مراجعة الدرس</p>
-          <div id="match-lesson-review-root" class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0"></div>
-          <div class="flex gap-2">
-            <button type="button" id="match-lesson-review-prev" class="ui-btn ui-btn--ghost flex-1 py-2" ${
-              matchLessonReviewIndex <= 0 ? "disabled" : ""
-            }>السابق</button>
-            <button type="button" id="match-lesson-review-next" class="ui-btn ui-btn--ghost flex-1 py-2" ${
-              matchLessonReviewIndex >= n - 1 ? "disabled" : ""
-            }>التالي</button>
-          </div>
-        </div>
-      `),
-    );
-    const root = app.querySelector<HTMLDivElement>("#match-lesson-review-root");
-    if (root && cur) {
-      const choiceIdx = cur.choiceIndex;
-      const optsHtml = cur.options
-        .map((label, idx) => {
-          const isCorrect = idx === cur.correctIndex;
-          const isWrongPick =
-            choiceIdx != null && choiceIdx !== cur.correctIndex && choiceIdx === idx;
-          let cls = "option-btn option-btn--disabled";
-          if (isCorrect) cls += " option-btn--review-correct";
-          if (isWrongPick) cls += " option-btn--review-wrong";
-          return `<button type="button" disabled class="${cls}">${escapeHtml(label)}</button>`;
-        })
-        .join("");
-      const studyBlock = cur.studyBody?.trim()
-        ? `<div class="study-card study-card--0 mt-2"><p class="study-card__body font-medium whitespace-pre-wrap">${escapeHtml(cur.studyBody)}</p></div>`
-        : "";
-      root.innerHTML = `<p class="text-right text-xl font-semibold leading-relaxed">${escapeHtml(cur.prompt)}</p>
-        <div class="options-grid grid">${optsHtml}</div>${studyBlock}`;
-    }
-    app.querySelector("#match-lesson-review-back")?.addEventListener("click", () => {
-      phase = "result";
-      render();
-    });
-    app.querySelector("#match-lesson-review-prev")?.addEventListener("click", () => {
-      if (matchLessonReviewIndex > 0) {
-        matchLessonReviewIndex--;
-        render();
-      }
-    });
-    app.querySelector("#match-lesson-review-next")?.addEventListener("click", () => {
-      if (matchLessonReviewIndex < n - 1) {
-        matchLessonReviewIndex++;
-        render();
-      }
+    renderMatchLessonReviewScreen({
+      getMatchLessonReviewItems: () => matchLessonReviewItems,
+      getMatchLessonReviewIndex: () => matchLessonReviewIndex,
+      setPhase: (p) => { phase = p; },
+      setMatchLessonReviewIndex: (v) => { matchLessonReviewIndex = v; },
+      render,
     });
     return;
   }
@@ -3400,19 +3075,10 @@ function render(): void {
   }
 
   if (phase === "countdown") {
-    const cdSubtitle =
-      isPrivateRoomSession || Boolean(lastPrivateRoomCode)
-        ? "جاري بدء الجولة في غرفتك الخاصة…"
-        : "تم العثور على منافسين. جاري اكتمال المجموعة…";
-    app.append(
-      el(`
-        <div class="app-screen min-h-screen text-white flex flex-col items-center justify-center p-6 text-center">
-          <p id="cd-subtitle" class="text-emerald-200/95 text-base max-w-md mb-3 leading-relaxed">${escapeHtml(cdSubtitle)}</p>
-          <p class="text-slate-300 mb-4">تبدأ المباراة خلال</p>
-          <div id="cd" class="text-7xl font-black text-amber-300 tabular-nums">3</div>
-        </div>
-      `),
-    );
+    renderCountdownScreen({
+      isPrivateRoomSession: () => isPrivateRoomSession,
+      getLastPrivateRoomCode: () => lastPrivateRoomCode,
+    });
     return;
   }
 
@@ -3589,110 +3255,53 @@ function render(): void {
   }
 
   if (phase === "result") {
-    const showPrivateRoomActions = isPrivateRoomSession && Boolean(lastPrivateRoomCode);
-    app.append(
-      el(`
-        <div id="result-screen" class="result-screen result-screen--empty min-h-screen text-white p-6 flex flex-col items-center justify-center text-center max-w-md mx-auto w-full gap-5">
-          <div class="result-screen__hero w-full">
-            <div class="result-screen__video-shell">
-              <video
-                id="res-video"
-                class="result-screen__video"
-                playsinline
-                muted
-                loop
-                preload="metadata"
-              ></video>
-              <p id="res-emoji" class="result-screen__emoji" aria-hidden="true"></p>
-              <div id="res-audio-gate" class="result-screen__audio-gate" hidden>
-                <button id="res-audio-gate-btn" type="button" class="result-screen__audio-gate-btn" aria-hidden="true">
-                  اضغط لتشغيل الفيديو مع الصوت
-                </button>
-              </div>
-            </div>
-          </div>
-          <h2 id="res-title" class="result-screen__title text-3xl font-extrabold tracking-tight"></h2>
-          <p id="res-kicker" class="result-screen__kicker text-sm font-semibold min-h-[1.25rem]"></p>
-          <p id="res-body" class="result-screen__body text-lg leading-relaxed"></p>
-          <button id="continue-watch" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base hidden">متابعة الجولة كمشاهد</button>
-          <div id="res-leaderboard" class="w-full text-right"></div>
-          <div id="res-team-extra" class="w-full text-right hidden"></div>
-          <div id="res-stats" class="result-screen__stats hidden"></div>
-          <button id="match-lesson-review-open" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-base ${
-            matchLessonReviewItems && matchLessonReviewItems.length > 0 && !showPrivateRoomActions ? "" : "hidden"
-          }">مراجعة الدرس</button>
-          <div class="${showPrivateRoomActions ? "w-full flex flex-col sm:flex-row gap-3" : "hidden"}">
-            <button id="back-private-room" type="button" class="result-screen__again ui-btn ui-btn--cta w-full py-3 text-base">العودة للغرفة الخاصة</button>
-            <button id="go-home-from-result" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base">الصفحة الرئيسية</button>
-          </div>
-          <button id="again" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-lg ${showPrivateRoomActions ? "hidden" : ""}">العب مجدداً</button>
-        </div>
-      `),
-    );
-    const continueWatch = app.querySelector<HTMLButtonElement>("#continue-watch");
-    if (continueWatch) {
-      continueWatch.addEventListener("click", () => {
-        spectatorFollowing = true;
-        spectatorEligible = false;
-        continueWatch.classList.add("hidden");
-        socket?.emit(
-          "continue_as_spectator",
-          { participantId: myParticipantId ?? undefined },
-          (ack: { ok?: boolean; snapshot?: Record<string, unknown> | null }) => {
-            if (ack?.ok && ack.snapshot && socket) {
-              applyMatchStateSnapshotFromServer(socket, coerceReconnectSnapshotForUi(ack.snapshot));
-            }
-          },
-        );
-      });
-    }
-    app.querySelector("#match-lesson-review-open")?.addEventListener("click", () => {
-      if (!matchLessonReviewItems?.length) return;
-      matchLessonReviewIndex = 0;
-      phase = "match_lesson_review";
-      render();
+    renderResultScreen({
+      isPrivateRoomSession: () => isPrivateRoomSession,
+      getLastPrivateRoomCode: () => lastPrivateRoomCode,
+      getMatchLessonReviewItems: () => matchLessonReviewItems,
+      getMyParticipantId: () => myParticipantId,
+      getPlayerNameDraft: () => playerNameDraft,
+      getEffectivePlayerName,
+      resetAllForReplay: () => {
+        matchLessonReviewItems = null;
+        matchLessonReviewIndex = 0;
+        phase = "name";
+        nameFlowStep = "mode";
+        selectedDifficultyMode = "mix";
+        selectedMainCategoryId = null;
+        selectedSubcategoryKey = null;
+        selectedSubcategoryLabel = null;
+        soloLearningPending = false;
+        privateRoomCodeState = null;
+        privateRoomHostParticipantId = null;
+        myParticipantId = null;
+        privateRoomInviteUrl = null;
+        socket?.disconnect();
+        socket = null;
+        currentGameMode = null;
+        studyCards = [];
+        lobbyPlayersList = [];
+        matchTeamPlayMode = null;
+        matchHeartsPerPlayerSetting = null;
+        resetPrivateRoomTeamLobbyClientState();
+      },
+      backToPrivateRoom: (roomCode, name) => {
+        phase = "matchmaking";
+        privateRoomCodeState = roomCode;
+        privateRoomInviteUrl = `${window.location.origin}?room=${roomCode}`;
+        lobbyNotice = "جاري العودة إلى الغرفة الخاصة...";
+        privateReadyPending = false;
+        render();
+        connectSocket(name, "direct", null, "mix", "private_join", roomCode);
+      },
+      returnToHomeFromSearch,
+      getSocket: () => socket,
+      applyMatchStateSnapshotFromServer,
+      setPhase: (p) => { phase = p; },
+      setMatchLessonReviewIndex: (v) => { matchLessonReviewIndex = v; },
+      render,
     });
-    const again = app.querySelector<HTMLButtonElement>("#again")!;
-    again.addEventListener("click", () => {
-      matchLessonReviewItems = null;
-      matchLessonReviewIndex = 0;
-      phase = "name";
-      nameFlowStep = "mode";
-      selectedDifficultyMode = "mix";
-      selectedMainCategoryId = null;
-      selectedSubcategoryKey = null;
-      selectedSubcategoryLabel = null;
-      soloLearningPending = false;
-      privateRoomCodeState = null;
-      privateRoomHostParticipantId = null;
-      myParticipantId = null;
-      privateRoomInviteUrl = null;
-      socket?.disconnect();
-      socket = null;
-      currentGameMode = null;
-      studyCards = [];
-      lobbyPlayersList = [];
-      matchTeamPlayMode = null;
-      matchHeartsPerPlayerSetting = null;
-      resetPrivateRoomTeamLobbyClientState();
-      render();
-    });
-    const backPrivateRoomBtn = app.querySelector<HTMLButtonElement>("#back-private-room");
-    backPrivateRoomBtn?.addEventListener("click", () => {
-      const roomCode = lastPrivateRoomCode;
-      if (!roomCode) return;
-      const name = getEffectivePlayerName(playerNameDraft);
-      phase = "matchmaking";
-      privateRoomCodeState = roomCode;
-      privateRoomInviteUrl = `${window.location.origin}?room=${roomCode}`;
-      lobbyNotice = "جاري العودة إلى الغرفة الخاصة...";
-      privateReadyPending = false;
-      render();
-      connectSocket(name, "direct", null, "mix", "private_join", roomCode);
-    });
-    app.querySelector<HTMLButtonElement>("#go-home-from-result")?.addEventListener("click", () => {
-      returnToHomeFromSearch();
-    });
+    return;
   }
 }
 
@@ -3850,7 +3459,6 @@ function resetLessonState(): void {
   lessonStudyIdx = 0;
   lessonStudySegmentEndAt = 0;
   lessonStudySectionDeadlineAt = 0;
-  lessonQuizIdx = 0;
   lessonQuizIdxInSection = 0;
   lessonSectionIdx = 0;
   lessonQuizCorrect = 0;
@@ -4029,7 +3637,6 @@ function lessonPrepareCurrentLessonQuizQuestion(): void {
   let globalIdx = 0;
   for (let i = 0; i < lessonSectionIdx; i++) globalIdx += secs[i]?.steps.length ?? 0;
   globalIdx += lessonQuizIdxInSection;
-  lessonQuizIdx = globalIdx;
   const step = sec.steps[lessonQuizIdxInSection];
   currentQuestionId = step.questionId;
   endsAt = nowSynced() + step.effectiveAnswerMs;
@@ -4142,14 +3749,6 @@ function savedLessonExpiryCaption(expiresAtIso: string): string {
 function savedLessonLibraryIconDisplay(icon: string | null | undefined): string {
   const s = icon?.trim();
   return s && s.length > 0 ? escapeHtml(s) : "📖";
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function abilityErrorMessage(code: string): string {
@@ -4605,8 +4204,6 @@ function bindPlayingAbilityUi(sk: Socket): void {
   refreshAbilityAffordability();
 }
 
-const FAHEM_MATCH_RESUME_KEY = "fahem_match_resume_v1";
-
 type StoredMatchResume = {
   matchId: string;
   participantId: string;
@@ -4698,18 +4295,6 @@ function applyTeamVoteBadgesToOptionButtons(): void {
     }
   });
 }
-
-type IncomingQuestionPayload = {
-  questionId: number;
-  prompt: string;
-  options: string[];
-  endsAt: number;
-  serverNow?: number;
-  revealKeysActive?: boolean;
-  keysAttacksEnabled?: boolean;
-  abilityCosts?: Partial<AbilityCostsPayload> | null;
-  abilityToggles?: Partial<AbilityTogglesPayload> | null;
-};
 
 function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
   syncClock(q.serverNow);
@@ -5246,8 +4831,6 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
   renderLeaderboard();
   applyResultScreenPresentation(kind, emojiForFallback);
 }
-
-type ResumePolicy = "none" | "resume_only";
 
 function connectSocket(
   name: string,
@@ -5905,6 +5488,14 @@ function connectSocket(
     render,
     applyResultScreenPresentation,
     onGameOver: (payload) => handleGameplayGameOver(payload, () => lobbyCountdown.clear()),
+    getOptsContainer: () => app.querySelector<HTMLDivElement>("#opts"),
+    getStatusElement: () => app.querySelector<HTMLParagraphElement>("#status"),
+    getResTitleElement: () => app.querySelector<HTMLHeadingElement>("#res-title"),
+    getResBodyElement: () => app.querySelector<HTMLParagraphElement>("#res-body"),
+    getResKickerElement: () => app.querySelector<HTMLParagraphElement>("#res-kicker"),
+    getResStatsElement: () => app.querySelector<HTMLDivElement>("#res-stats"),
+    getContinueWatchButton: () => app.querySelector<HTMLButtonElement>("#continue-watch"),
+    getStudyReadyStateElement: () => app.querySelector<HTMLParagraphElement>("#study-ready-state"),
   } satisfies GameplaySocketDeps);
 
   s.connect();
@@ -5985,7 +5576,6 @@ function startStudyTimer(): void {
 pendingJoinRoomCode = getRoomCodeFromUrl() ?? "";
 if (pendingJoinRoomCode) {
   nameFlowStep = "mode";
-  privateEntryAutoJoinTried = false;
 }
 refreshReconnectPromptStateFromStorage();
 subscribeAuthState(() => {
@@ -5997,9 +5587,6 @@ window.addEventListener("fahem:profile-cache-updated", () => {
 });
 window.addEventListener("popstate", () => {
   pendingJoinRoomCode = getRoomCodeFromUrl() ?? "";
-  if (pendingJoinRoomCode) {
-    privateEntryAutoJoinTried = false;
-  }
   refreshReconnectPromptStateFromStorage();
   const pathOnly = window.location.pathname.replace(/\/$/, "") || "/";
   if (pathOnly === "/profile") {
@@ -6058,7 +5645,6 @@ attachSocketAuthSync(
     socket = null;
   },
 );
-const FAHEM_ADMIN_LESSON_PREVIEW_KEY = "fahem_admin_lesson_preview_v1";
 const bootParams = new URLSearchParams(window.location.search);
 if (bootParams.get("auth") === "1") {
   openAuthModal({
