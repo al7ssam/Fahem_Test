@@ -1,4 +1,10 @@
 import type { Socket } from "socket.io";
+import type {
+  ClientToServerEvents,
+  FahemSocketData,
+  InterServerEvents,
+  ServerToClientEvents,
+} from "../../shared/socketEvents";
 import { authService } from "./AuthService";
 
 export type SocketAuthContext = {
@@ -17,7 +23,10 @@ function readSocketBearer(socket: Socket): string | null {
   return null;
 }
 
-export async function authenticateSocket(socket: Socket, next: (err?: Error) => void): Promise<void> {
+export async function authenticateSocket(
+  socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, FahemSocketData>,
+  next: (err?: Error) => void,
+): Promise<void> {
   try {
     const token = readSocketBearer(socket);
     if (!token) {

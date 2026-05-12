@@ -1,5 +1,7 @@
 # الهوية في اللعب، المشاركون، واستعداد إعادة الاتصال
 
+**وثائق Phase E (حدود زمن حقيقي):** [عقد أحادية العقدة](RUNTIME_SINGLE_NODE_CONTRACT.md) · [الإيقاف والتصريف](RUNTIME_LIFECYCLE_SHUTDOWN.md) · [ملكية المؤقتات](RUNTIME_TIMER_OWNERSHIP.md) · [idempotency إعادة الربط](RECONNECT_IDEMPOTENCY_CONTRACT.md) · [جاهزية persistence/توزيع](PERSISTENCE_AND_DISTRIBUTION_READINESS.md)
+
 هذا المستند يلخّص الوضع الحالي بعد هجرة **`participantId`** كهوية لعب سلطة، و**`userId`** كهوية حساب/سياسة، مع بقاء **`socket.id`** لطبقة النقل فقط.
 
 ---

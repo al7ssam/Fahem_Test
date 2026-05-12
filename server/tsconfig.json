@@ -9,5 +9,5 @@
     "sourceMap": true
   },
   "include": ["./**/*.ts", "../shared/**/*.ts"],
-  "exclude": ["./scripts/**"]
+  "exclude": ["./scripts/**", "./**/*.test.ts"]
 }

@@ -1,4 +1,10 @@
 ﻿import type { Server } from "socket.io";
+import type { ClientToServerEvents, ServerToClientEvents } from "../../shared/socketEvents";
+import type { GameOverWirePayload } from "../../shared/gameOverPayload";
+import {
+  matchReconnectSnapshotSchema,
+  type MatchReconnectSnapshot,
+} from "../../shared/matchReconnectSnapshot";
 import { randomBytes, timingSafeEqual } from "crypto";
 import { getPool } from "../db/pool";
 import type { LessonPlaybackPayload } from "../db/lessons";
@@ -22,6 +28,7 @@ import {
   resolveQuestionMsFromAppSetting,
   resolveStudyPhaseMsFromAppSetting,
 } from "./runtimeGameTiming";
+import { fahemStructuredLog, isFahemDebugRealtime } from "../runtime/fahemStructuredLog";
 import type { MatchSeatInput } from "./participantTypes";
 import type {
   MatchPrivateRuntimeOptions,
@@ -30,6 +37,15 @@ import type {
   PrivateRoomTeamPlayMode,
 } from "./privateRoomTeamTypes";
 import { MATCH_RECONNECT_GRACE_MS } from "./reconnectConfig";
+import { applySkillBoostToAwardPure, computeSpeedScoredBase } from "./teamRoundScore";
+import {
+  attachDenseRankAndMedal,
+  attachOrdinalRankAndMedalForSoloStyleLeaderboard,
+  clampAnswerWindowMs,
+  hasEnoughActivePlayersForQuestionsPure,
+  keysGrantedDeltaForStreakPure,
+  shouldDeclareWinnerForActiveCountPure,
+} from "./matchGameplayPure";
 
 /** بعد انتهاء الإجابات يبقى استقبال القدرات مفعّلاً لهذا الوقت (تخفيف سباق الشبكة مع finishRound). */
 const ABILITY_GRACE_MS = 500;
@@ -74,9 +90,9 @@ type MatchPlayerState = {
   isCaptain: boolean;
 };
 
-export type AbilityAck =
-  | { ok: true; keys: number; skillBoostStacks?: number; revealQuestions?: number }
-  | { ok: false; error: string };
+import type { AbilitySocketAck } from "../../shared/socketAcks";
+
+export type AbilityAck = AbilitySocketAck;
 
 export class Match {
   private static runtimeSettingsCache: {
@@ -191,7 +207,7 @@ export class Match {
   private matchPhaseHint: "idle" | "study" | "between" | "question" = "idle";
 
   constructor(
-    private readonly io: Server,
+    private readonly io: Server<ClientToServerEvents, ServerToClientEvents>,
     readonly matchId: string,
     entries: MatchSeatInput[],
     readonly gameMode: GameMode,
@@ -373,7 +389,6 @@ export class Match {
   ): void {
     const tmode = this.privateTeamPlayMode();
     if (!tmode) return;
-    const totalWindow = Math.max(1, this.answerDeadline - this.questionStartedAt);
 
     for (const [teamId, snap] of this.teamSnapshots) {
       const submission = this.teamRoundSubmissions.get(teamId);
@@ -382,8 +397,7 @@ export class Match {
       const answeredTeam = submission != null;
       const teamCorrect = answeredTeam && teamChoice === correctIndex;
       const answeredAt = submission?.at ?? this.answerDeadline;
-      const progress = Math.min(1, Math.max(0, (answeredAt - this.questionStartedAt) / totalWindow));
-      const base = Math.round(100 - progress * 99);
+      const base = computeSpeedScoredBase(this.questionStartedAt, this.answerDeadline, answeredAt);
       const submitter = submission ? this.players.get(submission.byParticipantId) : undefined;
       const stacks =
         submission?.skillBoostStacksAtLock ?? submitter?.skillBoostStacks ?? 0;
@@ -481,6 +495,57 @@ export class Match {
     return this.finished;
   }
 
+  /** يحرر انتظار الجولة الحية حتى لا تبقى `playOneQuestion` معلّقة بعد إيقاف الخادم أو خطأ. */
+  private releasePendingRoundWait(): void {
+    this.resolveRound?.();
+    this.resolveRound = null;
+  }
+
+  /**
+   * إنهاء المباراة بسبب خطأ تشغيلي (قاعدة بيانات/استثناء) بعد `game_started`.
+   * لا يستدعي declareWinner — يُصدِر `game_over` مرة واحدة.
+   */
+  private emitAbortGameOver(input: {
+    outcomeType: "server_aborted" | "server_shutdown";
+    reason: string;
+  }): void {
+    if (this.finished) return;
+    this.studyResyncBundle = null;
+    this.matchPhaseHint = "idle";
+    this.releasePendingRoundWait();
+    this.clearStudyWait();
+    this.clearQuestionTimers();
+    const rm = this.resultMessages ?? {
+      winner: "",
+      loser: "",
+      tie: "",
+    };
+    this.io.to(this.room).emit("game_over", {
+      reason: input.reason,
+      outcomeType: input.outcomeType,
+      winner: null,
+      winners: [],
+      players: this.snapshotPlayers(),
+      resultMessages: rm,
+    } as GameOverWirePayload);
+    this.finished = true;
+  }
+
+  /**
+   * إيقاف فوري بسبب تصريف العملية (SIGTERM / إغلاق منضبط).
+   * يُستدعى من GameManager قبل مسح التوجيه.
+   */
+  abortDueToServerShutdown(): void {
+    if (this.finished) return;
+    this.emitAbortGameOver({ outcomeType: "server_shutdown", reason: "server_shutdown" });
+  }
+
+  /** استثناء غير متوقع خارج المسارات المعالجة في `run()` — شبكة أمان ضد unhandledRejection. */
+  abortDueToRuntimeFailure(): void {
+    if (this.finished) return;
+    this.emitAbortGameOver({ outcomeType: "server_aborted", reason: "runtime_error" });
+  }
+
   /** استئناف النقل عبر المقبس لمباريات متعددة اللاعبين فقط (لا للتعلم الفردي). */
   allowsTransportReconnect(): boolean {
     return !this.isSoloMatch;
@@ -561,7 +626,7 @@ export class Match {
   /**
    * لقطة مزامنة للمقعد بعد استئناف النقل (حد أدنى من الحقول؛ يُوسَّع لاحقًا).
    */
-  buildMatchStateSnapshot(forParticipantId: string): Record<string, unknown> | null {
+  buildMatchStateSnapshot(forParticipantId: string): MatchReconnectSnapshot | null {
     if (this.finished || !this.players.has(forParticipantId)) return null;
     const serverNow = Date.now();
     const abilityCosts = this.snapshotAbilityCosts();
@@ -639,7 +704,7 @@ export class Match {
       }));
     }
 
-    return {
+    const built = {
       serverNow,
       reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
       reconnectExpiresAt: serverNow + MATCH_RECONNECT_GRACE_MS,
@@ -650,6 +715,17 @@ export class Match {
       study,
       teamVoteResync,
     };
+    const parsed = matchReconnectSnapshotSchema.safeParse(built);
+    if (!parsed.success) {
+      fahemStructuredLog("warn", {
+        cat: "match",
+        event: "reconnect_snapshot_schema_failed",
+        matchId: this.matchId,
+        flatten: parsed.error.flatten(),
+      });
+      return built as MatchReconnectSnapshot;
+    }
+    return parsed.data;
   }
 
   /** تكاليف القدرات للعميل (مزامنة مع الإدارة). */
@@ -756,19 +832,21 @@ export class Match {
   }
 
   private hasEnoughActivePlayersForQuestions(): boolean {
-    if (this.hasPrivateTeams()) {
-      return this.countActiveTeams() > 1;
-    }
-    const active = this.countActive();
-    return this.isSoloMatch ? active > 0 : active > 1;
+    return hasEnoughActivePlayersForQuestionsPure({
+      hasPrivateTeams: this.hasPrivateTeams(),
+      activeTeams: this.countActiveTeams(),
+      activeIndividuals: this.countActive(),
+      isSoloMatch: this.isSoloMatch,
+    });
   }
 
   private shouldDeclareWinnerForActiveCount(): boolean {
-    if (this.hasPrivateTeams()) {
-      return this.countActiveTeams() <= 1;
-    }
-    const active = this.countActive();
-    return this.isSoloMatch ? active <= 0 : active <= 1;
+    return shouldDeclareWinnerForActiveCountPure({
+      hasPrivateTeams: this.hasPrivateTeams(),
+      activeTeams: this.countActiveTeams(),
+      activeIndividuals: this.countActive(),
+      isSoloMatch: this.isSoloMatch,
+    });
   }
 
   private allActiveAnswered(): boolean {
@@ -822,24 +900,22 @@ export class Match {
   }
 
   private applyKeyGrants(p: MatchPlayerState): void {
-    const streak = p.correctStreak;
-    if (streak <= 0) return;
-    let add = 0;
-    if (streak % this.keysStreakPerKey === 0) add += this.keysSmallStreakReward;
-    if (streak % this.keysMegaStreak === 0) add += this.keysMegaReward;
-    if (add <= 0) return;
-    const scaled = Math.floor(add * this.keysDropRate);
-    if (scaled <= 0) return;
-    p.keys = Math.min(this.keysMaxPerPlayer, p.keys + scaled);
+    const delta = keysGrantedDeltaForStreakPure(p.correctStreak, {
+      keysStreakPerKey: this.keysStreakPerKey,
+      keysMegaStreak: this.keysMegaStreak,
+      keysSmallStreakReward: this.keysSmallStreakReward,
+      keysMegaReward: this.keysMegaReward,
+      keysDropRate: this.keysDropRate,
+    });
+    if (delta <= 0) return;
+    p.keys = Math.min(this.keysMaxPerPlayer, p.keys + delta);
   }
 
   private applySkillBoostToAward(base: number, stacks: number): number {
-    if (base <= 0 || stacks <= 0) return base;
-    const mult = Math.min(
-      this.keysSkillBoostMaxMultiplier,
-      2 ** stacks * (this.keysSkillBoostPercent / 100),
-    );
-    return Math.round(base * (1 + mult));
+    return applySkillBoostToAwardPure(base, stacks, {
+      maxMultiplier: this.keysSkillBoostMaxMultiplier,
+      percent: this.keysSkillBoostPercent,
+    });
   }
 
   private damageHeart(participantId: string, p: MatchPlayerState, opts?: { skipIfHeartsDisabled?: boolean }): void {
@@ -1196,7 +1272,25 @@ export class Match {
 
   async run(): Promise<void> {
     const startupAt = Date.now();
-    await this.loadRuntimeSettings();
+    try {
+      await this.loadRuntimeSettings();
+    } catch (err) {
+      fahemStructuredLog("error", {
+        cat: "match",
+        event: "load_runtime_settings_failed",
+        matchId: this.matchId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    if (isFahemDebugRealtime()) {
+      fahemStructuredLog("info", {
+        cat: "match",
+        event: "match_run_begin",
+        matchId: this.matchId,
+        gameMode: this.gameMode,
+      });
+    }
     const loadRuntimeMs = Date.now() - startupAt;
     this.io.to(this.room).emit("game_started", {
       matchId: this.matchId,
@@ -1226,18 +1320,50 @@ export class Match {
         }
       }
     }
-    console.debug(`[matchmaking] runtime_settings_loaded_ms=${loadRuntimeMs} match=${this.matchId} mode=${this.gameMode}`);
+    if (isFahemDebugRealtime()) {
+      fahemStructuredLog("info", {
+        cat: "match",
+        event: "runtime_settings_loaded_ms",
+        matchId: this.matchId,
+        mode: this.gameMode,
+        loadRuntimeMs,
+      });
+    }
     this.emitKeysRoomState();
 
     const pool = getPool();
-    this.resultMessages = await getResultMessages(pool);
+    try {
+      this.resultMessages = await getResultMessages(pool);
+    } catch (err) {
+      fahemStructuredLog("error", {
+        cat: "match",
+        event: "get_result_messages_failed",
+        matchId: this.matchId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      this.emitAbortGameOver({ outcomeType: "server_aborted", reason: "db_error" });
+      return;
+    }
 
-    if (this.gameMode === "direct") {
-      await this.runDirectQuestionLoop(pool);
-    } else if (this.gameMode === "lesson") {
-      await this.runLessonMatchLoop(pool);
-    } else {
-      await this.runStudyThenQuizLoop(pool);
+    try {
+      if (this.gameMode === "direct") {
+        await this.runDirectQuestionLoop(pool);
+      } else if (this.gameMode === "lesson") {
+        await this.runLessonMatchLoop(pool);
+      } else {
+        await this.runStudyThenQuizLoop(pool);
+      }
+    } catch (err) {
+      if (!this.finished) {
+        fahemStructuredLog("error", {
+          cat: "match",
+          event: "run_loop_failed",
+          matchId: this.matchId,
+          err: err instanceof Error ? err.message : String(err),
+        });
+        this.emitAbortGameOver({ outcomeType: "server_aborted", reason: "runtime_error" });
+      }
+      return;
     }
 
     if (!this.finished) {
@@ -1509,7 +1635,7 @@ export class Match {
       winners: [],
       players: this.snapshotPlayers(),
       resultMessages: rm,
-    });
+    } as GameOverWirePayload);
     this.finished = true;
   }
 
@@ -1531,10 +1657,7 @@ export class Match {
     this.studyResyncBundle = null;
     this.matchPhaseHint = "question";
     this.questionStartedAt = Date.now();
-    const windowMs = Math.min(
-      120_000,
-      Math.max(5_000, answerMsOverride ?? this.questionMs),
-    );
+    const windowMs = clampAnswerWindowMs(answerMsOverride ?? this.questionMs);
     this.answerDeadline = Date.now() + windowMs;
     this.pendingAnswers.clear();
     this.answerTimes.clear();
@@ -1648,12 +1771,7 @@ export class Match {
           p.correctStreak += 1;
           this.applyKeyGrants(p);
           const answeredAt = this.answerTimes.get(participantId) ?? this.answerDeadline;
-          const totalWindow = Math.max(1, this.answerDeadline - this.questionStartedAt);
-          const progress = Math.min(
-            1,
-            Math.max(0, (answeredAt - this.questionStartedAt) / totalWindow),
-          );
-          const base = Math.round(100 - progress * 99);
+          const base = computeSpeedScoredBase(this.questionStartedAt, this.answerDeadline, answeredAt);
           pointsAward = this.applySkillBoostToAward(base, p.skillBoostStacks);
           p.skillPoints += pointsAward;
         } else {
@@ -1755,14 +1873,17 @@ export class Match {
   private emitFinishedGameOver(payload: Record<string, unknown>): void {
     if (this.gameMode === "lesson") {
       for (const [participantId, p] of this.players) {
-        this.io.to(p.currentSocketId).emit("game_over", {
-          ...payload,
-          lessonReview: this.lessonAnswerHistory.get(participantId) ?? [],
-        });
+        this.io.to(p.currentSocketId).emit(
+          "game_over",
+          {
+            ...payload,
+            lessonReview: this.lessonAnswerHistory.get(participantId) ?? [],
+          } as unknown as GameOverWirePayload,
+        );
       }
       return;
     }
-    this.io.to(this.room).emit("game_over", payload);
+    this.io.to(this.room).emit("game_over", payload as GameOverWirePayload);
   }
 
   /** نجوم المباراة: الرتب 1–3 مع من يتساوون في أي منها (لا يُقتطع عند 3 صفوف فقط). */
@@ -1824,23 +1945,13 @@ export class Match {
       })
       .sort((a, b) => b.teamScore - a.teamScore);
 
-    let rankCounter = 0;
-    let lastScore: number | null = null;
-    const teamLeaderboard = byTeam.map((row, idx) => {
-      if (lastScore === null || row.teamScore !== lastScore) {
-        rankCounter = idx + 1;
-        lastScore = row.teamScore;
-      }
-      const medal =
-        rankCounter === 1 ? "gold" : rankCounter === 2 ? "silver" : rankCounter === 3 ? "bronze" : null;
-      return {
-        rank: rankCounter,
-        teamId: row.teamId,
-        displayName: row.displayName,
-        teamScore: row.teamScore,
-        medal,
-      };
-    });
+    const teamLeaderboard = attachDenseRankAndMedal(byTeam, (row) => row.teamScore).map((row) => ({
+      rank: row.rank,
+      teamId: row.teamId,
+      displayName: row.displayName,
+      teamScore: row.teamScore,
+      medal: row.medal,
+    }));
 
     const starsOfTheMatch = this.buildStarsOfTheMatch();
 
@@ -1857,24 +1968,14 @@ export class Match {
         eliminated: p.eliminated,
       }))
       .sort((a, b) => b.skillPoints - a.skillPoints);
-    let lr = 0;
-    let ls: number | null = null;
-    const leaderboard = bySkillDesc.map((row, idx) => {
-      if (ls === null || row.skillPoints !== ls) {
-        lr = idx + 1;
-        ls = row.skillPoints;
-      }
-      const medal =
-        lr === 1 ? "gold" : lr === 2 ? "silver" : lr === 3 ? "bronze" : null;
-      return {
-        participantId: row.participantId,
-        userId: row.userId,
-        name: row.name,
-        skillPoints: row.skillPoints,
-        rank: lr,
-        medal,
-      };
-    });
+    const leaderboard = attachDenseRankAndMedal(bySkillDesc, (row) => row.skillPoints).map((row) => ({
+      participantId: row.participantId,
+      userId: row.userId,
+      name: row.name,
+      skillPoints: row.skillPoints,
+      rank: row.rank,
+      medal: row.medal,
+    }));
 
     const rm = this.resultMessages ?? {
       winner: "",
@@ -1934,14 +2035,7 @@ export class Match {
         loser: "",
         tie: "",
       };
-      const leaderboard = bySkillDesc.map((row, idx) => ({
-        participantId: row.participantId,
-        userId: row.userId,
-        name: row.name,
-        skillPoints: row.skillPoints,
-        rank: idx + 1,
-        medal: idx === 0 ? "gold" : idx === 1 ? "silver" : idx === 2 ? "bronze" : null,
-      }));
+      const leaderboard = attachOrdinalRankAndMedalForSoloStyleLeaderboard(bySkillDesc);
       this.emitFinishedGameOver({
         reason,
         outcomeType: "solo_incomplete",
@@ -1981,14 +2075,7 @@ export class Match {
         winners: [winner],
         players: this.snapshotPlayers(),
         resultMessages: rm,
-        leaderboard: bySkillDesc.map((row, idx) => ({
-          participantId: row.participantId,
-          userId: row.userId,
-          name: row.name,
-          skillPoints: row.skillPoints,
-          rank: idx + 1,
-          medal: idx === 0 ? "gold" : idx === 1 ? "silver" : idx === 2 ? "bronze" : null,
-        })),
+        leaderboard: attachOrdinalRankAndMedalForSoloStyleLeaderboard(bySkillDesc),
       });
       return;
     }
@@ -2020,27 +2107,7 @@ export class Match {
           ? "single_winner"
           : "shared_winners";
 
-    let lastScore: number | null = null;
-    let lastRank = 0;
-    const leaderboard = bySkillDesc.map((row, idx) => {
-      if (lastScore === null || row.skillPoints !== lastScore) {
-        lastRank = idx + 1;
-        lastScore = row.skillPoints;
-      }
-      const medal =
-        lastRank === 1
-          ? "gold"
-          : lastRank === 2
-            ? "silver"
-            : lastRank === 3
-              ? "bronze"
-              : null;
-      return {
-        ...row,
-        rank: lastRank,
-        medal,
-      };
-    });
+    const leaderboard = attachDenseRankAndMedal(bySkillDesc, (row) => row.skillPoints);
 
     const rm = this.resultMessages ?? {
       winner: "",

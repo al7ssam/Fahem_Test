@@ -1,7 +1,11 @@
 import type { Server, Socket } from "socket.io";
-import type { SocketAuthContext } from "../auth/socketAuth";
 import { randomUUID } from "crypto";
-import { z } from "zod";
+import type {
+  ClientToServerEvents,
+  FahemSocketData,
+  InterServerEvents,
+  ServerToClientEvents,
+} from "../../shared/socketEvents";
 import { getPool } from "../db/pool";
 import { getPublishedLessonPlaybackById, type LessonPlaybackPayload } from "../db/lessons";
 import { getCustomLessonPlayback } from "../customLessonSessions";
@@ -32,70 +36,26 @@ import {
   clampGameStudyPhaseMs,
   fetchGameTimingFromAppSettings,
 } from "./runtimeGameTiming";
-
-const joinLobbySchema = z
-  .object({
-    name: z.string().trim().min(1).max(32),
-    mode: z.enum(["direct", "study_then_quiz", "lesson"]).default("direct"),
-    subcategoryKey: z.string().trim().min(1).max(120).optional(),
-    lessonId: z.number().int().positive().optional(),
-    difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
-    playerSessionId: z.string().trim().min(1).max(120).optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.mode === "lesson") {
-      if (data.lessonId == null || !Number.isFinite(data.lessonId) || data.lessonId < 1) {
-        ctx.addIssue({ code: "custom", path: ["lessonId"], message: "lesson_id_required" });
-      }
-    }
-  });
-
-/** غرفة خاصة + فردي عبر السيرفر: درس منشور أو درس مخصص برمز جلسة */
-const joinLessonFlexibleSchema = z
-  .object({
-    name: z.string().trim().min(1).max(32),
-    mode: z.enum(["direct", "study_then_quiz", "lesson"]).default("direct"),
-    subcategoryKey: z.string().trim().min(1).max(120).optional(),
-    lessonId: z.number().int().positive().optional(),
-    customLessonToken: z.string().uuid().optional(),
-    difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
-    playerSessionId: z.string().trim().min(1).max(120).optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.mode === "lesson") {
-      const hasToken = Boolean(data.customLessonToken?.trim());
-      const hasLesson = data.lessonId != null && Number.isFinite(data.lessonId) && data.lessonId >= 1;
-      if (!hasToken && !hasLesson) {
-        ctx.addIssue({ code: "custom", path: ["lessonId"], message: "lesson_id_or_token_required" });
-      }
-      if (hasToken && hasLesson) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["customLessonToken"],
-          message: "lesson_token_and_id_conflict",
-        });
-      }
-    }
-  });
-
-const answerSchema = z.object({
-  questionId: z.number().int().positive(),
-  choiceIndex: z.number().int().min(0),
-});
-
-const abilityHeartSchema = z.object({
-  targetParticipantId: z.string().min(1),
-});
-
-const resumeMatchSchema = z.object({
-  matchId: z.string().uuid(),
-  participantId: z.string().uuid(),
-  resumeSecret: z.string().min(1).max(512),
-});
-
-const continueSpectatorSchema = z.object({
-  participantId: z.string().uuid().optional(),
-});
+import {
+  abilityHeartAttackSchema,
+  answerSchema,
+  ignoredClientBodySchema,
+  joinLessonFlexibleSchema,
+} from "./socketSchemas";
+import {
+  attachJoinLobbySocketHandler,
+  attachPlayerReadySocketHandler,
+  type LobbySocketDeps,
+} from "./coordinators/LobbyCoordinator";
+import { attachReconnectSocketHandlers, type ReconnectSocketDeps } from "./coordinators/ReconnectCoordinator";
+import { fahemStructuredLog, isFahemDebugRealtime } from "../runtime/fahemStructuredLog";
+import { InMemoryRuntimeStats } from "../runtime/inMemoryRuntimeStats";
+import { Ack } from "../../shared/socketAckErrorCodes";
+import type { LobbyStateWirePayload, PrivateRoomStateWirePayload } from "../../shared/lobbyStateWire";
+import {
+  buildPrivateRoomWirePayloadPair,
+  buildPublicLobbyWirePayload,
+} from "./payloads/buildLobbyWirePayloads";
 
 const RESUME_MATCH_RATE_WINDOW_MS = 60_000;
 const RESUME_MATCH_RATE_MAX = 25;
@@ -121,33 +81,8 @@ export type LobbyEntry = {
   roomCode?: string | null;
 };
 
-type LobbyStatePayload = {
-  mode: GameMode;
-  players: Array<{
-    participantId: string;
-    userId: string | null;
-    name: string;
-    ready: boolean;
-    mode: GameMode;
-    subcategoryKey: string | null;
-    difficultyMode: DifficultyMode;
-  }>;
-  isStarting: boolean;
-  participantIds: string[];
-  maxPlayersPerMatch: number;
-  countdownSecondsRemaining?: number;
-  isPrivate?: boolean;
-  roomCode?: string;
-  hostParticipantId?: string;
-  roomSettings?: {
-    questionMs: number;
-    studyPhaseMs: number;
-  };
-  teamPlayMode?: PrivateRoomTeamPlayMode;
-  heartsPerPlayer?: PrivateRoomHeartsPerPlayer;
-  teamsLobby?: PrivateRoomTeamsLobbyPayload;
-  unassignedParticipantIds?: string[];
-};
+type LobbyStatePayload = LobbyStateWirePayload;
+type PrivateRoomStatePayload = PrivateRoomStateWirePayload;
 
 export type PrivateRoomSettings = {
   questionMs: number;
@@ -182,28 +117,45 @@ export type PrivateRoomState = {
   privateRoomMatchRunning: boolean;
 };
 
-type PrivateRoomStatePayload = {
-  roomCode: string;
-  hostParticipantId: string;
-  mode: GameMode;
-  subcategoryKey: string | null;
-  lessonId: number | null;
-  difficultyMode: DifficultyMode;
-  roomVersion: number;
-  players: Array<{ participantId: string; userId: string | null; name: string; ready: boolean }>;
-  isStarting: boolean;
-  participantIds: string[];
-  countdownSecondsRemaining?: number;
-  roomSettings: {
-    questionMs: number;
-    studyPhaseMs: number;
-  };
-  teamPlayMode: PrivateRoomTeamPlayMode;
-  heartsPerPlayer: PrivateRoomHeartsPerPlayer;
-  teamsLobby?: PrivateRoomTeamsLobbyPayload;
-  unassignedParticipantIds?: string[];
-};
+/**
+ * واجهة ضيّقة لمسجّل مقبس الغرفة الخاصة — تُمرَّر ككائن حرفي من attachSocket.
+ * ملكية الحالة: GameManager يملك الخرائط والمؤقتات؛ منسّقو إعادة الربط/اللوبي يملكون المسارات المذكورة في تعليق رأس الصنف.
+ */
+export interface PrivateRoomGameManagerFacade {
+  isDraining(): boolean;
+  resolvePlayerSessionId(raw: unknown, socketId: string): string;
+  allocateUniqueRoomCode(): string;
+  leaveMatchForSocket(socketId: string): void;
+  leaveLobbyEverywhere(socketId: string): void;
+  removeFromPrivateRoom(socketId: string): void;
+  readUserId(socket: Socket): string | null;
+  privateRooms: Map<string, PrivateRoomState>;
+  socketToPrivateRoomCode: Map<string, string>;
+  socketToPrivateParticipantId: Map<string, string>;
+  privateLobbyRoom(roomCode: string): string;
+  emitPrivateLobbyState(roomCode: string): void;
+  evictDuplicatePrivateMember(room: PrivateRoomState, incomingSocket: Socket, playerSessionId: string): void;
+  io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, FahemSocketData>;
+  tryStartPrivateRoom(roomCode: string): Promise<void>;
+  isPrivateRoomHost(room: PrivateRoomState, participantId: string | undefined): boolean;
+  shufflePrivateRoomTeams(room: PrivateRoomState): void;
+  joinTeamForParticipant(
+    room: PrivateRoomState,
+    participantId: string,
+    teamId: string,
+  ): { ok: true } | { ok: false; error: string };
+  leaveTeamForParticipant(
+    room: PrivateRoomState,
+    participantId: string,
+  ): { ok: true } | { ok: false; error: string };
+}
 
+/**
+ * ملكية الحالة: خرائط اللوبي العام، الغرف الخاصة، المباريات النشطة، ونوافذ إعادة الربط.
+ * مسارات المقبس: منسِّق اللوبي (`LobbyCoordinator`)، الغرف الخاصة (`privateRoomSocketHandlers`)، إعادة الربط (`ReconnectCoordinator`).
+ *
+ * Phase E — عقود أحادية العقدة ودورة الحياة (وثائق فقط): راجع `docs/RUNTIME_SINGLE_NODE_CONTRACT.md` و`docs/RUNTIME_LIFECYCLE_SHUTDOWN.md` و`docs/RUNTIME_TIMER_OWNERSHIP.md`.
+ */
 export class GameManager {
   private readonly privateRooms = new Map<string, PrivateRoomState>();
   private readonly socketToPrivateRoomCode = new Map<string, string>();
@@ -264,19 +216,26 @@ export class GameManager {
   private matchFillWindowSeconds = DEFAULT_MATCH_FILL_WINDOW_SECONDS;
   private maxPlayersLoadedAtMs = 0;
   private fillWindowLoadedAtMs = 0;
+  /** يمنع انضمامات جديدة أثناء تصريف العملية (SIGTERM). */
+  private draining = false;
+  /** وقت بدء التصريف — لحقل drainingSinceMs في لقطة الصحة. */
+  private drainingBeganAt: number | null = null;
+  private readonly runtimeStats = new InMemoryRuntimeStats();
+  private privateRoomGcInterval: ReturnType<typeof setInterval> | null = null;
 
-  constructor(private readonly io: Server) {
+  constructor(
+    private readonly io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, FahemSocketData>,
+  ) {
     const idlePrivateRoomMs = 6 * 60 * 60 * 1000;
-    setInterval(() => {
+    this.privateRoomGcInterval = setInterval(() => {
       const now = Date.now();
       try {
-        console.info(
-          "[fahem_private_room_metrics]",
-          JSON.stringify({
-            privateRooms: this.privateRooms.size,
-            runningMatches: this.runningMatches.size,
-          }),
-        );
+        fahemStructuredLog("info", {
+          cat: "private_room",
+          event: "gc_tick_metrics",
+          privateRooms: this.privateRooms.size,
+          runningMatches: this.runningMatches.size,
+        });
       } catch {
         /* ignore */
       }
@@ -294,9 +253,123 @@ export class GameManager {
     }, 12 * 60 * 1000);
   }
 
+  isDraining(): boolean {
+    return this.draining;
+  }
+
+  /** يُستدعى من `index.ts` عند SIGTERM قبل إغلاق المقابس. */
+  beginDrain(): void {
+    if (this.draining) return;
+    this.draining = true;
+    this.drainingBeganAt = Date.now();
+    this.io.emit("server_draining", {
+      serverNow: Date.now(),
+      messageAr: "الخادم يُحدَّث أو يُغلق مؤقتًا. لن يُقبل انضمام جديد؛ المباريات النشطة ستُنهى.",
+    });
+  }
+
+  stopPeriodicTasks(): void {
+    if (this.privateRoomGcInterval != null) {
+      clearInterval(this.privateRoomGcInterval);
+      this.privateRoomGcInterval = null;
+    }
+  }
+
+  /** إنهاء كل المباريات النشطة ومسح مؤقتات إعادة الربط وجداول الانطلاق. */
+  abortAllMatchesForShutdown(): void {
+    const matches = [...this.runningMatches.values()];
+    for (const m of matches) {
+      try {
+        m.abortDueToServerShutdown();
+      } catch (e) {
+        console.error("[shutdown] abort_match_failed", e);
+      }
+      this.unregisterMatchRoutingForMatch(m);
+    }
+    this.runningMatches.clear();
+    for (const [, t] of [...this.pendingReconnectByParticipantId.entries()]) {
+      clearTimeout(t);
+    }
+    this.pendingReconnectByParticipantId.clear();
+    for (const mode of ["direct", "study_then_quiz", "lesson"] as const) {
+      const t = this.matchStartTimers[mode];
+      if (t != null) {
+        clearTimeout(t);
+        this.matchStartTimers[mode] = null;
+      }
+      this.countdownEndsAt[mode] = null;
+      this.countdownGroup[mode] = null;
+      this.lockedParticipantIds[mode] = [];
+    }
+    let privateRoomsCountdownCleared = 0;
+    for (const [roomCode, room] of this.privateRooms.entries()) {
+      let dirty = false;
+      if (room.matchStartTimer != null) {
+        clearTimeout(room.matchStartTimer);
+        room.matchStartTimer = null;
+        dirty = true;
+      }
+      if (room.countdownEndsAt != null) {
+        room.countdownEndsAt = null;
+        dirty = true;
+      }
+      if (room.lockedParticipantIds.length > 0) {
+        room.lockedParticipantIds = [];
+        dirty = true;
+      }
+      if (dirty) {
+        privateRoomsCountdownCleared += 1;
+        room.roomVersion += 1;
+        this.emitPrivateLobbyState(roomCode);
+      }
+    }
+    if (privateRoomsCountdownCleared > 0) {
+      fahemStructuredLog("info", {
+        cat: "shutdown",
+        event: "private_room_countdown_cleared_shutdown",
+        rooms: privateRoomsCountdownCleared,
+      });
+    }
+  }
+
+  getOperationalSnapshot(): {
+    draining: boolean;
+    drainingSinceMs: number | null;
+    activeMatches: number;
+    lobbyPlayersApprox: number;
+    privateRooms: number;
+    uptimeMs: number;
+    connectedSocketsApprox: number;
+    stats: ReturnType<InMemoryRuntimeStats["snapshot"]>;
+  } {
+    const lobbyPlayersApprox =
+      this.lobbies.direct.size + this.lobbies.study_then_quiz.size + this.lobbies.lesson.size;
+    const engine = this.io.engine as unknown as { clientsCount?: number };
+    const connectedSocketsApprox =
+      typeof engine.clientsCount === "number" && Number.isFinite(engine.clientsCount)
+        ? engine.clientsCount
+        : this.io.sockets?.sockets?.size ?? 0;
+    return {
+      draining: this.draining,
+      drainingSinceMs:
+        this.draining && this.drainingBeganAt != null ? Date.now() - this.drainingBeganAt : null,
+      activeMatches: this.runningMatches.size,
+      lobbyPlayersApprox,
+      privateRooms: this.privateRooms.size,
+      uptimeMs: Math.floor(process.uptime() * 1000),
+      connectedSocketsApprox,
+      stats: this.runtimeStats.snapshot(),
+    };
+  }
+
   private logReconnectEvent(payload: Record<string, unknown>): void {
     try {
-      console.info("[fahem_reconnect]", JSON.stringify({ t: Date.now(), ...payload }));
+      this.runtimeStats.recordReconnectPayload(payload);
+      fahemStructuredLog("info", {
+        ...payload,
+        cat: "reconnect",
+        event: typeof payload.event === "string" ? payload.event : "reconnect_event",
+      });
     } catch {
       /* ignore */
     }
@@ -319,7 +392,7 @@ export class GameManager {
   }
 
   private readUserId(socket: Socket): string | null {
-    const u = (socket.data as { auth?: SocketAuthContext }).auth?.userId;
+    const u = (socket.data as FahemSocketData).auth?.userId;
     return typeof u === "string" && u.trim() ? u.trim() : null;
   }
 
@@ -502,35 +575,30 @@ export class GameManager {
     difficultyMode: DifficultyMode = "mix",
     lessonId?: number | null,
   ): LobbyStatePayload {
-    const isStarting = Boolean(this.matchStartTimers[mode]);
-    const endsAt = this.countdownEndsAt[mode];
-    const countdownSecondsRemaining =
-      isStarting && endsAt != null
-        ? Math.max(1, Math.ceil((endsAt - Date.now()) / 1000))
-        : undefined;
-    return {
+    const players = [...this.lobbies[mode].values()]
+      .filter(
+        (p) =>
+          p.difficultyMode === difficultyMode &&
+          (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")) &&
+          (mode !== "lesson" || p.lessonId === lessonId),
+      )
+      .map((p) => ({
+        participantId: p.participantId,
+        userId: p.userId,
+        name: p.name,
+        ready: p.ready,
+        mode: p.mode,
+        subcategoryKey: p.subcategoryKey,
+        difficultyMode: p.difficultyMode,
+      }));
+    return buildPublicLobbyWirePayload({
       mode,
-      players: [...this.lobbies[mode].values()]
-        .filter(
-          (p) =>
-            p.difficultyMode === difficultyMode &&
-            (mode !== "study_then_quiz" || p.subcategoryKey === (subcategoryKey ?? "general_default")) &&
-            (mode !== "lesson" || p.lessonId === lessonId),
-        )
-        .map((p) => ({
-          participantId: p.participantId,
-          userId: p.userId,
-          name: p.name,
-          ready: p.ready,
-          mode: p.mode,
-          subcategoryKey: p.subcategoryKey,
-          difficultyMode: p.difficultyMode,
-        })),
-      isStarting,
-      participantIds: [...this.lockedParticipantIds[mode]],
+      players,
+      lockedParticipantIds: [...this.lockedParticipantIds[mode]],
       maxPlayersPerMatch: this.maxPlayersPerMatch,
-      countdownSecondsRemaining,
-    };
+      matchStartTimerActive: Boolean(this.matchStartTimers[mode]),
+      countdownEndsAt: this.countdownEndsAt[mode],
+    });
   }
 
   private emitPrivateLobbyState(roomCode: string): void {
@@ -540,48 +608,31 @@ export class GameManager {
     if (room.members.size > 0) {
       room.postMatchExpiresAt = null;
     }
-    const countdownSecondsRemaining =
-      room.countdownEndsAt != null
-        ? Math.max(1, Math.ceil((room.countdownEndsAt - Date.now()) / 1000))
-        : undefined;
     const memberIds = new Set(room.members.keys());
-    const teamBroadcast =
+    const teamsLobbyPayload =
       room.teamPlayMode !== "individual" && room.teamsLobby
-        ? {
-            teamPlayMode: room.teamPlayMode,
-            heartsPerPlayer: room.heartsPerPlayer,
-            teamsLobby: teamsLobbyToPayload(room.teamsLobby),
-            unassignedParticipantIds: listUnassignedParticipantIds(memberIds, room.teamsLobby),
-          }
-        : {
-            teamPlayMode: room.teamPlayMode,
-            heartsPerPlayer: room.heartsPerPlayer,
-          };
-    const payload: LobbyStatePayload = {
-      mode: room.mode,
-      players: [...room.members.values()].map((p) => ({
-        participantId: p.participantId,
-        userId: p.userId,
-        name: p.name,
-        ready: p.ready,
-        mode: p.mode,
-        subcategoryKey: p.subcategoryKey,
-        difficultyMode: p.difficultyMode,
-      })),
-      isStarting: Boolean(room.matchStartTimer),
-      participantIds: [...room.lockedParticipantIds],
-      maxPlayersPerMatch: 100,
-      countdownSecondsRemaining,
-      isPrivate: true,
-      roomCode: room.roomCode,
-      hostParticipantId: room.hostParticipantId,
-      roomSettings: {
-        questionMs: room.settings.questionMs,
-        studyPhaseMs: room.settings.studyPhaseMs,
-      },
-      ...teamBroadcast,
-    };
-    const privatePayload: PrivateRoomStatePayload = {
+        ? teamsLobbyToPayload(room.teamsLobby)
+        : undefined;
+    const unassignedIds =
+      room.teamPlayMode !== "individual" && room.teamsLobby
+        ? listUnassignedParticipantIds(memberIds, room.teamsLobby)
+        : undefined;
+    const lobbyPlayerRows = [...room.members.values()].map((p) => ({
+      participantId: p.participantId,
+      userId: p.userId,
+      name: p.name,
+      ready: p.ready,
+      mode: p.mode,
+      subcategoryKey: p.subcategoryKey,
+      difficultyMode: p.difficultyMode,
+    }));
+    const privatePlayerRows = [...room.members.values()].map((p) => ({
+      participantId: p.participantId,
+      userId: p.userId,
+      name: p.name,
+      ready: p.ready,
+    }));
+    const { lobby: payload, privateRoom: privatePayload } = buildPrivateRoomWirePayloadPair({
       roomCode: room.roomCode,
       hostParticipantId: room.hostParticipantId,
       mode: room.mode,
@@ -589,21 +640,21 @@ export class GameManager {
       lessonId: room.lessonId,
       difficultyMode: room.difficultyMode,
       roomVersion: room.roomVersion,
-      players: [...room.members.values()].map((p) => ({
-        participantId: p.participantId,
-        userId: p.userId,
-        name: p.name,
-        ready: p.ready,
-      })),
-      isStarting: Boolean(room.matchStartTimer),
-      participantIds: [...room.lockedParticipantIds],
-      countdownSecondsRemaining,
+      lobbyPlayerRows,
+      privatePlayerRows,
+      lockedParticipantIds: [...room.lockedParticipantIds],
+      matchStartTimerActive: Boolean(room.matchStartTimer),
+      countdownEndsAt: room.countdownEndsAt,
       roomSettings: {
         questionMs: room.settings.questionMs,
         studyPhaseMs: room.settings.studyPhaseMs,
       },
-      ...teamBroadcast,
-    };
+      teamPlayMode: room.teamPlayMode,
+      heartsPerPlayer: room.heartsPerPlayer,
+      teamsLobby: teamsLobbyPayload,
+      unassignedParticipantIds: unassignedIds,
+      maxPlayersForPrivateLobby: 100,
+    });
     this.io.to(this.privateLobbyRoom(roomCode)).emit("lobby_state", payload);
     this.io.to(this.privateLobbyRoom(roomCode)).emit("private_room_state", privatePayload);
   }
@@ -630,11 +681,11 @@ export class GameManager {
     participantId: string,
     teamId: string,
   ): { ok: true } | { ok: false; error: string } {
-    if (!room.teamsLobby) return { ok: false, error: "teams_disabled" };
-    if (room.teamsLobby.teamsLocked) return { ok: false, error: "teams_locked" };
+    if (!room.teamsLobby) return { ok: false, error: Ack.teams_disabled };
+    if (room.teamsLobby.teamsLocked) return { ok: false, error: Ack.teams_locked };
     const team = room.teamsLobby.teams.get(teamId);
-    if (!team) return { ok: false, error: "team_not_found" };
-    if (!room.members.has(participantId)) return { ok: false, error: "not_member" };
+    if (!team) return { ok: false, error: Ack.team_not_found };
+    if (!room.members.has(participantId)) return { ok: false, error: Ack.not_member };
     this.removeParticipantFromAllTeamsInRoom(room, participantId);
     const becomesCaptain = team.memberParticipantIds.length === 0;
     team.memberParticipantIds.push(participantId);
@@ -646,8 +697,8 @@ export class GameManager {
     room: PrivateRoomState,
     participantId: string,
   ): { ok: true } | { ok: false; error: string } {
-    if (!room.teamsLobby) return { ok: false, error: "teams_disabled" };
-    if (room.teamsLobby.teamsLocked) return { ok: false, error: "teams_locked" };
+    if (!room.teamsLobby) return { ok: false, error: Ack.teams_disabled };
+    if (room.teamsLobby.teamsLocked) return { ok: false, error: Ack.teams_locked };
     for (const team of room.teamsLobby.teams.values()) {
       const idx = team.memberParticipantIds.indexOf(participantId);
       if (idx >= 0) {
@@ -658,7 +709,7 @@ export class GameManager {
         return { ok: true };
       }
     }
-    return { ok: false, error: "not_in_team" };
+    return { ok: false, error: Ack.not_in_team };
   }
 
   private shufflePrivateRoomTeams(room: PrivateRoomState): void {
@@ -679,63 +730,101 @@ export class GameManager {
     }
   }
 
-  attachSocket(socket: Socket): void {
-    socket.on("join_lobby", async (raw, cb) => {
-      try {
-        const parsed = joinLobbySchema.safeParse(raw);
-        if (!parsed.success) {
-          cb?.({ ok: false, error: "invalid_name" });
-          return;
-        }
-        const { name, mode } = parsed.data;
-        const playerSessionId = this.resolvePlayerSessionId(
-          { ...(raw as Record<string, unknown>), __authUserId: socket.data?.auth?.userId },
-          socket.id,
-        );
-        const difficultyMode = parsed.data.difficultyMode ?? "mix";
-        const subcategoryKey =
-          mode === "study_then_quiz"
-            ? String(parsed.data.subcategoryKey ?? "general_default").trim()
-            : null;
-        const lessonId = mode === "lesson" ? (parsed.data.lessonId ?? null) : null;
-        this.evictDuplicateLobbySocket(socket, playerSessionId, mode, subcategoryKey, difficultyMode, lessonId);
-        this.leaveMatchForSocket(socket.id);
-        this.leaveLobbyEverywhere(socket.id);
-        this.removeFromPrivateRoom(socket.id);
-        const participantId = randomUUID();
-        const userId = this.readUserId(socket);
-        const entry: LobbyEntry = {
-          participantId,
-          socketId: socket.id,
-          userId,
-          playerSessionId,
-          name,
-          ready: true,
-          readyOrder: ++this.readyOrderCounter,
-          mode,
-          subcategoryKey,
-          lessonId,
-          difficultyMode,
-        };
-        this.lobbies[mode].set(participantId, entry);
-        this.socketToPublicLobbyRef.set(socket.id, { mode, participantId });
-        await socket.join(this.lobbyRoom(mode, subcategoryKey, difficultyMode, lessonId));
-        this.broadcastLobby(mode, subcategoryKey, difficultyMode, lessonId);
-        socket.emit("lobby_state", this.buildLobbyPayload(mode, subcategoryKey, difficultyMode, lessonId));
-        this.enqueueScheduleMatchStart(mode, subcategoryKey, difficultyMode, lessonId);
-        cb?.({ ok: true });
-      } catch {
-        cb?.({ ok: false, error: "server" });
-      }
-    });
+  private asPrivateRoomFacade(): PrivateRoomGameManagerFacade {
+    return {
+      isDraining: () => this.isDraining(),
+      resolvePlayerSessionId: (raw, sid) => this.resolvePlayerSessionId(raw, sid),
+      allocateUniqueRoomCode: () => this.allocateUniqueRoomCode(),
+      leaveMatchForSocket: (sid) => this.leaveMatchForSocket(sid),
+      leaveLobbyEverywhere: (sid) => this.leaveLobbyEverywhere(sid),
+      removeFromPrivateRoom: (sid) => this.removeFromPrivateRoom(sid),
+      readUserId: (s) => this.readUserId(s),
+      privateRooms: this.privateRooms,
+      socketToPrivateRoomCode: this.socketToPrivateRoomCode,
+      socketToPrivateParticipantId: this.socketToPrivateParticipantId,
+      privateLobbyRoom: (code) => this.privateLobbyRoom(code),
+      emitPrivateLobbyState: (code) => this.emitPrivateLobbyState(code),
+      evictDuplicatePrivateMember: (room, incoming, psid) => this.evictDuplicatePrivateMember(room, incoming, psid),
+      io: this.io,
+      tryStartPrivateRoom: (code) => this.tryStartPrivateRoom(code),
+      isPrivateRoomHost: (room, pid) => this.isPrivateRoomHost(room, pid),
+      shufflePrivateRoomTeams: (room) => this.shufflePrivateRoomTeams(room),
+      joinTeamForParticipant: (room, pid, tid) => this.joinTeamForParticipant(room, pid, tid),
+      leaveTeamForParticipant: (room, pid) => this.leaveTeamForParticipant(room, pid),
+    };
+  }
 
-    registerPrivateRoomSocketHandlers(this, socket);
+  private createLobbySocketDeps(): LobbySocketDeps {
+    return {
+      isDraining: () => this.isDraining(),
+      resolvePlayerSessionId: (raw, sid) => this.resolvePlayerSessionId(raw, sid),
+      evictDuplicateLobbySocket: (incoming, psid, mode, sub, diff, lesson) =>
+        this.evictDuplicateLobbySocket(incoming, psid, mode, sub, diff, lesson),
+      leaveMatchForSocket: (sid) => this.leaveMatchForSocket(sid),
+      leaveLobbyEverywhere: (sid) => this.leaveLobbyEverywhere(sid),
+      removeFromPrivateRoom: (sid) => this.removeFromPrivateRoom(sid),
+      readUserId: (s) => this.readUserId(s),
+      takeNextReadyOrder: () => ++this.readyOrderCounter,
+      setLobbyEntry: (mode, pid, entry) => {
+        this.lobbies[mode].set(pid, entry);
+      },
+      setPublicLobbyRef: (socketId, ref) => {
+        this.socketToPublicLobbyRef.set(socketId, ref);
+      },
+      joinLobbyRoom: async (socket, mode, sub, diff, lesson) => {
+        await socket.join(this.lobbyRoom(mode, sub, diff, lesson));
+      },
+      broadcastLobby: (mode, sub, diff, lesson) => this.broadcastLobby(mode, sub, diff, lesson),
+      buildLobbyPayload: (mode, sub, diff, lesson) => this.buildLobbyPayload(mode, sub, diff, lesson),
+      emitLobbyStateToSocket: (socket, mode, sub, diff, lesson) => {
+        socket.emit("lobby_state", this.buildLobbyPayload(mode, sub, diff, lesson));
+      },
+      enqueueScheduleMatchStart: (mode, sub, diff, lesson) =>
+        this.enqueueScheduleMatchStart(mode, sub, diff, lesson),
+      findLobbyEntry: (sid) => this.findLobbyEntry(sid),
+    };
+  }
+
+  private createReconnectSocketDeps(): ReconnectSocketDeps {
+    return {
+      isDraining: () => this.isDraining(),
+      logReconnectEvent: (p) => this.logReconnectEvent(p),
+      checkResumeMatchRateLimit: (sid) => this.checkResumeMatchRateLimit(sid),
+      clearPendingReconnect: (pid, src) => this.clearPendingReconnect(pid, src),
+      getParticipantIdToSocket: () => this.participantIdToSocket,
+      clearSocketMatchBinding: (sid) => this.clearSocketMatchBinding(sid),
+      disconnectSocket: (sid) => {
+        this.io.sockets.sockets.get(sid)?.disconnect(true);
+      },
+      tagSocketMatchBinding: (sid, mid) => this.tagSocketMatchBinding(sid, mid),
+      setSocketToParticipant: (sid, pid) => this.socketToParticipantId.set(sid, pid),
+      setParticipantToSocket: (pid, sid) => this.participantIdToSocket.set(pid, sid),
+      setParticipantToMatch: (pid, m) => this.participantIdToMatch.set(pid, m),
+      deleteSocketToParticipant: (sid) => this.socketToParticipantId.delete(sid),
+      getRunningMatch: (mid) => this.runningMatches.get(mid),
+      getParticipantIdToMatch: (pid) => this.participantIdToMatch.get(pid),
+      getSocketToParticipant: (sid) => this.socketToParticipantId.get(sid),
+      getSocketDataMatchId: (s) => (s.data as { fahemMatchId?: string }).fahemMatchId,
+    };
+  }
+
+  attachSocket(
+    socket: Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, FahemSocketData>,
+  ): void {
+    const lobbyDeps = this.createLobbySocketDeps();
+    const reconnectDeps = this.createReconnectSocketDeps();
+    attachJoinLobbySocketHandler(lobbyDeps, socket);
+    registerPrivateRoomSocketHandlers(this.asPrivateRoomFacade(), socket);
 
     socket.on("start_solo_match", async (raw, cb) => {
+      if (this.draining) {
+        cb?.({ ok: false, error: Ack.server_draining });
+        return;
+      }
       try {
         const parsed = joinLessonFlexibleSchema.safeParse(raw);
         if (!parsed.success) {
-          cb?.({ ok: false, error: "invalid_name" });
+          cb?.({ ok: false, error: Ack.invalid_name });
           return;
         }
         const { name, mode } = parsed.data;
@@ -758,7 +847,7 @@ export class GameManager {
             if (!lessonPlaybackForMatch || lessonPlaybackForMatch.steps.length === 0) {
               cb?.({
                 ok: false,
-                error: "custom_lesson_expired",
+                error: Ack.custom_lesson_expired,
                 message: "انتهت صلاحية الدرس المخصص أو غير صالح.",
               });
               return;
@@ -766,14 +855,14 @@ export class GameManager {
             lessonId = null;
           } else {
             if (lessonId == null || lessonId < 1) {
-              cb?.({ ok: false, error: "lesson_id_required", message: "معرّف الدرس مطلوب." });
+              cb?.({ ok: false, error: Ack.lesson_id_required, message: "معرّف الدرس مطلوب." });
               return;
             }
             lessonPlaybackForMatch = await getPublishedLessonPlaybackById(lessonId);
             if (!lessonPlaybackForMatch || lessonPlaybackForMatch.steps.length === 0) {
               cb?.({
                 ok: false,
-                error: "lesson_not_found",
+                error: Ack.lesson_not_found,
                 message: "الدرس غير متاح أو غير منشور.",
               });
               return;
@@ -788,7 +877,7 @@ export class GameManager {
           if (total < 30) {
             cb?.({
               ok: false,
-              error: "not_enough_questions",
+              error: Ack.not_enough_questions,
               message: difficultyMode === "mix"
                 ? "لا توجد أسئلة كافية في هذا التصنيف."
                 : "لا توجد أسئلة كافية في مستوى الصعوبة هذا داخل التصنيف. جرّب اختيار مزيج.",
@@ -834,11 +923,21 @@ export class GameManager {
         await socket.join(match.room);
         this.registerMatchRouting([soloSeat], match);
         this.runningMatches.set(matchId, match);
+        this.runtimeStats.matchStarted();
         cb?.({ ok: true });
 
         void (async () => {
           try {
             await match.run();
+          } catch (err) {
+            this.runtimeStats.matchmakingSoloRunUnhandled += 1;
+            fahemStructuredLog("error", {
+              cat: "matchmaking",
+              event: "solo_match_run_unhandled",
+              matchId,
+              err: err instanceof Error ? err.message : String(err),
+            });
+            match.abortDueToRuntimeFailure();
           } finally {
             const s = this.io.sockets.sockets.get(socket.id);
             if (s) {
@@ -850,27 +949,23 @@ export class GameManager {
             }
             this.runningMatches.delete(matchId);
             this.unregisterMatchRoutingForMatch(match);
+            this.runtimeStats.matchEnded();
           }
-        })();
+        })().catch((err) => {
+          this.runtimeStats.matchmakingSoloOuterFatal += 1;
+          fahemStructuredLog("error", {
+            cat: "matchmaking",
+            event: "solo_match_outer_fatal",
+            matchId,
+            err: err instanceof Error ? err.message : String(err),
+          });
+        });
       } catch {
-        cb?.({ ok: false, error: "server" });
+        cb?.({ ok: false, error: Ack.server });
       }
     });
 
-    socket.on("player_ready", (_payload, cb) => {
-      const entry = this.findLobbyEntry(socket.id);
-      if (!entry) {
-        cb?.({ ok: false, error: "not_in_lobby" });
-        return;
-      }
-      if (!entry.ready) {
-        entry.ready = true;
-        entry.readyOrder = ++this.readyOrderCounter;
-      }
-      this.broadcastLobby(entry.mode, entry.subcategoryKey, entry.difficultyMode, entry.lessonId);
-      this.enqueueScheduleMatchStart(entry.mode, entry.subcategoryKey, entry.difficultyMode, entry.lessonId);
-      cb?.({ ok: true });
-    });
+    attachPlayerReadySocketHandler(lobbyDeps, socket);
 
     socket.on("answer", (raw, cb) => {
       const match = this.getMatchForConnectedSocket(socket.id);
@@ -888,7 +983,8 @@ export class GameManager {
       cb?.({ ok: true });
     });
 
-    socket.on("round_ready", (_raw, cb) => {
+    socket.on("round_ready", (raw, cb) => {
+      void ignoredClientBodySchema.safeParse(raw);
       const match = this.getMatchForConnectedSocket(socket.id);
       const participantId = this.resolveParticipantIdForSocket(socket.id);
       if (!match || !participantId) {
@@ -899,57 +995,26 @@ export class GameManager {
       cb?.({ ok: true });
     });
 
-    socket.on("continue_as_spectator", async (raw, cb) => {
-      try {
-        const parsed = continueSpectatorSchema.safeParse(raw ?? {});
-        if (!parsed.success) {
-          cb?.({ ok: false, error: "invalid_body" });
-          return;
-        }
-        let participantId = parsed.data.participantId;
-        const mid = (socket.data as { fahemMatchId?: string }).fahemMatchId;
-        const match = mid ? this.runningMatches.get(mid) : undefined;
-        if (!match || match.isFinished()) {
-          cb?.({ ok: false, error: "no_match" });
-          return;
-        }
-        if (!participantId) {
-          participantId = this.socketToParticipantId.get(socket.id);
-        }
-        if (!participantId || this.participantIdToMatch.get(participantId) !== match) {
-          cb?.({ ok: false, error: "unknown_seat" });
-          return;
-        }
-        if (!match.canContinueAsSpectator(participantId)) {
-          cb?.({ ok: false, error: "not_spectator" });
-          return;
-        }
-        match.syncParticipantSocket(participantId, socket.id);
-        await socket.join(match.room);
-        match.emitKeysRoomStateToSocketForParticipant(socket.id, participantId);
-        const snapshot = match.buildMatchStateSnapshot(participantId);
-        cb?.({ ok: true, snapshot: snapshot ?? null });
-      } catch {
-        cb?.({ ok: false, error: "server" });
-      }
-    });
+    attachReconnectSocketHandlers(reconnectDeps, socket);
 
-    socket.on("ability_skill_boost", (_raw, cb) => {
+    socket.on("ability_skill_boost", (raw, cb) => {
+      void ignoredClientBodySchema.safeParse(raw);
       const match = this.getMatchForConnectedSocket(socket.id);
       const participantId = this.resolveParticipantIdForSocket(socket.id);
       if (!match || !participantId) {
-        cb?.({ ok: false, error: "not_in_match" });
+        cb?.({ ok: false, error: Ack.not_in_match });
         return;
       }
       const r = match.tryAbilitySkillBoost(participantId);
       cb?.(r);
     });
 
-    socket.on("ability_skip_question", (_raw, cb) => {
+    socket.on("ability_skip_question", (raw, cb) => {
+      void ignoredClientBodySchema.safeParse(raw);
       const match = this.getMatchForConnectedSocket(socket.id);
       const participantId = this.resolveParticipantIdForSocket(socket.id);
       if (!match || !participantId) {
-        cb?.({ ok: false, error: "not_in_match" });
+        cb?.({ ok: false, error: Ack.not_in_match });
         return;
       }
       const r = match.tryAbilitySkipQuestion(participantId);
@@ -960,12 +1025,12 @@ export class GameManager {
       const match = this.getMatchForConnectedSocket(socket.id);
       const attackerPid = this.resolveParticipantIdForSocket(socket.id);
       if (!match || !attackerPid) {
-        cb?.({ ok: false, error: "not_in_match" });
+        cb?.({ ok: false, error: Ack.not_in_match });
         return;
       }
-      const parsed = abilityHeartSchema.safeParse(raw);
+      const parsed = abilityHeartAttackSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       const victimPid = parsed.data.targetParticipantId.trim();
@@ -973,95 +1038,16 @@ export class GameManager {
       cb?.(r);
     });
 
-    socket.on("ability_reveal_keys", (_raw, cb) => {
+    socket.on("ability_reveal_keys", (raw, cb) => {
+      void ignoredClientBodySchema.safeParse(raw);
       const match = this.getMatchForConnectedSocket(socket.id);
       const participantId = this.resolveParticipantIdForSocket(socket.id);
       if (!match || !participantId) {
-        cb?.({ ok: false, error: "not_in_match" });
+        cb?.({ ok: false, error: Ack.not_in_match });
         return;
       }
       const r = match.tryAbilityRevealKeys(participantId);
       cb?.(r);
-    });
-
-    socket.on("resume_match", async (raw, cb) => {
-      const logBase: Record<string, unknown> = { socketId: socket.id, event: "resume_match_result" };
-      try {
-        if (!this.checkResumeMatchRateLimit(socket.id)) {
-          this.logReconnectEvent({ ...logBase, ok: false, error: "rate_limited" });
-          cb?.({ ok: false, error: "rate_limited" });
-          return;
-        }
-        const parsed = resumeMatchSchema.safeParse(raw);
-        if (!parsed.success) {
-          this.logReconnectEvent({ ...logBase, ok: false, error: "invalid_body" });
-          cb?.({ ok: false, error: "invalid_body" });
-          return;
-        }
-        const { matchId, participantId, resumeSecret } = parsed.data;
-        const match = this.runningMatches.get(matchId);
-        if (!match || match.isFinished()) {
-          this.logReconnectEvent({ ...logBase, participantId, matchId, ok: false, error: "no_match" });
-          cb?.({ ok: false, error: "no_match" });
-          return;
-        }
-        if (!match.allowsTransportReconnect()) {
-          this.logReconnectEvent({ ...logBase, participantId, matchId, ok: false, error: "solo_no_transport_reconnect" });
-          cb?.({ ok: false, error: "solo_no_transport_reconnect" });
-          return;
-        }
-        if (this.participantIdToMatch.get(participantId) !== match) {
-          this.logReconnectEvent({ ...logBase, participantId, matchId, ok: false, error: "seat_not_in_match" });
-          cb?.({ ok: false, error: "seat_not_in_match" });
-          return;
-        }
-        if (!match.verifyResumeSecret(participantId, resumeSecret)) {
-          this.logReconnectEvent({ ...logBase, participantId, matchId, ok: false, error: "bad_token" });
-          cb?.({ ok: false, error: "bad_token" });
-          return;
-        }
-        if (!match.canResumeTransport(participantId)) {
-          this.logReconnectEvent({ ...logBase, participantId, matchId, ok: false, error: "cannot_resume" });
-          cb?.({ ok: false, error: "cannot_resume" });
-          return;
-        }
-        this.clearPendingReconnect(participantId, "resume_match");
-        const prevSid = this.participantIdToSocket.get(participantId);
-        if (prevSid && prevSid !== socket.id) {
-          this.socketToParticipantId.delete(prevSid);
-          this.clearSocketMatchBinding(prevSid);
-          this.io.sockets.sockets.get(prevSid)?.disconnect(true);
-        }
-        match.syncParticipantSocket(participantId, socket.id);
-        this.socketToParticipantId.set(socket.id, participantId);
-        this.participantIdToSocket.set(participantId, socket.id);
-        this.participantIdToMatch.set(participantId, match);
-        this.tagSocketMatchBinding(socket.id, match.matchId);
-        await socket.join(match.room);
-        match.emitCaptainTeamVoteResyncToRoom();
-        const newSecret = match.rotateResumeSecret(participantId);
-        if (newSecret && match.allowsTransportReconnect()) {
-          const expiresAt = Date.now() + MATCH_RECONNECT_GRACE_MS;
-          socket.emit("match_resume_token", {
-            matchId: match.matchId,
-            participantId,
-            resumeSecret: newSecret,
-            reconnectGraceMs: MATCH_RECONNECT_GRACE_MS,
-            expiresAt,
-          });
-        }
-        const snapshot = match.buildMatchStateSnapshot(participantId);
-        this.logReconnectEvent({ ...logBase, participantId, matchId, ok: true });
-        cb?.({ ok: true, snapshot: snapshot ?? null });
-      } catch {
-        this.logReconnectEvent({
-          socketId: socket.id,
-          event: "resume_match_result",
-          ok: false,
-          error: "server",
-        });
-        cb?.({ ok: false, error: "server" });
-      }
     });
 
     socket.on("disconnect", () => {
@@ -1157,6 +1143,7 @@ export class GameManager {
   private async tryStartPrivateRoom(roomCode: string): Promise<void> {
     const room = this.privateRooms.get(roomCode);
     if (!room || room.matchStartTimer) return;
+    if (this.draining) return;
     const members = [...room.members.values()];
     if (members.length < 2) return;
     const allReady = members.every((m) => m.ready);
@@ -1169,6 +1156,7 @@ export class GameManager {
       const key = room.subcategoryKey ?? "general_default";
       const difficultyFilter = room.difficultyMode === "mix" ? null : room.difficultyMode;
       const total = await countQuestionsBySubcategory(getPool(), key, true, difficultyFilter);
+      if (this.draining) return;
       if (total < 30) {
         this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
           reason: "not_enough_questions",
@@ -1199,6 +1187,7 @@ export class GameManager {
           return;
         }
         const lesson = await getPublishedLessonPlaybackById(lid);
+        if (this.draining) return;
         if (!lesson || lesson.steps.length === 0) {
           this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
             reason: "lesson_not_found",
@@ -1208,6 +1197,7 @@ export class GameManager {
         }
       }
     }
+    if (this.draining) return;
     room.lockedParticipantIds = members.map((m) => m.participantId);
     room.countdownEndsAt = Date.now() + (this.matchFillWindowSeconds * 1000);
     room.roomVersion += 1;
@@ -1227,6 +1217,7 @@ export class GameManager {
   private async startPrivateRoomMatch(roomCode: string): Promise<void> {
     const room = this.privateRooms.get(roomCode);
     if (!room) return;
+    if (this.draining) return;
     const participants = room.lockedParticipantIds
       .map((id) => room.members.get(id))
       .filter((p): p is LobbyEntry => Boolean(p))
@@ -1336,11 +1327,22 @@ export class GameManager {
     room.lockedParticipantIds = [];
     room.roomVersion += 1;
     this.runningMatches.set(matchId, match);
+    this.runtimeStats.matchStarted();
     room.privateRoomMatchRunning = true;
     room.postMatchExpiresAt = null;
     this.emitPrivateLobbyState(roomCode);
     try {
       await match.run();
+    } catch (err) {
+      this.runtimeStats.matchmakingPrivateRoomRunUnhandled += 1;
+      fahemStructuredLog("error", {
+        cat: "matchmaking",
+        event: "private_room_match_run_unhandled",
+        matchId,
+        roomCode,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      match.abortDueToRuntimeFailure();
     } finally {
       const postMatchKeepAliveMs = 5 * 60 * 1000;
       room.privateRoomMatchRunning = false;
@@ -1382,6 +1384,7 @@ export class GameManager {
       room.countdownEndsAt = null;
       this.runningMatches.delete(matchId);
       this.unregisterMatchRoutingForMatch(match);
+      this.runtimeStats.matchEnded();
       if (![...room.members.values()].some((m) => m.participantId === room.hostParticipantId)) {
         const nextPid = room.members.keys().next().value as string | undefined;
         if (nextPid) {
@@ -1530,7 +1533,7 @@ export class GameManager {
         this.io.to(this.lobbyRoom(mode, sub ?? undefined, diff, lessonId)).emit("match_start_cancelled", {
           reason: "not_enough_ready",
         });
-        if (this.readyPlayers(mode, sub, diff, lessonId).length >= 2) {
+        if (!this.draining && this.readyPlayers(mode, sub, diff, lessonId).length >= 2) {
           this.enqueueScheduleMatchStart(mode, sub, diff, lessonId);
         }
       }
@@ -1575,6 +1578,7 @@ export class GameManager {
       return;
     }
     const maxPlayers = await this.loadMaxPlayersPerMatch();
+    if (this.draining) return;
     const picked = this.sortedReadyPlayers(mode, subcategoryKey, difficultyMode, lessonId).slice(0, maxPlayers);
     const lockedParticipantIds = picked.map((p) => p.participantId);
     if (lockedParticipantIds.length < 2) {
@@ -1590,11 +1594,12 @@ export class GameManager {
         reason: "not_enough_ready",
       });
       this.broadcastLobby(mode, subcategoryKey, difficultyMode, lessonId);
-      if (this.readyPlayers(mode, subcategoryKey, difficultyMode, lessonId).length >= 2) {
+      if (!this.draining && this.readyPlayers(mode, subcategoryKey, difficultyMode, lessonId).length >= 2) {
         this.enqueueScheduleMatchStart(mode, subcategoryKey, difficultyMode, lessonId);
       }
       return;
     }
+    if (this.draining) return;
     this.lockedParticipantIds[mode] = lockedParticipantIds;
     this.emitMatchStarting(mode, lockedParticipantIds, maxPlayers, subcategoryKey, difficultyMode, lessonId);
     this.broadcastLobby(mode, subcategoryKey, difficultyMode, lessonId);
@@ -1634,12 +1639,15 @@ export class GameManager {
       }
       if (sameBucket) {
         await this.updateRosterDuringCountdown(mode, subcategoryKey, difficultyMode, lessonId);
+        if (this.draining) return;
       }
       return;
     }
 
     const maxPlayers = await this.loadMaxPlayersPerMatch();
+    if (this.draining) return;
     const fillSeconds = await this.loadMatchFillWindowSeconds();
+    if (this.draining) return;
     const fillMs = fillSeconds * 1000;
     const picked = this.sortedReadyPlayers(mode, subcategoryKey, difficultyMode, lessonId).slice(0, maxPlayers);
     const lockedParticipantIds = picked.map((p) => p.participantId);
@@ -1647,8 +1655,11 @@ export class GameManager {
 
     if (this.matchStartTimers[mode]) {
       await this.updateRosterDuringCountdown(mode, subcategoryKey, difficultyMode, lessonId);
+      if (this.draining) return;
       return;
     }
+
+    if (this.draining) return;
 
     this.lockedParticipantIds[mode] = lockedParticipantIds;
     this.countdownEndsAt[mode] = Date.now() + fillMs;
@@ -1674,6 +1685,7 @@ export class GameManager {
     difficultyMode: DifficultyMode = "mix",
     lessonId?: number | null,
   ): Promise<void> {
+    if (this.draining) return;
     const startedAt = Date.now();
     const lockedIds = this.lockedParticipantIds[gameMode];
     const participants = lockedIds
@@ -1689,7 +1701,7 @@ export class GameManager {
         reason: "not_enough_ready",
       });
       this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
-      if (this.readyPlayers(gameMode, subcategoryKey, difficultyMode, lessonId).length >= 2) {
+      if (!this.draining && this.readyPlayers(gameMode, subcategoryKey, difficultyMode, lessonId).length >= 2) {
         this.enqueueScheduleMatchStart(gameMode, subcategoryKey, difficultyMode, lessonId);
       }
       return;
@@ -1710,6 +1722,11 @@ export class GameManager {
         this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
         return;
       }
+    }
+    if (this.draining) {
+      this.lockedParticipantIds[gameMode] = [];
+      this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
+      return;
     }
     let lessonPlaybackForLobby: Awaited<ReturnType<typeof getPublishedLessonPlaybackById>> = null;
     if (gameMode === "lesson") {
@@ -1732,6 +1749,11 @@ export class GameManager {
         return;
       }
     }
+    if (this.draining) {
+      this.lockedParticipantIds[gameMode] = [];
+      this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
+      return;
+    }
     this.lockedParticipantIds[gameMode] = [];
     const matchId = randomUUID();
 
@@ -1742,6 +1764,12 @@ export class GameManager {
             subcategoryKey ?? "general_default",
           )) ?? undefined
         : undefined;
+
+    if (this.draining) {
+      this.lockedParticipantIds[gameMode] = [];
+      this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
+      return;
+    }
 
     const matchSeats: MatchSeatInput[] = participants.map((p) => ({
       participantId: p.participantId,
@@ -1773,13 +1801,32 @@ export class GameManager {
     }));
     this.registerMatchRouting(matchSeats, match);
     const roomsReadyMs = Date.now() - startedAt;
-    console.debug(`[matchmaking] lobby_to_match_rooms_ms=${roomsReadyMs} mode=${gameMode} participants=${participants.length}`);
+    if (isFahemDebugRealtime()) {
+      fahemStructuredLog("info", {
+        cat: "matchmaking",
+        event: "lobby_to_match_rooms_ms",
+        roomsReadyMs,
+        mode: gameMode,
+        participants: participants.length,
+      });
+    }
 
     this.runningMatches.set(matchId, match);
+    this.runtimeStats.matchStarted();
     this.broadcastLobby(gameMode, subcategoryKey, difficultyMode, lessonId);
 
     try {
       await match.run();
+    } catch (err) {
+      this.runtimeStats.matchmakingLobbyRunUnhandled += 1;
+      fahemStructuredLog("error", {
+        cat: "matchmaking",
+        event: "lobby_match_run_unhandled",
+        matchId,
+        mode: gameMode,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      match.abortDueToRuntimeFailure();
     } finally {
       for (const p of participants) {
         const s = this.io.sockets.sockets.get(p.socketId);
@@ -1793,6 +1840,7 @@ export class GameManager {
       }
       this.runningMatches.delete(matchId);
       this.unregisterMatchRoutingForMatch(match);
+      this.runtimeStats.matchEnded();
     }
   }
 }

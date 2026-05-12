@@ -25,7 +25,14 @@ import {
   clampGameStudyPhaseMs,
   fetchGameTimingFromAppSettings,
 } from "./runtimeGameTiming";
-import type { LobbyEntry, PrivateRoomSettings, PrivateRoomState } from "./GameManager";
+import { Ack } from "../../shared/socketAckErrorCodes";
+import { joinLessonFlexibleSchema } from "./socketSchemas";
+import type {
+  LobbyEntry,
+  PrivateRoomGameManagerFacade,
+  PrivateRoomSettings,
+  PrivateRoomState,
+} from "./GameManager";
 
 const teamPlayModeSchema = z.enum(["individual", "teams_first_answer", "teams_captain_approval"]);
 const privateRoomJoinTeamSchema = z.object({ teamId: z.string().uuid() });
@@ -47,41 +54,21 @@ const privateRoomSetDesiredTeamCountSchema = z.object({
 });
 const privateRoomRemoveTeamSchema = z.object({ teamId: z.string().uuid() });
 
-const joinLessonFlexibleSchema = z
-  .object({
-    name: z.string().trim().min(1).max(32),
-    mode: z.enum(["direct", "study_then_quiz", "lesson"]).default("direct"),
-    subcategoryKey: z.string().trim().min(1).max(120).optional(),
-    lessonId: z.number().int().positive().optional(),
-    customLessonToken: z.string().uuid().optional(),
-    difficultyMode: z.enum(["mix", "easy", "medium", "hard"]).default("mix"),
-    playerSessionId: z.string().trim().min(1).max(120).optional(),
-  })
-  .superRefine((data, ctx) => {
-    if (data.mode === "lesson") {
-      const hasToken = Boolean(data.customLessonToken?.trim());
-      const hasLesson = data.lessonId != null && Number.isFinite(data.lessonId) && data.lessonId >= 1;
-      if (!hasToken && !hasLesson) {
-        ctx.addIssue({ code: "custom", path: ["lessonId"], message: "lesson_id_or_token_required" });
-      }
-      if (hasToken && hasLesson) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["customLessonToken"],
-          message: "lesson_token_and_id_conflict",
-        });
-      }
-    }
-  });
-
-export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: Socket): void {
-  const g = gameManager as Record<string, unknown> as any;
+export function registerPrivateRoomSocketHandlers(
+  gameManager: PrivateRoomGameManagerFacade,
+  socket: Socket,
+): void {
+  const g = gameManager;
 
     socket.on("create_private_room", async (raw, cb) => {
       try {
+        if (typeof g.isDraining === "function" && g.isDraining()) {
+          cb?.({ ok: false, error: Ack.server_draining });
+          return;
+        }
         const parsed = joinLessonFlexibleSchema.safeParse(raw);
         if (!parsed.success) {
-          cb?.({ ok: false, error: "invalid_body" });
+          cb?.({ ok: false, error: Ack.invalid_body });
           return;
         }
         const d = parsed.data;
@@ -104,14 +91,14 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
             if (!customLessonPlayback || customLessonPlayback.steps.length === 0) {
               cb?.({
                 ok: false,
-                error: "custom_lesson_expired",
+                error: Ack.custom_lesson_expired,
                 message: "انتهت صلاحية الدرس المخصص أو غير صالح. أعد التحقق من JSON ثم أنشئ جلسة جديدة.",
               });
               return;
             }
             lessonId = null;
           } else if (lessonId == null || lessonId < 1) {
-            cb?.({ ok: false, error: "lesson_id_required", message: "اختر درساً صالحاً." });
+            cb?.({ ok: false, error: Ack.lesson_id_required, message: "اختر درساً صالحاً." });
             return;
           }
         }
@@ -205,12 +192,16 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
           roomVersion: room.roomVersion,
         });
       } catch {
-        cb?.({ ok: false, error: "server" });
+        cb?.({ ok: false, error: Ack.server });
       }
     });
 
     socket.on("join_private_room", async (raw, cb) => {
       try {
+        if (typeof g.isDraining === "function" && g.isDraining()) {
+          cb?.({ ok: false, error: Ack.server_draining });
+          return;
+        }
         const name = String((raw as { name?: unknown }).name ?? "").trim();
         const playerSessionId = g.resolvePlayerSessionId(
           { ...(raw as Record<string, unknown>), __authUserId: socket.data?.auth?.userId },
@@ -218,12 +209,12 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
         );
         const roomCode = String((raw as { roomCode?: unknown }).roomCode ?? "").trim().toUpperCase();
         if (!name || !roomCode) {
-          cb?.({ ok: false, error: "invalid_body" });
+          cb?.({ ok: false, error: Ack.invalid_body });
           return;
         }
         const room = g.privateRooms.get(roomCode);
         if (!room) {
-          cb?.({ ok: false, error: "room_not_found", message: "الغرفة غير موجودة." });
+          cb?.({ ok: false, error: Ack.room_not_found, message: "الغرفة غير موجودة." });
           return;
         }
         if (
@@ -234,7 +225,7 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
           Date.now() >= room.postMatchExpiresAt
         ) {
           g.privateRooms.delete(roomCode);
-          cb?.({ ok: false, error: "room_not_found", message: "انتهت صلاحية الغرفة الخاصة." });
+          cb?.({ ok: false, error: Ack.room_not_found, message: "انتهت صلاحية الغرفة الخاصة." });
           return;
         }
         g.evictDuplicatePrivateMember(room, socket, playerSessionId);
@@ -279,29 +270,29 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
           roomVersion: room.roomVersion,
         });
       } catch {
-        cb?.({ ok: false, error: "server" });
+        cb?.({ ok: false, error: Ack.server });
       }
     });
 
     socket.on("private_room_update_settings", (raw, cb) => {
       const roomCode = g.socketToPrivateRoomCode.get(socket.id);
       if (!roomCode) {
-        cb?.({ ok: false, error: "not_in_private_room" });
+        cb?.({ ok: false, error: Ack.not_in_private_room });
         return;
       }
       const room = g.privateRooms.get(roomCode);
       if (!room) {
-        cb?.({ ok: false, error: "room_not_found" });
+        cb?.({ ok: false, error: Ack.room_not_found });
         return;
       }
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const hostEntry = myPid ? room.members.get(myPid) : undefined;
       if (!hostEntry || hostEntry.participantId !== room.hostParticipantId) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const qRaw = Number((raw as { questionMs?: unknown }).questionMs ?? room.settings.questionMs);
@@ -316,18 +307,22 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
     socket.on("private_room_set_ready", async (raw, cb) => {
       const roomCode = g.socketToPrivateRoomCode.get(socket.id);
       if (!roomCode) {
-        cb?.({ ok: false, error: "not_in_private_room" });
+        cb?.({ ok: false, error: Ack.not_in_private_room });
         return;
       }
       const room = g.privateRooms.get(roomCode);
       if (!room) {
-        cb?.({ ok: false, error: "room_not_found" });
+        cb?.({ ok: false, error: Ack.room_not_found });
         return;
       }
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const entry = myPid ? room.members.get(myPid) : undefined;
       if (!entry) {
-        cb?.({ ok: false, error: "not_in_private_room" });
+        cb?.({ ok: false, error: Ack.not_in_private_room });
+        return;
+      }
+      if (typeof g.isDraining === "function" && g.isDraining()) {
+        cb?.({ ok: false, error: Ack.server_draining });
         return;
       }
       const ready = Boolean((raw as { ready?: unknown }).ready);
@@ -353,16 +348,16 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !g.isPrivateRoomHost(room, myPid)) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const parsed = privateRoomSetPlayModeSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       const mode = parsed.data.playMode;
@@ -382,16 +377,16 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !g.isPrivateRoomHost(room, myPid)) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const parsed = privateRoomSetHeartsSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       room.heartsPerPlayer = parsed.data.heartsPerPlayer as PrivateRoomHeartsPerPlayer;
@@ -405,16 +400,16 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !g.isPrivateRoomHost(room, myPid) || !room.teamsLobby) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const parsed = privateRoomSetDesiredTeamCountSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       const target = clampDesiredTeamCount(parsed.data.desiredTeamCount);
@@ -433,7 +428,7 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
         if (!last) break;
         const t = teams.get(last);
         if (t && t.memberParticipantIds.length > 0) {
-          cb?.({ ok: false, error: "non_empty_team", message: "أفرغ الفرق الزائدة يدوياً قبل تقليل العدد." });
+          cb?.({ ok: false, error: Ack.non_empty_team, message: "أفرغ الفرق الزائدة يدوياً قبل تقليل العدد." });
           return;
         }
         teams.delete(last);
@@ -449,15 +444,15 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !g.isPrivateRoomHost(room, myPid) || !room.teamsLobby) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       if (room.teamsLobby.teams.size >= 12) {
-        cb?.({ ok: false, error: "max_teams" });
+        cb?.({ ok: false, error: Ack.max_teams });
         return;
       }
       const teamId = randomUUID();
@@ -478,29 +473,29 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !g.isPrivateRoomHost(room, myPid) || !room.teamsLobby) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const parsed = privateRoomRemoveTeamSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       if (room.teamsLobby.teams.size <= 2) {
-        cb?.({ ok: false, error: "min_teams" });
+        cb?.({ ok: false, error: Ack.min_teams });
         return;
       }
       const t = room.teamsLobby.teams.get(parsed.data.teamId);
       if (!t) {
-        cb?.({ ok: false, error: "team_not_found" });
+        cb?.({ ok: false, error: Ack.team_not_found });
         return;
       }
       if (t.memberParticipantIds.length > 0) {
-        cb?.({ ok: false, error: "team_not_empty" });
+        cb?.({ ok: false, error: Ack.team_not_empty });
         return;
       }
       room.teamsLobby.teams.delete(parsed.data.teamId);
@@ -515,11 +510,11 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !g.isPrivateRoomHost(room, myPid) || !room.teamsLobby) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       g.shufflePrivateRoomTeams(room);
@@ -533,16 +528,16 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !g.isPrivateRoomHost(room, myPid) || !room.teamsLobby) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const parsed = privateRoomLockTeamsSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       room.teamsLobby.teamsLocked = parsed.data.locked;
@@ -556,21 +551,21 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !g.isPrivateRoomHost(room, myPid) || !room.teamsLobby) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const parsed = privateRoomSetCaptainSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       const team = room.teamsLobby.teams.get(parsed.data.teamId);
       if (!team || !team.memberParticipantIds.includes(parsed.data.captainParticipantId)) {
-        cb?.({ ok: false, error: "invalid_captain" });
+        cb?.({ ok: false, error: Ack.invalid_captain });
         return;
       }
       team.captainParticipantId = parsed.data.captainParticipantId;
@@ -584,16 +579,16 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !myPid) {
-        cb?.({ ok: false, error: "not_in_private_room" });
+        cb?.({ ok: false, error: Ack.not_in_private_room });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const parsed = privateRoomJoinTeamSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       const r = g.joinTeamForParticipant(room, myPid, parsed.data.teamId);
@@ -611,11 +606,11 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !myPid) {
-        cb?.({ ok: false, error: "not_in_private_room" });
+        cb?.({ ok: false, error: Ack.not_in_private_room });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const r = g.leaveTeamForParticipant(room, myPid);
@@ -633,21 +628,21 @@ export function registerPrivateRoomSocketHandlers(gameManager: unknown, socket: 
       const myPid = g.socketToPrivateParticipantId.get(socket.id);
       const room = roomCode ? g.privateRooms.get(roomCode) : undefined;
       if (!room || !myPid || !room.teamsLobby) {
-        cb?.({ ok: false, error: "not_in_private_room" });
+        cb?.({ ok: false, error: Ack.not_in_private_room });
         return;
       }
       if (room.matchStartTimer) {
-        cb?.({ ok: false, error: "countdown_started" });
+        cb?.({ ok: false, error: Ack.countdown_started });
         return;
       }
       const parsed = privateRoomUpdateTeamNameSchema.safeParse(raw);
       if (!parsed.success) {
-        cb?.({ ok: false, error: "invalid_body" });
+        cb?.({ ok: false, error: Ack.invalid_body });
         return;
       }
       const team = room.teamsLobby.teams.get(parsed.data.teamId);
       if (!team || team.captainParticipantId !== myPid) {
-        cb?.({ ok: false, error: "forbidden" });
+        cb?.({ ok: false, error: Ack.forbidden });
         return;
       }
       team.displayName = parsed.data.displayName;

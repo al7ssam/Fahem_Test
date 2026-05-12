@@ -27,6 +27,20 @@ import {
 } from "./customLessonPromptPrefsApi";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
+import { coerceReconnectSnapshotForUi } from "./realtime/matchReconnect";
+import { attachServerDrainingListener } from "./realtime/socketBindings";
+import { createLobbyCountdownController } from "./realtime/lobbyCountdown";
+import { tryResumeMatchAfterConnect } from "./realtime/resumeMatchAfterConnect";
+import {
+  applyMatchStateSnapshotFromServer as applyMatchStateSnapshotFromServerWithDeps,
+  type SnapshotApplyDeps,
+} from "./realtime/snapshotApply";
+import { attachGameplaySocketListeners, type GameplaySocketDeps } from "./realtime/gameplaySocketListeners";
+import { applyPrivateRoomStateFromPayload, type PrivateRoomStateApplyDeps } from "./realtime/privateRoomStateApply";
+import type {
+  PrivateRoomStateClientPayload,
+  PrivateTeamLobbyTeamPayload,
+} from "./realtime/privateRoomFlow";
 import {
   cleanupEmailLinkLandingUrl,
   completeGoogleRedirectLogin,
@@ -159,12 +173,6 @@ let privateRoomVersionState = 0;
 let privateRoomTeamPlayModeState: "individual" | "teams_first_answer" | "teams_captain_approval" =
   "individual";
 let privateRoomHeartsPerPlayerState = 3;
-type PrivateTeamLobbyTeamPayload = {
-  teamId: string;
-  displayName: string;
-  captainParticipantId: string;
-  memberParticipantIds: string[];
-};
 let privateRoomTeamsLobbyState: {
   desiredTeamCount: number;
   teamsLocked: boolean;
@@ -3631,7 +3639,9 @@ function render(): void {
           "continue_as_spectator",
           { participantId: myParticipantId ?? undefined },
           (ack: { ok?: boolean; snapshot?: Record<string, unknown> | null }) => {
-            if (ack?.ok && ack.snapshot && socket) applyMatchStateSnapshotFromServer(socket, ack.snapshot);
+            if (ack?.ok && ack.snapshot && socket) {
+              applyMatchStateSnapshotFromServer(socket, coerceReconnectSnapshotForUi(ack.snapshot));
+            }
           },
         );
       });
@@ -5004,128 +5014,237 @@ function applyGameStartedClientPayload(payload: {
   }
 }
 
+const snapshotApplyDeps: SnapshotApplyDeps = {
+  syncClock,
+  applyGameStartedClientPayload: (gs) =>
+    applyGameStartedClientPayload(gs as Parameters<typeof applyGameStartedClientPayload>[0]),
+  applyKeysRoomSlice: (ks, opts) =>
+    applyKeysRoomSlice(ks as Parameters<typeof applyKeysRoomSlice>[0], opts),
+  applyStudyBundleFromServer,
+  getPhase: () => phase,
+  queryStudyReadyStateEl: () => app.querySelector<HTMLParagraphElement>("#study-ready-state"),
+  bindQuestionOptionsUi: (sock, q) => bindQuestionOptionsUi(sock, q as IncomingQuestionPayload),
+  getMatchTeamPlayMode: () => matchTeamPlayMode,
+  findMeInPlayers,
+  getCurrentMatchPlayers: () => currentMatchPlayers,
+  setTeamVoteCountsByChoice: (next) => {
+    teamVoteCountsByChoice = next;
+  },
+  setCaptainTapPendingIndex: (v) => {
+    captainTapPendingIndex = v;
+  },
+  applyTeamVoteBadgesToOptionButtons,
+  queryStatusEl: () => app.querySelector<HTMLParagraphElement>("#status"),
+  render,
+  surfaceGameplayConnectionMessage,
+  queryLobbyNoticeEl: () => app.querySelector<HTMLParagraphElement>("#lobby-notice"),
+};
+
 function applyMatchStateSnapshotFromServer(s: Socket, snap: Record<string, unknown>): void {
-  const sn = snap.serverNow;
-  if (typeof sn === "number") syncClock(sn);
-  const gs = snap.gameStarted as Parameters<typeof applyGameStartedClientPayload>[0] | undefined;
-  if (gs) applyGameStartedClientPayload(gs);
-  const ks = snap.keysRoomState as Parameters<typeof applyKeysRoomSlice>[0] | undefined;
-  if (ks) applyKeysRoomSlice(ks, {});
-  const st = snap.study as Record<string, unknown> | undefined;
-  if (st && st.study_phase) applyStudyBundleFromServer(st);
-  const hint = snap.matchPhaseHint as string | undefined;
-  if (hint === "between" && phase === "studying") {
-    const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
-    if (readyStateEl && !snap.question) {
-      readyStateEl.textContent = "انتقال إلى السؤال…";
-    }
+  applyMatchStateSnapshotFromServerWithDeps(snapshotApplyDeps, s, snap);
+}
+
+/** ناتج `game_over` — يُستدعى من `attachGameplaySocketListeners` مع تنظيف عدّاد اللوبي من سياق المقبس. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- لقطة خادم مرنة؛ الحقول تُفرّع يدوياً كالسابق
+function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): void {
+  clearReconnectMultiplayerRuntime();
+  matchHeartsPerPlayerSetting = null;
+  clearLobbyCountdown();
+  clearTimer();
+  const lr = payload.lessonReview;
+  matchLessonReviewItems =
+    Array.isArray(lr) && lr.length > 0
+      ? (lr as NonNullable<typeof matchLessonReviewItems>)
+      : null;
+  matchLessonReviewIndex = 0;
+  phase = "result";
+  render();
+  const me = findMeInPlayers(payload.players);
+  currentMatchPlayers = payload.players.map((p: (typeof currentMatchPlayers)[number]) => ({ ...p }));
+  syncMyParticipantIdFromPlayers(payload.players);
+  currentLeaderboard = payload.leaderboard ?? [];
+  const title = app.querySelector<HTMLHeadingElement>("#res-title");
+  const body = app.querySelector<HTMLParagraphElement>("#res-body");
+  const kicker = app.querySelector<HTMLParagraphElement>("#res-kicker");
+  const stats = app.querySelector<HTMLDivElement>("#res-stats");
+  const againBtn = app.querySelector<HTMLButtonElement>("#again");
+  if (!title || !body) return;
+  if (kicker) kicker.hidden = true;
+  const rm = payload.resultMessages;
+  const winTitle = rm?.winnerTitle?.trim() || DEFAULT_RESULT_MESSAGES.winnerTitle;
+  const loseTitle = rm?.loserTitle?.trim() || DEFAULT_RESULT_MESSAGES.loserTitle;
+  const tieTitle = rm?.tieTitle?.trim() || DEFAULT_RESULT_MESSAGES.tieTitle;
+  const winCopy = rm?.winner?.trim() || DEFAULT_RESULT_MESSAGES.winner;
+  const loseCopy = rm?.loser?.trim() || DEFAULT_RESULT_MESSAGES.loser;
+  const tieCopy = rm?.tie?.trim() || DEFAULT_RESULT_MESSAGES.tie;
+  if (payload.reason === "no_questions" || payload.outcomeType === "no_questions") {
+    matchLessonReviewItems = null;
+    title.textContent = "لا توجد أسئلة";
+    body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
+    if (stats) stats.classList.add("hidden");
+    if (againBtn) againBtn.textContent = "العودة والمحاولة لاحقًا";
+    applyResultScreenPresentation("empty", "");
+    return;
   }
-  const q = snap.question as IncomingQuestionPayload | null | undefined;
-  if (q && typeof q.questionId === "number" && Array.isArray(q.options)) {
-    bindQuestionOptionsUi(s, q);
+  if (
+    payload.outcomeType === "server_shutdown" ||
+    payload.reason === "server_shutdown"
+  ) {
+    matchLessonReviewItems = null;
+    title.textContent = "توقف الخادم مؤقتًا";
+    body.textContent =
+      "انتهت الجلسة لأن الخادم يُحدَّث أو يُغلق. يمكنك بدء جولة جديدة بعد لحظات.";
+    if (stats) stats.classList.add("hidden");
+    if (againBtn) againBtn.textContent = "العودة للقائمة";
+    applyResultScreenPresentation("empty", "");
+    return;
   }
-  const tvr = snap.teamVoteResync as
-    | Array<{
-        teamId: string;
-        votes: Record<string, number>;
-        captainAwaitingSecondOn: number | null;
-      }>
-    | undefined;
-  if (tvr && matchTeamPlayMode === "teams_captain_approval") {
-    const me = findMeInPlayers(currentMatchPlayers);
-    if (me?.teamId) {
-      const mine = tvr.find((x) => x.teamId === me.teamId);
-      if (mine) {
-        teamVoteCountsByChoice = {};
-        for (const v of Object.values(mine.votes)) {
-          if (typeof v === "number") {
-            teamVoteCountsByChoice[v] = (teamVoteCountsByChoice[v] ?? 0) + 1;
-          }
-        }
-        captainTapPendingIndex =
-          typeof mine.captainAwaitingSecondOn === "number" ? mine.captainAwaitingSecondOn : null;
-        applyTeamVoteBadgesToOptionButtons();
-        const stEl = app.querySelector<HTMLParagraphElement>("#status");
-        if (stEl && phase === "playing") {
-          const n = Object.keys(mine.votes).length;
-          stEl.textContent = `تصويت الفريق: ${n} عضو سجّل اختيارًا.`;
-        }
+  if (
+    payload.outcomeType === "server_aborted" ||
+    payload.reason === "db_error" ||
+    payload.reason === "runtime_error"
+  ) {
+    matchLessonReviewItems = null;
+    title.textContent = "تعذر إكمال المباراة";
+    body.textContent =
+      "حدث خطأ في الخادم أثناء الجولة. إذا تكرر ذلك، أعد المحاولة لاحقًا.";
+    if (stats) stats.classList.add("hidden");
+    if (againBtn) againBtn.textContent = "العودة والمحاولة";
+    applyResultScreenPresentation("empty", "");
+    return;
+  }
+  if (
+    payload.outcomeType === "solo_incomplete" ||
+    payload.outcomeType === "solo_study_incomplete"
+  ) {
+    matchLessonReviewItems = null;
+    title.textContent = loseTitle;
+    body.textContent = loseCopy;
+    if (againBtn) againBtn.textContent = "حاول مرة أخرى";
+    if (stats) {
+      if (me) {
+        stats.innerHTML = `<span class="result-screen__stat-chip">❤️ القلوب: ${me.hearts}</span><span class="result-screen__stat-chip">⭐ النقاط: ${me.skillPoints ?? 0}</span>`;
+        stats.classList.remove("hidden");
+      } else {
+        stats.classList.add("hidden");
+        stats.innerHTML = "";
       }
     }
+    renderLeaderboard();
+    applyResultScreenPresentation("lose", "💔");
+    return;
   }
-  render();
-  if (
-    phase === "playing" ||
-    phase === "studying" ||
-    phase === "countdown" ||
-    phase === "match_lesson_review"
-  ) {
-    surfaceGameplayConnectionMessage("تم استعادة الجلسة.");
-  } else {
-    const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
-    if (noticeEl) noticeEl.textContent = "تم استعادة الجلسة.";
-  }
-}
-
-function sleepMs(ms: number): Promise<void> {
-  return new Promise((r) => window.setTimeout(r, ms));
-}
-
-async function tryResumeMatchAfterConnect(s: Socket, flowToken: number): Promise<boolean> {
-  const raw = readStoredMatchResume();
-  if (!raw) return false;
-  if (Date.now() > raw.expiresAt) {
-    clearReconnectMultiplayerRuntime();
-    return false;
-  }
-  reconnectAttemptInFlight = true;
-  try {
-    const backoffMs = [0, 500, 1000, 2000, 2000];
-    for (let attempt = 0; attempt < backoffMs.length; attempt++) {
-      if (attempt > 0) await sleepMs(backoffMs[attempt]!);
-      const outcome = await new Promise<"ok" | "retry" | "fail">((resolve) => {
-        const to = window.setTimeout(() => resolve("retry"), 9000);
-        s.emit(
-          "resume_match",
-          {
-            matchId: raw.matchId,
-            participantId: raw.participantId,
-            resumeSecret: raw.resumeSecret,
-          },
-          (ack: { ok?: boolean; error?: string; snapshot?: Record<string, unknown> | null } | undefined) => {
-            window.clearTimeout(to);
-            if (flowToken !== searchFlowToken) {
-              resolve("fail");
-              return;
-            }
-            if (!ack?.ok) {
-              if (ack?.error === "rate_limited") {
-                resolve("retry");
-                return;
-              }
-              clearReconnectMultiplayerRuntime();
-              resolve("fail");
-              return;
-            }
-            if (!ack.snapshot || typeof ack.snapshot !== "object") {
-              clearReconnectMultiplayerRuntime();
-              resolve("fail");
-              return;
-            }
-            reconnectPromptState = null;
-            applyMatchStateSnapshotFromServer(s, ack.snapshot);
-            resolve("ok");
-          },
-        );
-      });
-      if (outcome === "ok") return true;
-      if (outcome === "fail") return false;
+  if (payload.outcomeType === "team_match") {
+    matchLessonReviewItems = null;
+    matchTeamPlayMode = null;
+    const teamExtra = app.querySelector<HTMLDivElement>("#res-team-extra");
+    if (teamExtra) {
+      const rows = (payload.teamLeaderboard ?? [])
+        .map(
+          (r: { medal?: string | null; rank: number; displayName: string; teamScore: number }) =>
+            `<div class="players-panel__row"><span>${r.medal === "gold" ? "🥇" : r.medal === "silver" ? "🥈" : r.medal === "bronze" ? "🥉" : `#${r.rank}`} ${escapeHtml(r.displayName)}</span><span>نقاط الفريق: ${r.teamScore}</span></div>`,
+        )
+        .join("");
+      const stars = (payload.starsOfTheMatch ?? [])
+        .map(
+          (r: { rank: number; name: string; individualPoints: number }) =>
+            `<div class="players-panel__row"><span>#${r.rank} ${escapeHtml(r.name)}</span><span>⭐ ${r.individualPoints}</span></div>`,
+        )
+        .join("");
+      teamExtra.innerHTML = `
+            <section class="res-team-block">
+              <h3 class="res-team-block__title">ترتيب الفرق</h3>
+              <div class="players-panel res-team-block__panel">${rows || "<p class=\"text-slate-400 text-sm\">لا بيانات.</p>"}</div>
+            </section>
+            <section class="res-team-block res-team-block--stars">
+              <h3 class="res-team-block__title">نجوم المباراة</h3>
+              <div class="players-panel res-team-block__panel">${stars || "<p class=\"text-slate-400 text-sm\">لا بيانات.</p>"}</div>
+            </section>`;
+      teamExtra.classList.remove("hidden");
     }
-    clearReconnectMultiplayerRuntime();
-    return false;
-  } finally {
-    reconnectAttemptInFlight = false;
+    const wt = payload.winningTeams ?? [];
+    title.textContent = "انتهت المباراة — وضع الفرق";
+    body.textContent =
+      wt.length > 0
+        ? `الفريق (الفرق) الأعلى نقاطاً: ${wt.map((t: { displayName?: string }) => escapeHtml(t.displayName ?? "")).join("، ")}.`
+        : tieCopy;
+    if (againBtn) againBtn.textContent = "العب مجددًا";
+    if (stats) {
+      if (me) {
+        stats.innerHTML = `<span class="result-screen__stat-chip">⭐ نقاطك: ${me.skillPoints ?? 0}</span>`;
+        stats.classList.remove("hidden");
+      } else {
+        stats.classList.add("hidden");
+        stats.innerHTML = "";
+      }
+    }
+    renderLeaderboard();
+    const myTeamIdForRes =
+      me && "teamId" in me ? (me as { teamId?: string | null }).teamId : null;
+    const iTopTeam = Boolean(
+      myTeamIdForRes && wt.some((t: { teamId?: string }) => String(t.teamId) === String(myTeamIdForRes)),
+    );
+    let screenKind: ResultScreenKind = "tie";
+    let emoji = "🏆";
+    if (wt.length === 0) {
+      screenKind = "tie";
+      emoji = "🤝";
+    } else if (iTopTeam) {
+      screenKind = "win";
+      emoji = "🎉";
+    } else {
+      screenKind = "lose";
+      emoji = "💔";
+    }
+    applyResultScreenPresentation(screenKind, emoji);
+    return;
   }
+  const winners = payload.winners ?? (payload.winner ? [payload.winner] : []);
+  const iAmWinner = winners.some(
+    (w: { participantId?: string; userId?: string | null }) =>
+      (w.participantId && myParticipantId && w.participantId === myParticipantId) ||
+      Boolean(w.userId && accountUserId() && w.userId === accountUserId()),
+  );
+  let kind: ResultScreenKind = "tie";
+  let emojiForFallback = "🤝";
+  if (iAmWinner) {
+    kind = "win";
+    emojiForFallback = "🎉";
+    if (winners.length > 1) {
+      title.textContent = winTitle;
+      body.textContent = `${winCopy} — فائزون معك: ${winners.map((w: { name: string }) => w.name).join("، ")}`;
+    } else {
+      title.textContent = winTitle;
+      body.textContent = winCopy;
+    }
+    if (againBtn) againBtn.textContent = "العب مجددًا";
+  } else if (winners.length > 0) {
+    kind = "lose";
+    emojiForFallback = "💔";
+    title.textContent = loseTitle;
+    body.textContent =
+      winners.length === 1
+        ? `${loseCopy} (الفائز: ${winners[0]?.name ?? "-"})`
+        : `${loseCopy} (فائزون مشتركون: ${winners.map((w: { name: string }) => w.name).join("، ")})`;
+    if (againBtn) againBtn.textContent = "حاول مرة أخرى";
+  } else {
+    kind = "tie";
+    emojiForFallback = "🤝";
+    title.textContent = tieTitle;
+    body.textContent = tieCopy;
+    if (againBtn) againBtn.textContent = "جولة جديدة";
+  }
+  if (stats) {
+    if (me) {
+      stats.innerHTML = `<span class="result-screen__stat-chip">❤️ القلوب: ${me.hearts}</span><span class="result-screen__stat-chip">⭐ النقاط: ${me.skillPoints ?? 0}</span>`;
+      stats.classList.remove("hidden");
+    } else {
+      stats.classList.add("hidden");
+      stats.innerHTML = "";
+    }
+  }
+  renderLeaderboard();
+  applyResultScreenPresentation(kind, emojiForFallback);
 }
 
 type ResumePolicy = "none" | "resume_only";
@@ -5194,31 +5313,28 @@ function connectSocket(
     if (errEl) errEl.textContent = msg;
   };
 
+  attachServerDrainingListener(s, {
+    getFlowToken: () => flowToken,
+    getSearchFlowToken: () => searchFlowToken,
+    failBackToName,
+    disconnectSocket: () => {
+      try {
+        s.disconnect();
+      } catch {
+        /* ignore */
+      }
+    },
+  });
+
   lobbyPlayersList = [];
 
-  let cdInterval: number | null = null;
-
   const DEFAULT_LOBBY_COUNTDOWN_SEC = 5;
-
-  function startCountdownTicks(initialLeft: number): void {
-    if (cdInterval) {
-      window.clearInterval(cdInterval);
-      cdInterval = null;
-    }
-    let left = Math.max(1, Math.floor(initialLeft));
-    const cd = app.querySelector<HTMLDivElement>("#cd");
-    const show = (): void => {
-      if (cd) cd.textContent = String(left);
-    };
-    show();
-    cdInterval = window.setInterval(() => {
-      left -= 1;
-      if (left <= 0) {
-        if (cdInterval) window.clearInterval(cdInterval);
-        cdInterval = null;
-      } else show();
-    }, 1000);
-  }
+  const lobbyCountdown = createLobbyCountdownController({
+    getCdElement: () => app.querySelector<HTMLDivElement>("#cd"),
+  });
+  const startCountdownTicks = (initialLeft: number): void => {
+    lobbyCountdown.start(initialLeft);
+  };
 
   s.on("connect", async () => {
     console.debug("[join-flow] click->connect_ms", Math.round(performance.now() - joinFlowStartMs), "socket", s.id);
@@ -5234,7 +5350,24 @@ function connectSocket(
     }
     if (resumePolicy === "resume_only") {
       if (noticeEl) noticeEl.textContent = "جاري محاولة استعادة المباراة…";
-      if (await tryResumeMatchAfterConnect(s, flowToken)) {
+      if (
+        await tryResumeMatchAfterConnect(
+          {
+            getSearchFlowToken: () => searchFlowToken,
+            readStoredMatchResume,
+            clearReconnectMultiplayerRuntime,
+            setReconnectAttemptInFlight: (v) => {
+              reconnectAttemptInFlight = v;
+            },
+            applyReconnectSnapshot: (sock, snap) => {
+              reconnectPromptState = null;
+              applyMatchStateSnapshotFromServer(sock, snap);
+            },
+          },
+          s,
+          flowToken,
+        )
+      ) {
         if (joinAckTimer) {
           window.clearTimeout(joinAckTimer);
           joinAckTimer = null;
@@ -5299,6 +5432,10 @@ function connectSocket(
       }
       joinCompleted = true;
       if (!ack?.ok) {
+        if (ack?.error === "server_draining") {
+          failBackToName("الخادم يُصفَّى للتحديث. حاول بعد قليل.");
+          return;
+        }
         failBackToName(
           ack?.message
           || (joinKind === "solo"
@@ -5365,72 +5502,82 @@ function connectSocket(
 
   s.on(
     "private_room_state",
-    async (payload: {
-      roomCode: string;
-      hostParticipantId: string;
-      mode: GameMode;
-      subcategoryKey: string | null;
-      lessonId?: number | null;
-      difficultyMode: DifficultyMode;
-      roomVersion: number;
-      players: Array<{
-        participantId: string;
-        userId?: string | null;
-        name: string;
-        ready: boolean;
-      }>;
-      isStarting: boolean;
-      participantIds: string[];
-      countdownSecondsRemaining?: number;
-      roomSettings: { questionMs: number; studyPhaseMs: number };
-      teamPlayMode?: "individual" | "teams_first_answer" | "teams_captain_approval";
-      heartsPerPlayer?: number;
-      teamsLobby?: {
-        desiredTeamCount: number;
-        teamsLocked: boolean;
-        teams: PrivateTeamLobbyTeamPayload[];
-      };
-      unassignedParticipantIds?: string[];
-    }) => {
-      const prevRoomCode = privateRoomCodeState;
-      if (prevRoomCode !== null && prevRoomCode !== payload.roomCode) {
-        resetPrivateRoomSyncStateForNewSocketIntent();
-      }
-      if (payload.roomVersion < privateRoomVersionState) return;
-      privateRoomVersionState = payload.roomVersion;
-      privateRoomCodeState = payload.roomCode;
-      privateRoomHostParticipantId = payload.hostParticipantId;
-      currentGameMode = payload.mode;
-      selectedSubcategoryKey = payload.subcategoryKey;
-      if (payload.mode === "lesson" && payload.lessonId != null && payload.lessonId > 0) {
-        selectedLessonMatchId = payload.lessonId;
-      }
-      selectedDifficultyMode = payload.difficultyMode;
-      privateRoomQuestionMs = payload.roomSettings.questionMs;
-      privateRoomStudyPhaseMs = payload.roomSettings.studyPhaseMs;
-      privateRoomTeamPlayModeState = payload.teamPlayMode ?? "individual";
-      privateRoomHeartsPerPlayerState =
-        typeof payload.heartsPerPlayer === "number" ? payload.heartsPerPlayer : 3;
-      privateRoomTeamsLobbyState = payload.teamsLobby ?? null;
-      privateRoomUnassignedIds = payload.unassignedParticipantIds ?? [];
-      lobbyPlayersList = payload.players;
-      syncMyParticipantIdFromPlayers(payload.players);
-      privateReadyPending = false;
-      const inviteUrl = `${window.location.origin}?room=${payload.roomCode}`;
-      privateRoomInviteUrl = inviteUrl;
-      lastPrivateRoomCode = payload.roomCode;
-      isPrivateRoomSession = true;
-      await ensurePrivateQrDataUrl(inviteUrl);
-      if (phase === "result") {
-        return;
-      }
-      if (phase !== "countdown") {
-        phase = "private_room_lobby";
-      }
-      if (payload.isStarting && isSelectedForMatchStart(payload.participantIds)) {
-        lobbyNotice = "جاري بدء الجولة...";
-      }
-      render();
+    async (payload: PrivateRoomStateClientPayload) => {
+      await applyPrivateRoomStateFromPayload(
+        {
+          getPrivateRoomCodeState: () => privateRoomCodeState,
+          resetPrivateRoomSyncStateForNewSocketIntent,
+          getPrivateRoomVersionState: () => privateRoomVersionState,
+          setPrivateRoomVersionState: (v) => {
+            privateRoomVersionState = v;
+          },
+          setPrivateRoomCodeState: (c) => {
+            privateRoomCodeState = c;
+          },
+          setPrivateRoomHostParticipantId: (id) => {
+            privateRoomHostParticipantId = id;
+          },
+          setCurrentGameMode: (m) => {
+            currentGameMode = m;
+          },
+          setSelectedSubcategoryKey: (k) => {
+            selectedSubcategoryKey = k;
+          },
+          applyLessonIdFromPrivateRoomPayload: (p) => {
+            if (p.mode === "lesson" && p.lessonId != null && p.lessonId > 0) {
+              selectedLessonMatchId = p.lessonId;
+            }
+          },
+          setSelectedDifficultyMode: (d) => {
+            selectedDifficultyMode = d;
+          },
+          setPrivateRoomQuestionMs: (n) => {
+            privateRoomQuestionMs = n;
+          },
+          setPrivateRoomStudyPhaseMs: (n) => {
+            privateRoomStudyPhaseMs = n;
+          },
+          setPrivateRoomTeamPlayModeState: (m) => {
+            privateRoomTeamPlayModeState = m;
+          },
+          setPrivateRoomHeartsPerPlayerState: (n) => {
+            privateRoomHeartsPerPlayerState = n;
+          },
+          setPrivateRoomTeamsLobbyState: (t) => {
+            privateRoomTeamsLobbyState = t;
+          },
+          setPrivateRoomUnassignedIds: (ids) => {
+            privateRoomUnassignedIds = ids;
+          },
+          setLobbyPlayersList: (players) => {
+            lobbyPlayersList = players;
+          },
+          syncMyParticipantIdFromPlayers,
+          setPrivateReadyPending: (v) => {
+            privateReadyPending = v;
+          },
+          setPrivateRoomInviteUrl: (url) => {
+            privateRoomInviteUrl = url;
+          },
+          setLastPrivateRoomCode: (code) => {
+            lastPrivateRoomCode = code;
+          },
+          setIsPrivateRoomSession: (v) => {
+            isPrivateRoomSession = v;
+          },
+          ensurePrivateQrDataUrl,
+          getPhase: () => phase,
+          setPhase: (ph) => {
+            phase = ph as Phase;
+          },
+          isSelectedForMatchStart,
+          setLobbyNotice: (msg) => {
+            lobbyNotice = msg;
+          },
+          render,
+        } satisfies PrivateRoomStateApplyDeps,
+        payload,
+      );
     },
   );
 
@@ -5475,10 +5622,7 @@ function connectSocket(
 
       if (phase === "countdown") {
         if (!isSelected) {
-          if (cdInterval) {
-            window.clearInterval(cdInterval);
-            cdInterval = null;
-          }
+          lobbyCountdown.clear();
           lobbyNotice = LOBBY_MSG_WAIT_NEXT;
           lobbyPlayersList = payload.players;
           phase = "matchmaking";
@@ -5538,10 +5682,7 @@ function connectSocket(
     if (!isSelected) {
       lobbyNotice = LOBBY_MSG_WAIT_NEXT;
       if (phase === "countdown") {
-        if (cdInterval) {
-          window.clearInterval(cdInterval);
-          cdInterval = null;
-        }
+        lobbyCountdown.clear();
         phase = "matchmaking";
         render();
       } else if (phase === "matchmaking" || phase === "private_room_lobby") {
@@ -5566,10 +5707,7 @@ function connectSocket(
   });
 
   s.on("match_start_cancelled", (payload?: { reason?: string; message?: string }) => {
-    if (cdInterval) {
-      window.clearInterval(cdInterval);
-      cdInterval = null;
-    }
+    lobbyCountdown.clear();
     if (phase === "countdown") {
       phase = "matchmaking";
     }
@@ -5612,10 +5750,7 @@ function connectSocket(
         isCaptain?: boolean;
       }>;
     }) => {
-      if (cdInterval) {
-        window.clearInterval(cdInterval);
-        cdInterval = null;
-      }
+      lobbyCountdown.clear();
       applyGameStartedClientPayload(payload);
     },
   );
@@ -5730,544 +5865,47 @@ function connectSocket(
     },
   );
 
-  s.on("question", (q: IncomingQuestionPayload) => {
-    bindQuestionOptionsUi(s, q);
-  });
-
-  s.on(
-    "team_vote_update",
-    (payload: {
-      teamId?: string;
-      votes?: Record<string, number>;
-      captainAwaitingSecondOn?: number | null;
-    }) => {
-      if (phase !== "playing") return;
-      const me = findMeInPlayers(currentMatchPlayers);
-      if (!me?.teamId || payload.teamId !== me.teamId) return;
-      const votes = payload.votes ?? {};
-      teamVoteCountsByChoice = {};
-      for (const v of Object.values(votes)) {
-        if (typeof v === "number") {
-          teamVoteCountsByChoice[v] = (teamVoteCountsByChoice[v] ?? 0) + 1;
-        }
-      }
-      applyTeamVoteBadgesToOptionButtons();
-      const st = app.querySelector<HTMLParagraphElement>("#status");
-      if (st && matchTeamPlayMode === "teams_captain_approval") {
-        const n = Object.keys(votes).length;
-        st.textContent = `تصويت الفريق: ${n} عضو سجّل اختيارًا للآن.`;
-        st.classList.add("status--team-votes");
-      }
+  attachGameplaySocketListeners(s, {
+    getApp: () => app,
+    getPhase: () => phase,
+    bindQuestionOptionsUi,
+    findMeInPlayers,
+    getCurrentMatchPlayers: () => currentMatchPlayers,
+    setCurrentMatchPlayers: (next) => {
+      currentMatchPlayers = next as typeof currentMatchPlayers;
     },
-  );
-
-  s.on("team_answer_locked", (payload: { teamId?: string; participantId?: string; mode?: string }) => {
-    if (phase !== "playing") return;
-    if (payload.mode !== "teams_first_answer") return;
-    const me = findMeInPlayers(currentMatchPlayers);
-    if (!me?.teamId || payload.teamId !== me.teamId) return;
-    if (payload.participantId && myParticipantId && payload.participantId !== myParticipantId) {
-      teamRoundUiLocked = true;
-      const optsEl = app.querySelector<HTMLDivElement>("#opts");
-      const st = app.querySelector<HTMLParagraphElement>("#status");
-      if (optsEl) {
-        optsEl.querySelectorAll("button").forEach((btn) => {
-          const htmlBtn = btn as HTMLButtonElement;
-          htmlBtn.disabled = true;
-          htmlBtn.classList.add("option-btn--disabled");
-        });
-      }
-      if (st) {
-        st.textContent = "قُفلت إجابة الفريق من زميلك — لا يمكن تغيير الخيار.";
-        st.classList.add("status--team-lock");
-      }
-    }
-  });
-
-  s.on("team_submitted", (payload: { teamId?: string }) => {
-    if (phase !== "playing") return;
-    const me = findMeInPlayers(currentMatchPlayers);
-    if (!me?.teamId || payload.teamId !== me.teamId) return;
-    teamRoundCaptainSubmitted = true;
-    const optsEl = app.querySelector<HTMLDivElement>("#opts");
-    if (optsEl) {
-      optsEl.querySelectorAll("button").forEach((btn) => {
-        const htmlBtn = btn as HTMLButtonElement;
-        htmlBtn.disabled = true;
-        htmlBtn.classList.add("option-btn--disabled");
-      });
-    }
-    const st = app.querySelector<HTMLParagraphElement>("#status");
-    if (st) {
-      st.textContent = "أُرسلت إجابة الفريق — انتظر نتيجة السؤال.";
-      st.classList.add("status--team-lock");
-    }
-  });
-
-  s.on("team_captain_changed", (payload: { teamId?: string; captainParticipantId?: string }) => {
-    const tid = payload.teamId;
-    const cap = payload.captainParticipantId;
-    if (tid && cap) {
-      currentMatchPlayers = currentMatchPlayers.map((pl) => {
-        if (pl.teamId !== tid) return pl;
-        return { ...pl, isCaptain: pl.participantId === cap };
-      });
-      renderPlayingPlayersPanel();
-    }
-    showGameToast(
-      payload.captainParticipantId
-        ? "تغيّر قائد أحد الفرق. تحقق من لوحة اللاعبين."
-        : "تغيّر قائد الفريق.",
-    );
-  });
-
-  s.on(
-    "question_result",
-    (payload: {
-      revealKeysActive?: boolean;
-      keysAttacksEnabled?: boolean;
-      abilityCosts?: Partial<AbilityCostsPayload> | null;
-      abilityToggles?: Partial<AbilityTogglesPayload> | null;
-      results?: Array<{
-        participantId?: string;
-        correct: boolean;
-        skipped?: boolean;
-        pointsAward?: number;
-        hearts: number;
-        eliminated: boolean;
-      }>;
-      players: {
-        participantId?: string;
-        userId?: string | null;
-        hearts: number;
-        eliminated: boolean;
-        skillPoints?: number;
-        lastAward?: number;
-        isSpectator?: boolean;
-        keys?: number;
-        skillBoostStacks?: number;
-        teamId?: string | null;
-        isCaptain?: boolean;
-      }[];
-    }) => {
-      applyKeysRoomSlice(
-        {
-          revealKeysActive: payload.revealKeysActive,
-          keysAttacksEnabled: payload.keysAttacksEnabled,
-          abilityCosts: payload.abilityCosts,
-          abilityToggles: payload.abilityToggles,
-          players: payload.players,
-        },
-        { skipPanelRender: true, keyRewardGlow: true },
-      );
-      const me = findMeInPlayers(payload.players);
-      if (me && phase === "playing") renderHearts(me.hearts);
-      const results = payload.results ?? [];
-      currentMatchPlayers = currentMatchPlayers.map((player) => {
-        const next = findServerPlayerRow(payload.players, player);
-        const rr = results.find((r) => r.participantId === player.participantId);
-        const lastRoundResult = rr
-          ? rr.skipped
-            ? ("skipped" as const)
-            : rr.correct
-              ? ("correct" as const)
-              : ("wrong" as const)
-          : undefined;
-        if (!next) {
-          const { lastRoundResult: _lr, ...rest } = player;
-          return rest;
-        }
-        const nx = next as typeof next & { teamId?: string | null; isCaptain?: boolean };
-        return {
-          ...player,
-          participantId: next.participantId ?? player.participantId,
-          hearts: next.hearts,
-          eliminated: next.eliminated,
-          skillPoints: next.skillPoints ?? player.skillPoints ?? 0,
-          lastAward: next.lastAward ?? 0,
-          isSpectator: next.isSpectator ?? player.isSpectator ?? false,
-          keys: next.keys ?? player.keys ?? 0,
-          skillBoostStacks: next.skillBoostStacks ?? player.skillBoostStacks ?? 0,
-          teamId: nx.teamId !== undefined ? nx.teamId : player.teamId,
-          isCaptain: nx.isCaptain !== undefined ? nx.isCaptain : player.isCaptain,
-          lastRoundResult,
-        };
-      });
-      refreshKeysBadge();
-      renderPlayingPlayersPanel();
-      const status = app.querySelector<HTMLParagraphElement>("#status");
-      if (status) status.textContent = "جاري السؤال التالي…";
+    getMatchTeamPlayMode: () => matchTeamPlayMode,
+    setTeamVoteCountsByChoice: (v) => {
+      teamVoteCountsByChoice = v;
     },
-  );
-
-  s.on(
-    "game_over",
-    (payload: {
-      outcomeType?:
-        | "no_questions"
-        | "single_winner"
-        | "shared_winners"
-        | "tie_all_zero"
-        | "solo_incomplete"
-        | "solo_study_incomplete"
-        | "team_match";
-      winner: { participantId?: string; userId?: string | null; name: string } | null;
-      winners?: Array<{ participantId?: string; userId?: string | null; name: string }>;
-      winningTeams?: Array<{ teamId?: string; displayName?: string; teamScore?: number }>;
-      teamLeaderboard?: Array<{
-        rank: number;
-        teamId: string;
-        displayName: string;
-        teamScore: number;
-        medal: "gold" | "silver" | "bronze" | null;
-      }>;
-      starsOfTheMatch?: Array<{
-        rank: number;
-        participantId: string;
-        userId: string | null;
-        name: string;
-        individualPoints: number;
-        teamId: string | null;
-      }>;
-      players: {
-        participantId?: string;
-        userId?: string | null;
-        name: string;
-        hearts: number;
-        eliminated: boolean;
-        skillPoints?: number;
-        lastAward?: number;
-        isSpectator?: boolean;
-        teamId?: string | null;
-        isCaptain?: boolean;
-      }[];
-      reason?: string;
-      resultMessages?: {
-        winnerTitle?: string;
-        loserTitle?: string;
-        tieTitle?: string;
-        winner: string;
-        loser: string;
-        tie: string;
-      };
-      leaderboard?: Array<{
-        participantId?: string;
-        userId?: string | null;
-        rank: number;
-        name: string;
-        skillPoints: number;
-        medal: "gold" | "silver" | "bronze" | null;
-      }>;
-      lessonReview?: Array<{
-        questionId: number;
-        choiceIndex: number | null;
-        correctIndex: number;
-        prompt: string;
-        options: string[];
-        studyBody: string | null;
-      }>;
-    }) => {
-      clearReconnectMultiplayerRuntime();
-      matchHeartsPerPlayerSetting = null;
-      if (cdInterval) {
-        window.clearInterval(cdInterval);
-        cdInterval = null;
-      }
-      clearTimer();
-      const lr = payload.lessonReview;
-      matchLessonReviewItems =
-        Array.isArray(lr) && lr.length > 0
-          ? (lr as NonNullable<typeof matchLessonReviewItems>)
-          : null;
-      matchLessonReviewIndex = 0;
-      phase = "result";
-      render();
-      const me = findMeInPlayers(payload.players);
-      currentMatchPlayers = payload.players.map((p) => ({ ...p }));
-      syncMyParticipantIdFromPlayers(payload.players);
-      currentLeaderboard = payload.leaderboard ?? [];
-      const title = app.querySelector<HTMLHeadingElement>("#res-title");
-      const body = app.querySelector<HTMLParagraphElement>("#res-body");
-      const kicker = app.querySelector<HTMLParagraphElement>("#res-kicker");
-      const stats = app.querySelector<HTMLDivElement>("#res-stats");
-      const againBtn = app.querySelector<HTMLButtonElement>("#again");
-      if (!title || !body) return;
-      if (kicker) kicker.hidden = true;
-      const rm = payload.resultMessages;
-      const winTitle = rm?.winnerTitle?.trim() || DEFAULT_RESULT_MESSAGES.winnerTitle;
-      const loseTitle = rm?.loserTitle?.trim() || DEFAULT_RESULT_MESSAGES.loserTitle;
-      const tieTitle = rm?.tieTitle?.trim() || DEFAULT_RESULT_MESSAGES.tieTitle;
-      const winCopy = rm?.winner?.trim() || DEFAULT_RESULT_MESSAGES.winner;
-      const loseCopy = rm?.loser?.trim() || DEFAULT_RESULT_MESSAGES.loser;
-      const tieCopy = rm?.tie?.trim() || DEFAULT_RESULT_MESSAGES.tie;
-      if (payload.reason === "no_questions" || payload.outcomeType === "no_questions") {
-        matchLessonReviewItems = null;
-        title.textContent = "لا توجد أسئلة";
-        body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
-        if (stats) stats.classList.add("hidden");
-        if (againBtn) againBtn.textContent = "العودة والمحاولة لاحقًا";
-        applyResultScreenPresentation("empty", "");
-        return;
-      }
-      if (
-        payload.outcomeType === "solo_incomplete" ||
-        payload.outcomeType === "solo_study_incomplete"
-      ) {
-        matchLessonReviewItems = null;
-        title.textContent = loseTitle;
-        body.textContent = loseCopy;
-        if (againBtn) againBtn.textContent = "حاول مرة أخرى";
-        if (stats) {
-          if (me) {
-            stats.innerHTML = `<span class="result-screen__stat-chip">❤️ القلوب: ${me.hearts}</span><span class="result-screen__stat-chip">⭐ النقاط: ${me.skillPoints ?? 0}</span>`;
-            stats.classList.remove("hidden");
-          } else {
-            stats.classList.add("hidden");
-            stats.innerHTML = "";
-          }
-        }
-        renderLeaderboard();
-        applyResultScreenPresentation("lose", "💔");
-        return;
-      }
-      if (payload.outcomeType === "team_match") {
-        matchLessonReviewItems = null;
-        matchTeamPlayMode = null;
-        const teamExtra = app.querySelector<HTMLDivElement>("#res-team-extra");
-        if (teamExtra) {
-          const rows = (payload.teamLeaderboard ?? [])
-            .map(
-              (r) =>
-                `<div class="players-panel__row"><span>${r.medal === "gold" ? "🥇" : r.medal === "silver" ? "🥈" : r.medal === "bronze" ? "🥉" : `#${r.rank}`} ${escapeHtml(r.displayName)}</span><span>نقاط الفريق: ${r.teamScore}</span></div>`,
-            )
-            .join("");
-          const stars = (payload.starsOfTheMatch ?? [])
-            .map(
-              (r) =>
-                `<div class="players-panel__row"><span>#${r.rank} ${escapeHtml(r.name)}</span><span>⭐ ${r.individualPoints}</span></div>`,
-            )
-            .join("");
-          teamExtra.innerHTML = `
-            <section class="res-team-block">
-              <h3 class="res-team-block__title">ترتيب الفرق</h3>
-              <div class="players-panel res-team-block__panel">${rows || "<p class=\"text-slate-400 text-sm\">لا بيانات.</p>"}</div>
-            </section>
-            <section class="res-team-block res-team-block--stars">
-              <h3 class="res-team-block__title">نجوم المباراة</h3>
-              <div class="players-panel res-team-block__panel">${stars || "<p class=\"text-slate-400 text-sm\">لا بيانات.</p>"}</div>
-            </section>`;
-          teamExtra.classList.remove("hidden");
-        }
-        const wt = payload.winningTeams ?? [];
-        title.textContent = "انتهت المباراة — وضع الفرق";
-        body.textContent =
-          wt.length > 0
-            ? `الفريق (الفرق) الأعلى نقاطاً: ${wt.map((t) => escapeHtml(t.displayName ?? "")).join("، ")}.`
-            : tieCopy;
-        if (againBtn) againBtn.textContent = "العب مجددًا";
-        if (stats) {
-          if (me) {
-            stats.innerHTML = `<span class="result-screen__stat-chip">⭐ نقاطك: ${me.skillPoints ?? 0}</span>`;
-            stats.classList.remove("hidden");
-          } else {
-            stats.classList.add("hidden");
-            stats.innerHTML = "";
-          }
-        }
-        renderLeaderboard();
-        const myTeamIdForRes =
-          me && "teamId" in me ? (me as { teamId?: string | null }).teamId : null;
-        const iTopTeam = Boolean(
-          myTeamIdForRes && wt.some((t) => String(t.teamId) === String(myTeamIdForRes)),
-        );
-        let screenKind: ResultScreenKind = "tie";
-        let emoji = "🏆";
-        if (wt.length === 0) {
-          screenKind = "tie";
-          emoji = "🤝";
-        } else if (iTopTeam) {
-          screenKind = "win";
-          emoji = "🎉";
-        } else {
-          screenKind = "lose";
-          emoji = "💔";
-        }
-        applyResultScreenPresentation(screenKind, emoji);
-        return;
-      }
-      const winners = payload.winners ?? (payload.winner ? [payload.winner] : []);
-      const iAmWinner = winners.some(
-        (w) =>
-          (w.participantId && myParticipantId && w.participantId === myParticipantId) ||
-          Boolean(w.userId && accountUserId() && w.userId === accountUserId()),
-      );
-      let kind: ResultScreenKind = "tie";
-      let emojiForFallback = "🤝";
-      if (iAmWinner) {
-        kind = "win";
-        emojiForFallback = "🎉";
-        if (winners.length > 1) {
-          title.textContent = winTitle;
-          body.textContent = `${winCopy} — فائزون معك: ${winners.map((w) => w.name).join("، ")}`;
-        } else {
-          title.textContent = winTitle;
-          body.textContent = winCopy;
-        }
-        if (againBtn) againBtn.textContent = "العب مجددًا";
-      } else if (winners.length > 0) {
-        kind = "lose";
-        emojiForFallback = "💔";
-        title.textContent = loseTitle;
-        body.textContent =
-          winners.length === 1
-            ? `${loseCopy} (الفائز: ${winners[0]?.name ?? "-"})`
-            : `${loseCopy} (فائزون مشتركون: ${winners.map((w) => w.name).join("، ")})`;
-        if (againBtn) againBtn.textContent = "حاول مرة أخرى";
-      } else {
-        kind = "tie";
-        emojiForFallback = "🤝";
-        title.textContent = tieTitle;
-        body.textContent = tieCopy;
-        if (againBtn) againBtn.textContent = "جولة جديدة";
-      }
-      if (stats) {
-        if (me) {
-          stats.innerHTML = `<span class="result-screen__stat-chip">❤️ القلوب: ${me.hearts}</span><span class="result-screen__stat-chip">⭐ النقاط: ${me.skillPoints ?? 0}</span>`;
-          stats.classList.remove("hidden");
-        } else {
-          stats.classList.add("hidden");
-          stats.innerHTML = "";
-        }
-      }
-      renderLeaderboard();
-      applyResultScreenPresentation(kind, emojiForFallback);
+    applyTeamVoteBadgesToOptionButtons,
+    getMyParticipantId: () => myParticipantId,
+    setTeamRoundUiLocked: (v) => {
+      teamRoundUiLocked = v;
     },
-  );
-
-  s.on(
-    "keys_room_state",
-    (payload: {
-      revealKeysActive?: boolean;
-      abilityCosts?: Partial<AbilityCostsPayload> | null;
-      abilityToggles?: Partial<AbilityTogglesPayload> | null;
-      players?: Array<{
-        participantId?: string;
-        userId?: string | null;
-        name: string;
-        hearts: number;
-        eliminated: boolean;
-        isSpectator?: boolean;
-        skillPoints?: number;
-        lastAward?: number;
-        keys?: number;
-        skillBoostStacks?: number;
-      }>;
-    }) => {
-      applyKeysRoomSlice({
-        revealKeysActive: payload.revealKeysActive,
-        abilityCosts: payload.abilityCosts,
-        abilityToggles: payload.abilityToggles,
-        players: payload.players,
-      });
+    setTeamRoundCaptainSubmitted: (v) => {
+      teamRoundCaptainSubmitted = v;
     },
-  );
-
-  s.on(
-    "ability_heart_resolved",
-    (payload: {
-      attackerParticipantId?: string;
-      attackerUserId?: string | null;
-      attackerName?: string;
-      victimParticipantId?: string;
-      victimUserId?: string | null;
-      victimName?: string;
-      outcome?: "hit" | "blocked";
-      shieldCost?: number;
-    }) => {
-      const aName = payload.attackerName ?? "لاعب";
-      const vName = payload.victimName ?? "لاعب";
-      const uid = accountUserId();
-      const victimIsMe =
-        (myParticipantId && payload.victimParticipantId === myParticipantId) ||
-        Boolean(uid && payload.victimUserId && payload.victimUserId === uid);
-      const attackerIsMe =
-        (myParticipantId && payload.attackerParticipantId === myParticipantId) ||
-        Boolean(uid && payload.attackerUserId && payload.attackerUserId === uid);
-      if (victimIsMe) {
-        if (payload.outcome === "blocked") {
-          showGameToast(`${aName} أطلق عليك صاروخاً — تصدّيت بمفاتيح!`);
-        } else {
-          showGameToast(`${aName} أطلق عليك صاروخاً — خسرت قلباً!`);
-        }
-      } else if (attackerIsMe) {
-        if (payload.outcome === "blocked") {
-          showGameToast(`${vName} تصدّى بمفاتيح (${payload.shieldCost ?? 2} مفتاحاً).`);
-        } else {
-          showGameToast(`أصبت ${vName} — خسر قلباً.`);
-        }
-      }
+    renderPlayingPlayersPanel,
+    showGameToast,
+    applyKeysRoomSlice: (slice, opts) =>
+      applyKeysRoomSlice(slice as Parameters<typeof applyKeysRoomSlice>[0], opts as Parameters<typeof applyKeysRoomSlice>[1]),
+    findServerPlayerRow: (list, local) =>
+      findServerPlayerRow(list as never, local as never),
+    renderHearts,
+    refreshKeysBadge,
+    accountUserId,
+    isCurrentStudyRound,
+    setSpectatorEligible: (v) => {
+      spectatorEligible = v;
     },
-  );
-
-  s.on(
-    "player_eliminated",
-    (p: { name: string; participantId?: string; reason?: string; teamId?: string }) => {
-    currentMatchPlayers = currentMatchPlayers.map((x) =>
-      (p.participantId && x.participantId === p.participantId) ||
-      (!p.participantId && x.name === p.name)
-        ? { ...x, eliminated: true, hearts: 0 }
-        : x,
-    );
-    renderPlayingPlayersPanel();
-    const status = app.querySelector<HTMLParagraphElement>("#status");
-    if (status && phase === "playing") {
-      const teamHint = p.teamId && matchTeamPlayMode ? " (فريق)" : "";
-      status.textContent =
-        p.reason === "disconnect"
-          ? `${p.name} خرج من اللعبة${teamHint}.`
-          : `${p.name} نفدت قلوبه${teamHint}.`;
-    }
-  },
-  );
-
-  s.on("spectator_offer", (p: { participantId?: string }) => {
-    const forMe = Boolean(myParticipantId && p.participantId === myParticipantId);
-    if (!forMe) return;
-    spectatorEligible = true;
-    phase = "result";
-    render();
-    const title = app.querySelector<HTMLHeadingElement>("#res-title");
-    const body = app.querySelector<HTMLParagraphElement>("#res-body");
-    const kicker = app.querySelector<HTMLParagraphElement>("#res-kicker");
-    const stats = app.querySelector<HTMLDivElement>("#res-stats");
-    const continueWatch = app.querySelector<HTMLButtonElement>("#continue-watch");
-    if (kicker) kicker.hidden = true;
-    if (title) title.textContent = "خرجت من الجولة";
-    if (body) body.textContent = "يمكنك متابعة المباراة كمشاهد حتى النهاية.";
-    if (stats) {
-      stats.classList.add("hidden");
-      stats.innerHTML = "";
-    }
-    if (continueWatch) continueWatch.classList.remove("hidden");
-    applyResultScreenPresentation("lose", "💔");
-  });
-
-  s.on(
-    "round_ready_state",
-    (p: {
-      roundToken?: string;
-      macroRound?: number;
-      readyParticipantIds?: string[];
-      totalActive: number;
-    }) => {
-      if (!isCurrentStudyRound(p.roundToken, p.macroRound)) return;
-      const readyStateEl = app.querySelector<HTMLParagraphElement>("#study-ready-state");
-      if (readyStateEl && phase === "studying") {
-        const n = p.readyParticipantIds?.length ?? 0;
-        readyStateEl.textContent = `جاهزية اللاعبين: ${n}/${p.totalActive}`;
-      }
+    setPhase: (ph) => {
+      phase = ph as Phase;
     },
-  );
+    render,
+    applyResultScreenPresentation,
+    onGameOver: (payload) => handleGameplayGameOver(payload, () => lobbyCountdown.clear()),
+  } satisfies GameplaySocketDeps);
 
   s.connect();
 }
