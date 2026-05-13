@@ -4840,7 +4840,7 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
       const rows = (payload.teamLeaderboard ?? [])
         .map(
           (r: { medal?: string | null; rank: number; displayName: string; teamScore: number }) =>
-            `<div class="players-panel__row"><span>${r.medal === "gold" ? "🥇" : r.medal === "silver" ? "🥈" : r.medal === "bronze" ? "🥉" : `#${r.rank}`} ${escapeHtml(r.displayName)}</span><span>نقاط الفريق: ${r.teamScore}</span></div>`,
+            `<div class="players-panel__row"><span>${r.medal === "gold" ? "🥇" : r.medal === "silver" ? "🥈" : r.medal === "bronze" ? "🥉" : `#${r.rank}`} ${escapeHtml(r.displayName)}</span><span>⭐ ${r.teamScore}</span></div>`,
         )
         .join("");
       const stars = (payload.starsOfTheMatch ?? [])
@@ -4876,7 +4876,8 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
         stats.innerHTML = "";
       }
     }
-    renderLeaderboard();
+    const lbBox = app.querySelector<HTMLDivElement>("#res-leaderboard");
+    if (lbBox) lbBox.innerHTML = "";
     const myTeamIdForRes =
       me && "teamId" in me ? (me as { teamId?: string | null }).teamId : null;
     const iTopTeam = Boolean(
