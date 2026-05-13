@@ -289,7 +289,7 @@ export async function signupWithEmailPassword(email: string, password: string): 
     const code = readFirebaseErrorCode(error);
     if (code === "auth/email-already-in-use") {
       authTrace(traceId, "email_signup_conflict_fetch_methods", {});
-      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch(() => []);
+      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch((): string[] => []);
       try {
         signupConflictScenarioForMethods(traceId, methods, emailNorm, password);
       } catch (e2) {
@@ -318,7 +318,7 @@ export async function loginWithEmailPassword(email: string, password: string): P
   } catch (error) {
     const code = readFirebaseErrorCode(error);
     if (code === "auth/account-exists-with-different-credential") {
-      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch(() => []);
+      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch((): string[] => []);
       authTrace(traceId, "provider_conflict_detected", { source: "email_login", code });
       commitAuthOperation(op, { status: "unauthenticated", user: null, lastError: code });
       if (methods.includes("google.com") && !methods.includes("password")) {
@@ -326,7 +326,7 @@ export async function loginWithEmailPassword(email: string, password: string): P
       }
     }
     if (code === "auth/invalid-credential") {
-      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch(() => []);
+      const methods = await fetchSignInMethodsForEmail(auth, emailNorm).catch((): string[] => []);
       authTrace(traceId, "email_login_invalid_credential_methods", {
         hasPasswordMethod: methods.includes("password"),
         hasGoogleMethod: methods.includes("google.com"),

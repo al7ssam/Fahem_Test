@@ -14,7 +14,7 @@ import {
   deleteSavedLesson,
   getActiveSavedLessonForUser,
   insertSavedLesson,
-  listActiveSavedLessonsForUser,
+  listActiveSavedLessonsForUserWithExpiryCleanup,
   updateSavedLesson,
 } from "../userSavedLessons/repository";
 
@@ -68,8 +68,7 @@ export function registerUserSavedLessonsRoutes(app: Express): void {
     const userId = req.auth!.userId;
     try {
       const pool = getPool();
-      await deleteExpiredUserSavedLessonsForUser(pool, userId);
-      const items = await listActiveSavedLessonsForUser(pool, userId);
+      const items = await listActiveSavedLessonsForUserWithExpiryCleanup(pool, userId);
       res.json({ ok: true, lessons: items });
     } catch {
       res.status(500).json({ ok: false, error: "list_failed" });

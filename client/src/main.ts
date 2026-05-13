@@ -14,17 +14,12 @@ import {
 import { parseLessonPastedJson } from "@shared/lessonJsonParse";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import {
-  clearCustomLessonPromptPrefs,
   hasLocalCustomLessonPromptPrefs,
   loadCustomLessonPromptPrefs,
   mergeUserPromptParamsWithSiteDefaults,
   saveCustomLessonPromptPrefs,
 } from "./customLessonPromptPrefs";
-import {
-  deleteMeCustomLessonPromptParams,
-  fetchMeCustomLessonPromptParams,
-  putMeCustomLessonPromptParams,
-} from "./customLessonPromptPrefsApi";
+import { fetchMeCustomLessonPromptParams, putMeCustomLessonPromptParams } from "./customLessonPromptPrefsApi";
 import { openChatGptExternal, openGeminiExternal } from "./openExternalAiApp";
 import { createAuthedSocket } from "./auth/socketFactory";
 import { attachServerDrainingListener } from "./realtime/socketBindings";
@@ -494,16 +489,16 @@ function renderPrivateRoomTeamsSection(): void {
   });
 }
 
-function findMeInPlayers<T extends { participantId?: string; userId?: string | null }>(
-  players: T[],
-): T | undefined {
+function findMeInPlayers(players: unknown[]): (typeof currentMatchPlayers)[number] | undefined {
+  if (!Array.isArray(players)) return undefined;
+  const list = players as (typeof currentMatchPlayers)[number][];
   if (myParticipantId) {
-    const byPid = players.find((p) => p.participantId === myParticipantId);
+    const byPid = list.find((p) => p.participantId === myParticipantId);
     if (byPid) return byPid;
   }
   const uid = accountUserId();
-  if (uid) return players.find((p) => p.userId === uid);
-  return players.length === 1 ? players[0] : undefined;
+  if (uid) return list.find((p) => p.userId === uid);
+  return list.length === 1 ? list[0] : undefined;
 }
 
 function isSelectedForMatchStart(participantIds?: string[]): boolean {
@@ -614,25 +609,28 @@ async function refreshCustomLessonPromptServerOverrideFlag(): Promise<void> {
 
 async function bootstrapCustomLessonShell(): Promise<void> {
   try {
-    await Promise.all([fetchLessonAiPromptPublicConfig(), refreshCustomLessonPromptServerOverrideFlag()]);
+    await fetchLessonAiPromptPublicConfig();
     const base = defaultCustomPromptParams();
     const d = loadCustomLessonDraft();
     const localPrefs = loadCustomLessonPromptPrefs();
     let promptResolved = base;
     if (getAuthState().status === "authenticated") {
       const me = await fetchMeCustomLessonPromptParams();
+      customLessonPromptHasServerOverride = Boolean(me.ok && me.params != null);
       if (me.ok && me.params != null) {
         promptResolved = mergeUserPromptParamsWithSiteDefaults(base, me.params);
-        customLessonPromptHasServerOverride = true;
       } else if (localPrefs) {
         promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
       } else if (d?.promptParams) {
         promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
       }
-    } else if (localPrefs) {
-      promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
-    } else if (d?.promptParams) {
-      promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
+    } else {
+      customLessonPromptHasServerOverride = false;
+      if (localPrefs) {
+        promptResolved = mergeUserPromptParamsWithSiteDefaults(base, localPrefs.params);
+      } else if (d?.promptParams) {
+        promptResolved = mergeUserPromptParamsWithSiteDefaults(base, d.promptParams);
+      }
     }
     customLessonPromptParams = promptResolved;
     if (d) {
@@ -693,7 +691,6 @@ async function fetchLessonAiPromptPublicConfig(): Promise<void> {
 function defaultCustomPromptParams(): LessonAiPromptParams {
   return clampCustomLessonFlowParams({
     ...DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS,
-    ...(lessonAiPromptRemote?.defaults ?? {}),
     topic: "",
   });
 }
@@ -1887,7 +1884,6 @@ function render(): void {
             <select id="cl-audience" class="app-input w-full px-2 py-1 text-sm" title="من يخاطبهم الدرس" aria-label="مستوى الجمهور">
               ${audienceOptions.map((o) => `<option value="${escapeHtml(o.v)}" ${p.audience === o.v ? "selected" : ""}>${escapeHtml(o.t)}</option>`).join("")}
             </select>
-            <button type="button" id="cl-prompt-reset-site" class="ui-btn ui-btn--ghost w-full py-2 text-xs mt-1 border border-slate-600/40">استعادة افتراضيات الموقع</button>
           </details>
           <button type="button" id="cl-copy" class="ui-btn ui-btn--primary w-full py-2">نسخ البرومبت</button>
           ${
@@ -1953,16 +1949,6 @@ function render(): void {
         persistPromptPrefs();
       });
     }
-    app.querySelector("#cl-prompt-reset-site")?.addEventListener("click", () => {
-      clearCustomLessonPromptPrefs();
-      customLessonPromptHasServerOverride = false;
-      if (getAuthState().status === "authenticated") {
-        void deleteMeCustomLessonPromptParams();
-      }
-      customLessonPromptParams = defaultCustomPromptParams();
-      persistDraft();
-      render();
-    });
     app.querySelector("#cl-back")?.addEventListener("click", () => {
       persistPromptPrefs();
       customLessonShellBoot = "idle";
@@ -1970,32 +1956,17 @@ function render(): void {
       nameFlowStep = "mode";
       render();
     });
-    app.querySelector("#cl-library")?.addEventListener("click", async () => {
+    app.querySelector("#cl-library")?.addEventListener("click", () => {
       persistPromptPrefs();
-      const go = async (): Promise<void> => {
-        phase = "saved_lessons_library";
-        savedLessonsLoading = true;
-        savedLessonsRows = [];
-        savedLessonsLibraryErr = "";
-        render();
-        const r = await fetchSavedLessonsList();
-        savedLessonsLoading = false;
-        if (!r.ok) {
-          savedLessonsLibraryErr = "تعذر تحميل المكتبة.";
-        } else {
-          savedLessonsRows = r.lessons ?? [];
-        }
-        render();
-      };
       if (getAuthState().status !== "authenticated") {
         openAuthModal({
           onCompleted: () => {
-            void go();
+            openSavedLessonsLibraryScreen();
           },
         });
         return;
       }
-      await go();
+      openSavedLessonsLibraryScreen();
     });
     app.querySelector("#cl-copy")?.addEventListener("click", async () => {
       readParamsFromDom();
@@ -3560,7 +3531,6 @@ function openSavedLessonsLibraryScreen(): void {
   phase = "saved_lessons_library";
   savedLessonDetailId = null;
   savedLessonsLoading = true;
-  savedLessonsRows = [];
   savedLessonsLibraryErr = "";
   render();
   void fetchSavedLessonsList().then((r) => {
@@ -5261,7 +5231,7 @@ function connectSocket(
             privateRoomHeartsPerPlayerState = n;
           },
           setPrivateRoomTeamsLobbyState: (t) => {
-            privateRoomTeamsLobbyState = t;
+            privateRoomTeamsLobbyState = t ?? null;
           },
           setPrivateRoomUnassignedIds: (ids) => {
             privateRoomUnassignedIds = ids;
@@ -5390,9 +5360,8 @@ function connectSocket(
     },
   );
 
-  s.on(
-    "match_starting",
-    (payload: { seconds: number; participantIds?: string[] }) => {
+  s.on("match_starting", (raw: unknown) => {
+    const payload = raw as { seconds: number; participantIds?: string[] };
     const pids = payload.participantIds ?? [];
     const hasLock = pids.length > 0;
     const isSelected = !hasLock || (myParticipantId && pids.includes(myParticipantId));
@@ -5416,14 +5385,15 @@ function connectSocket(
       render();
       return;
     }
-    if (phase !== "matchmaking" && phase !== "private_room_lobby") return;
+    if (phase !== "matchmaking") return;
     lobbyNotice = "";
     phase = "countdown";
     render();
     startCountdownTicks(Math.max(1, payload.seconds));
   });
 
-  s.on("match_start_cancelled", (payload?: { reason?: string; message?: string }) => {
+  s.on("match_start_cancelled", (raw: unknown) => {
+    const payload = raw as { reason?: string; message?: string } | undefined;
     lobbyCountdown.clear();
     if (phase === "countdown") {
       phase = "matchmaking";
@@ -5504,20 +5474,22 @@ function connectSocket(
 
   s.on(
     "round_ready_window",
-    (payload: {
+    (raw: unknown) => {
+      const payload = raw as {
       roundToken?: string;
       startsAt?: number;
       endsAt: number;
       serverNow?: number;
       macroRound?: number;
-    }) => {
+    };
       applyStudyBundleFromServer({ round_ready_window: payload as Record<string, unknown> });
     },
   );
 
   s.on(
     "study_phase",
-    (payload: {
+    (raw: unknown) => {
+      const payload = raw as {
       cards: Array<{ id: number; questionId?: number; body: string; order: number }>;
       roundToken?: string;
       startsAt?: number;
@@ -5528,20 +5500,21 @@ function connectSocket(
       lessonSectionIndex?: number;
       lessonSectionCount?: number;
       lessonSectionTitle?: string | null;
-    }) => {
+    };
       applyStudyBundleFromServer({ study_phase: payload as Record<string, unknown> });
     },
   );
 
   s.on(
     "study_phase_end",
-    (payload: {
+    (raw: unknown) => {
+      const payload = raw as {
       roundToken?: string;
       macroRound?: number;
       startsAt?: number;
       studyEndsAt?: number;
       serverNow?: number;
-    }) => {
+    };
       syncClock(payload.serverNow);
       if (!isCurrentStudyRound(payload.roundToken, payload.macroRound)) return;
       studyPhaseState = "transition_to_question";
@@ -5556,13 +5529,14 @@ function connectSocket(
 
   s.on(
     "round_ready_closed",
-    (payload: {
+    (raw: unknown) => {
+      const payload = raw as {
       roundToken?: string;
       startsAt?: number;
       endsAt?: number;
       serverNow?: number;
       macroRound?: number;
-    }) => {
+    };
       syncClock(payload.serverNow);
       if (phase !== "studying") return;
       if (!isCurrentStudyRound(payload.roundToken, payload.macroRound)) return;
@@ -5589,7 +5563,7 @@ function connectSocket(
   attachGameplaySocketListeners(s, {
     getApp: () => app,
     getPhase: () => phase,
-    bindQuestionOptionsUi,
+    bindQuestionOptionsUi: (sock, q) => bindQuestionOptionsUi(sock, q as IncomingQuestionPayload),
     findMeInPlayers,
     getCurrentMatchPlayers: () => currentMatchPlayers,
     setCurrentMatchPlayers: (next) => {

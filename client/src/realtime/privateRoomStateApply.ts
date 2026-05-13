@@ -53,7 +53,7 @@ export async function applyPrivateRoomStateFromPayload(
   deps.setPrivateRoomHeartsPerPlayerState(
     typeof payload.heartsPerPlayer === "number" ? payload.heartsPerPlayer : 3,
   );
-  deps.setPrivateRoomTeamsLobbyState(payload.teamsLobby ?? null);
+  deps.setPrivateRoomTeamsLobbyState(payload.teamsLobby);
   deps.setPrivateRoomUnassignedIds(payload.unassignedParticipantIds ?? []);
   deps.setLobbyPlayersList(payload.players);
   deps.syncMyParticipantIdFromPlayers(payload.players);

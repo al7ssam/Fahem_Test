@@ -47,7 +47,7 @@ export function clearCustomLessonPromptPrefs(): void {
   }
 }
 
-/** يدمج تفضيل المستخدم فوق افتراضيات الموقع الحالية (ولحقول جديدة لاحقاً). */
+/** يدمج تفضيل المستخدم فوق قاعدة ثابتة من الواجهة (`DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS` بعد clamp). */
 export function mergeUserPromptParamsWithSiteDefaults(
   siteBase: LessonAiPromptParams,
   user: LessonAiPromptParams | null | undefined,

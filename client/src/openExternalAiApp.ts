@@ -32,7 +32,7 @@ function openAndroidIntentHttps(intentHostAndPath: string, packageName: string, 
  */
 function tryIosCustomSchemeThenWeb(primary: string, secondary: string | null, webUrl: string): void {
   let cancelled = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timer: number | undefined;
 
   const cleanupAndClearTimer = (): void => {
     document.removeEventListener("visibilitychange", onVis);

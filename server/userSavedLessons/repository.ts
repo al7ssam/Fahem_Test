@@ -63,6 +63,38 @@ export async function listActiveSavedLessonsForUser(
   }));
 }
 
+/** حذف منتهية الصلاحية ثم إرجاع القائمة النشطة في جولة DB واحدة (مسار قائمة المكتبة). */
+export async function listActiveSavedLessonsForUserWithExpiryCleanup(
+  pool: Pool,
+  userId: string,
+): Promise<UserSavedLessonSummaryRow[]> {
+  const r = await pool.query<{
+    id: string;
+    title: string;
+    library_icon: string | null;
+    expires_at: Date;
+    updated_at: Date;
+  }>(
+    `WITH deleted AS (
+       DELETE FROM public.user_saved_lessons
+       WHERE user_id = $1 AND expires_at < NOW()
+       RETURNING id
+     )
+     SELECT id, title, library_icon, expires_at, updated_at
+     FROM public.user_saved_lessons
+     WHERE user_id = $1 AND expires_at >= NOW()
+     ORDER BY updated_at DESC`,
+    [userId],
+  );
+  return r.rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    libraryIcon: row.library_icon,
+    expiresAt: row.expires_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  }));
+}
+
 export async function getActiveSavedLessonForUser(
   pool: Pool,
   userId: string,

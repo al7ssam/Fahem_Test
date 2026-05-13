@@ -161,6 +161,9 @@
         <p class="muted" style="margin: 0 0 0.65rem; font-size: 0.84rem; line-height: 1.55">
           اكتب القالب كاملاً واستخدم <code>{{...}}</code> للمتغيرات. المعاينة أدناه تستخدم نفس مسار الخادم الذي ينفّذه التطبيق عند النسخ (<code class="muted">custom_lesson</code>) — لا يوجد هنا مسار استيراد الدروس.
         </p>
+        <p class="muted" style="margin: 0 0 0.65rem; font-size: 0.8rem; line-height: 1.55; padding: 0.45rem 0.55rem; background: rgba(0, 0, 0, 0.2); border-radius: 0.55rem; border: 1px solid var(--border)">
+          <strong>ملاحظة:</strong> حقول «القيم الافتراضية» في القسم القابل للطي أدناه تُحفَظ في الخادم وتُعرَض عبر واجهة الإعداد العامة، لكن شاشة «درس مخصص» للمستخدم تعتمد على ثوابت التطبيق (<code>DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS</code> في <code>shared/lessonAiPrompt.ts</code>) ما لم يحفظ المستخدم إعداداته في حسابه أو محلياً. تبقى هذه الحقول مفيدة للمعاينة هنا وللقالب وللاستخدامات من جهة الخادم.
+        </p>
         <details class="collapsible-details" style="margin-top: 0.75rem">
           <summary class="collapsible-summary">
             <strong>القيم الافتراضية في التطبيق</strong>

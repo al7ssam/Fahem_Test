@@ -63,7 +63,7 @@ export function renderSavedLessonEditScreen(deps: SavedLessonEditScreenDeps): vo
       if (!Number.isFinite(si)) return;
       if (!window.confirm("حذف هذا القسم وجميع أسئلته؟ يمكنك التراجع قبل الضغط على «حفظ التعديلات».")) return;
       const res = deps.removeSectionFromPayload(payload, si);
-      if (!res.ok) {
+      if (!res.ok || res.payload == null) {
         deps.setSavedLessonEditorErr(res.error ?? "");
         deps.setSavedLessonEditorMsg("");
         deps.render();
@@ -85,7 +85,7 @@ export function renderSavedLessonEditScreen(deps: SavedLessonEditScreenDeps): vo
       if (!Number.isFinite(si) || !Number.isFinite(qi)) return;
       if (!window.confirm("حذف هذا السؤال؟")) return;
       const res = deps.removeQuestionFromPayload(payload, si, qi);
-      if (!res.ok) {
+      if (!res.ok || res.payload == null) {
         deps.setSavedLessonEditorErr(res.error ?? "");
         deps.setSavedLessonEditorMsg("");
         deps.render();
@@ -130,6 +130,11 @@ export function renderSavedLessonEditScreen(deps: SavedLessonEditScreenDeps): vo
     const collected = deps.collectSavedLessonPayloadFromEditor(rootEl as HTMLElement);
     if (!collected.ok) {
       deps.setSavedLessonEditorErr(collected.error ?? "");
+      deps.render();
+      return;
+    }
+    if (collected.payload == null) {
+      deps.setSavedLessonEditorErr("تعذر قراءة المحتوى.");
       deps.render();
       return;
     }

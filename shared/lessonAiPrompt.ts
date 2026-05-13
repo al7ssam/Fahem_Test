@@ -256,12 +256,12 @@ export const DEFAULT_CUSTOM_LESSON_AUDIENCE_OPTIONS: ReadonlyArray<{ v: string; 
 ];
 
 export const DEFAULT_CUSTOM_LESSON_PROMPT_DEFAULTS: LessonAiPromptParams = {
-  nSec: 3,
-  qSame: 5,
+  nSec: 2,
+  qSame: 8,
   ansSec: 15,
   studySec: 60,
   topic: "",
   audience: "ثانوي",
   minSentences: 1,
-  maxSentences: 6,
+  maxSentences: 5,
 };
