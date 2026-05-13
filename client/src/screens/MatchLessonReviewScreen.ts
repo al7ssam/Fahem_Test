@@ -1,21 +1,16 @@
 import { escapeHtml, el } from "../utils";
-import type { Phase } from "../types";
+import type { Phase, GameMode } from "../types";
+import type { ReviewItem } from "../../shared/reviewItem";
 
-export type MatchReviewItem = {
-  questionId: number;
-  choiceIndex: number | null;
-  correctIndex: number;
-  prompt: string;
-  options: string[];
-  studyBody: string | null;
-};
+export type MatchReviewItem = ReviewItem;
 
 export type MatchLessonReviewScreenDeps = {
-  getMatchLessonReviewItems: () => MatchReviewItem[] | null;
+  getMatchLessonReviewItems: () => ReviewItem[] | null;
   getMatchLessonReviewIndex: () => number;
   setPhase: (p: Phase) => void;
   setMatchLessonReviewIndex: (v: number) => void;
   render: () => void;
+  getGameMode: () => GameMode | null;
 };
 
 export function renderMatchLessonReviewScreen(deps: MatchLessonReviewScreenDeps): void {
@@ -31,7 +26,7 @@ export function renderMatchLessonReviewScreen(deps: MatchLessonReviewScreenDeps)
           <button type="button" id="match-lesson-review-back" class="ui-btn ui-btn--ghost py-2 text-sm">رجوع للنتيجة</button>
           <span class="text-slate-400 text-xs">سؤال ${idx + 1} / ${n}</span>
         </div>
-        <p class="text-amber-200 text-sm text-right m-0">مراجعة الدرس</p>
+        <p class="text-amber-200 text-sm text-right m-0">${deps.getGameMode() === "lesson" ? "مراجعة الدرس" : "مراجعة الأسئلة"}</p>
         <div id="match-lesson-review-root" class="question-card rounded-2xl p-5 flex-1 flex flex-col gap-4 shadow-xl min-h-0"></div>
         <div class="flex gap-2">
           <button type="button" id="match-lesson-review-prev" class="ui-btn ui-btn--ghost flex-1 py-2" ${

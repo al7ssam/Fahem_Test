@@ -138,8 +138,8 @@ export class Match {
   private soloStudyQuizReachedFullCourse = false;
   /** direct فردي: إكمال حلقة الأسئلة حتى حد MAX_ROUNDS وهو لا يزال حيًا */
   private soloDirectReachedFullCourse = false;
-  /** في نمط الدرس: تاريخ إجابات لكل مشارك لبناء lessonReview عند game_over */
-  private lessonAnswerHistory = new Map<
+  /** تاريخ إجابات لكل مشارك لبناء review عند game_over (جميع أنماط اللعب). */
+  private answerHistoryByParticipant = new Map<
     string,
     Array<{
       questionId: number;
@@ -149,6 +149,11 @@ export class Match {
       options: string[];
       studyBody: string | null;
     }>
+  >();
+  /** بيانات كل سؤال عُرض أثناء المباراة — تُملأ من beginLiveQuestionState وتُستخدم في finishRound لأي نمط. */
+  private questionDataById = new Map<
+    number,
+    { prompt: string; options: string[]; correctIndex: number; studyBody: string | null }
   >();
   private readonly privateRuntime: MatchPrivateRuntimeOptions | null = null;
   private readonly teamSnapshots = new Map<string, MatchTeamSnapshot>();
@@ -254,6 +259,7 @@ export class Match {
         isCaptain: Boolean(e.isCaptain),
       });
       this.resumeSecretsByParticipant.set(e.participantId, randomBytes(32));
+      this.answerHistoryByParticipant.set(e.participantId, []);
     }
   }
 
@@ -1490,11 +1496,6 @@ export class Match {
       this.emitNoQuestions();
       return;
     }
-    this.lessonAnswerHistory.clear();
-    for (const participantId of this.players.keys()) {
-      this.lessonAnswerHistory.set(participantId, []);
-    }
-
     const sections =
       playback.sections.length > 0
         ? playback.sections
@@ -1654,6 +1655,12 @@ export class Match {
     this.currentOptionsCount = q.options.length;
     this.currentQuestionPrompt = q.prompt;
     this.currentQuestionOptions = [...q.options];
+    this.questionDataById.set(q.id, {
+      prompt: q.prompt,
+      options: [...q.options],
+      correctIndex: q.correct_index,
+      studyBody: q.study_body ?? null,
+    });
     this.studyResyncBundle = null;
     this.matchPhaseHint = "question";
     this.questionStartedAt = Date.now();
@@ -1812,19 +1819,19 @@ export class Match {
       }
     }
 
-    if (this.gameMode === "lesson" && questionId != null && this.lessonPlayback) {
-      const step = this.lessonPlayback.steps.find((s) => s.questionId === questionId);
-      if (step) {
+    if (questionId != null) {
+      const qd = this.questionDataById.get(questionId);
+      if (qd) {
         for (const r of results) {
-          const list = this.lessonAnswerHistory.get(r.participantId);
+          const list = this.answerHistoryByParticipant.get(r.participantId);
           if (!list) continue;
           list.push({
             questionId,
             choiceIndex: r.choiceIndex ?? null,
-            correctIndex,
-            prompt: step.prompt,
-            options: step.options,
-            studyBody: step.studyBody,
+            correctIndex: qd.correctIndex,
+            prompt: qd.prompt,
+            options: qd.options,
+            studyBody: qd.studyBody,
           });
         }
       }
@@ -1871,13 +1878,13 @@ export class Match {
   }
 
   private emitFinishedGameOver(payload: Record<string, unknown>): void {
-    if (this.gameMode === "lesson") {
+    if (this.gameMode === "lesson" || this.gameMode === "direct" || this.gameMode === "study_then_quiz") {
       for (const [participantId, p] of this.players) {
         this.io.to(p.currentSocketId).emit(
           "game_over",
           {
             ...payload,
-            lessonReview: this.lessonAnswerHistory.get(participantId) ?? [],
+            lessonReview: this.answerHistoryByParticipant.get(participantId) ?? [],
           } as unknown as GameOverWirePayload,
         );
       }

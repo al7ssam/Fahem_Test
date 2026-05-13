@@ -3,7 +3,12 @@
     "allow": [
       "Bash(npx tsc *)",
       "Bash(npx vite *)",
-      "Bash(npx vitest *)"
+      "Bash(npx vitest *)",
+      "Bash(npm test *)",
+      "Bash(xargs wc -l)",
+      "Bash(find \"c:/Users/Hussam/Desktop/تطبيق فاهم\" -name \"*.ts\" -not -path \"*/node_modules/*\" -not -path \"*/.git/*\" -not -path \"*/dist/*\" | wc -l; echo \"---\"; find \"c:/Users/Hussam/Desktop/تطبيق فاهم\" -name \"*.ts\" -not -path \"*/node_modules/*\" -not -path \"*/.git/*\" -not -path \"*/dist/*\" | sort > /tmp/ts_files.txt && head -200 /tmp/ts_files.txt)",
+      "Read(//tmp/**)",
+      "Bash(awk '/^function render\\\\\\(\\\\\\)/,/^  function /' \"c:\\\\Users\\\\Hussam\\\\Desktop\\\\تطبيق فاهم\\\\client\\\\src\\\\main.ts\")"
     ]
   }
 }

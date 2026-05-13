@@ -12,6 +12,7 @@ import {
   type BuildLessonAiPromptOptions,
 } from "./lessonPromptBuilder";
 import { parseLessonPastedJson } from "@shared/lessonJsonParse";
+import type { ReviewItem } from "../shared/reviewItem";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import {
   hasLocalCustomLessonPromptPrefs,
@@ -129,14 +130,7 @@ let selectedLessonMatchId: number | null = null;
 let lessonMatchStudyNav = false;
 let lessonMatchStudyCardIndex = 0;
 let lessonMatchSectionMeta = { index: 0, count: 0, title: null as string | null };
-let matchLessonReviewItems: Array<{
-  questionId: number;
-  choiceIndex: number | null;
-  correctIndex: number;
-  prompt: string;
-  options: string[];
-  studyBody: string | null;
-}> | null = null;
+let matchLessonReviewItems: ReviewItem[] | null = null;
 let matchLessonReviewIndex = 0;
 let pendingJoinRoomCode = "";
 let privateRoomVersionState = 0;
@@ -2822,6 +2816,7 @@ function render(): void {
       setPhase: (p) => { phase = p; },
       setMatchLessonReviewIndex: (v) => { matchLessonReviewIndex = v; },
       render,
+      getGameMode: () => currentGameMode,
     });
     return;
   }
@@ -3235,6 +3230,7 @@ function render(): void {
       isPrivateRoomSession: () => isPrivateRoomSession,
       getLastPrivateRoomCode: () => lastPrivateRoomCode,
       getMatchLessonReviewItems: () => matchLessonReviewItems,
+      getGameMode: () => currentGameMode,
       getMyParticipantId: () => myParticipantId,
       getPlayerNameDraft: () => playerNameDraft,
       getEffectivePlayerName,
@@ -3660,14 +3656,7 @@ function advanceLessonQuizAfterResolution(wasCorrect: boolean, selectedChoice: n
   }, 900);
 }
 
-function lessonRestReviewItems(): Array<{
-  questionId: number;
-  choiceIndex: number | null;
-  correctIndex: number;
-  prompt: string;
-  options: string[];
-  studyBody: string | null;
-}> {
+function lessonRestReviewItems(): ReviewItem[] {
   if (!lessonPlayback) return [];
   return lessonPlayback.steps.map((step) => ({
     questionId: step.questionId,

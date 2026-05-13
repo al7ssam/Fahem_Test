@@ -1,18 +1,13 @@
 import { escapeHtml, el } from "../utils";
 import type { LessonPlaybackPayload, Phase } from "../types";
+import type { ReviewItem } from "../../shared/reviewItem";
 
-export type LessonReviewItem = {
-  prompt: string;
-  options: string[];
-  correctIndex: number;
-  choiceIndex: number | null;
-  studyBody: string | null;
-};
+export type LessonReviewItem = ReviewItem;
 
 export type LessonReviewScreenDeps = {
   getLessonReviewIndex: () => number;
   getLessonPlayback: () => LessonPlaybackPayload | null;
-  lessonRestReviewItems: () => LessonReviewItem[];
+  lessonRestReviewItems: () => ReviewItem[];
   setPhase: (p: Phase) => void;
   setLessonReviewIndex: (v: number) => void;
   render: () => void;

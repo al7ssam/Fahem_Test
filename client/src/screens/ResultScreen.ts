@@ -1,20 +1,13 @@
 import { el } from "../utils";
-import type { Phase, NameFlowStep } from "../types";
+import type { Phase, NameFlowStep, GameMode } from "../types";
 import type { Socket } from "socket.io-client";
-
-export type ResultScreenMatchReviewItem = {
-  questionId: number;
-  choiceIndex: number | null;
-  correctIndex: number;
-  prompt: string;
-  options: string[];
-  studyBody: string | null;
-};
+import type { ReviewItem } from "../../shared/reviewItem";
 
 export type ResultScreenDeps = {
   isPrivateRoomSession: () => boolean;
   getLastPrivateRoomCode: () => string | null;
-  getMatchLessonReviewItems: () => ResultScreenMatchReviewItem[] | null;
+  getMatchLessonReviewItems: () => ReviewItem[] | null;
+  getGameMode: () => GameMode | null;
   getMyParticipantId: () => string | null;
   getPlayerNameDraft: () => string;
   getEffectivePlayerName: (draft: string) => string;
@@ -71,7 +64,7 @@ export function renderResultScreen(deps: ResultScreenDeps): void {
         <div id="res-stats" class="result-screen__stats hidden"></div>
         <button id="match-lesson-review-open" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-base ${
           mlItems && mlItems.length > 0 && !showPrivateRoomActions ? "" : "hidden"
-        }">مراجعة الدرس</button>
+        }">${deps.getGameMode() === "lesson" ? "مراجعة الدرس" : "مراجعة الأسئلة"}</button>
         <div class="${showPrivateRoomActions ? "w-full flex flex-col sm:flex-row gap-3" : "hidden"}">
           <button id="back-private-room" type="button" class="result-screen__again ui-btn ui-btn--cta w-full py-3 text-base">العودة للغرفة الخاصة</button>
           <button id="go-home-from-result" type="button" class="result-screen__again ui-btn ui-btn--ghost w-full py-3 text-base">الصفحة الرئيسية</button>
