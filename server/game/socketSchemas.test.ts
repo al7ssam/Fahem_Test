@@ -41,7 +41,13 @@ describe("answerSchema", () => {
     expect(r.success).toBe(true);
   });
 
-  it("rejects non-positive questionId", () => {
+  it("يقبل questionId سالباً (تشغيل درس مخصص/استيراد)", () => {
+    const r = answerSchema.safeParse({ questionId: -1, choiceIndex: 0 });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.questionId).toBe(-1);
+  });
+
+  it("rejects questionId zero", () => {
     const r = answerSchema.safeParse({ questionId: 0, choiceIndex: 0 });
     expect(r.success).toBe(false);
   });

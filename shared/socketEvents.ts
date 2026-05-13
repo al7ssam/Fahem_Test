@@ -58,6 +58,7 @@ export interface ClientToServerEvents {
   join_lobby: (raw: unknown, cb?: (ack: StandardOkErrorAck) => void) => void;
   start_solo_match: (raw: unknown, cb?: (ack: StartSoloMatchAck) => void) => void;
   player_ready: (raw: unknown, cb?: (ack: StandardOkErrorAck) => void) => void;
+  /** `answer`: جسم JSON يمر عبر `answerSchema`؛ `questionId` تشغيلي (قد يكون سالباً في درس مخصص). */
   answer: (raw: unknown, cb?: (ack: SimpleBooleanAck) => void) => void;
   round_ready: (raw: unknown, cb?: (ack: SimpleBooleanAck) => void) => void;
   continue_as_spectator: (raw: unknown, cb?: (ack: ResumeMatchAck) => void) => void;

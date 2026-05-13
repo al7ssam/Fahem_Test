@@ -6,8 +6,11 @@ export type StartSoloMatchAck =
   | { ok: true }
   | { ok: false; error?: string; message?: string };
 
-/** إجابة/جاهزية الجولة — بدون حقل error تاريخياً */
-export type SimpleBooleanAck = { ok: boolean };
+/**
+ * إجابة/جاهزية الجولة — بدون حقل error تاريخياً.
+ * `reason` اختياري للتشخيص (مثلاً حدث `answer`) دون كسر المستهلكين الذين يقرؤون `ok` فقط.
+ */
+export type SimpleBooleanAck = { ok: boolean; reason?: string };
 
 /** ACK القدرات — مطابق لـ `AbilityAck` في Match */
 export type AbilitySocketAck =

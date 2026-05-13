@@ -997,12 +997,16 @@ export class GameManager {
       const match = this.getMatchForConnectedSocket(socket.id);
       const parsed = answerSchema.safeParse(raw);
       const participantId = this.resolveParticipantIdForSocket(socket.id);
-      if (!match || !parsed.success || !participantId) {
-        cb?.({ ok: false });
+      if (!parsed.success) {
+        cb?.({ ok: false, reason: "parse_failed" });
+        return;
+      }
+      if (!match || !participantId) {
+        cb?.({ ok: false, reason: "not_in_match" });
         return;
       }
       if (!match.canAcceptChoice(parsed.data.questionId, parsed.data.choiceIndex)) {
-        cb?.({ ok: false });
+        cb?.({ ok: false, reason: "invalid_choice" });
         return;
       }
       match.recordAnswer(participantId, parsed.data.questionId, parsed.data.choiceIndex);

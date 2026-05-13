@@ -32,7 +32,7 @@ export const SOCKET_PROTOCOL_INVENTORY: readonly ProtocolRow[] = [
   { event: "join_lobby", direction: "C2S", handlerModule: "LobbyCoordinator", zodSchema: "joinLobbySchema", ackNotes: "{ ok, error? }", cleanupOnJoinLikePaths: "combo_join_lobby" },
   { event: "player_ready", direction: "C2S", handlerModule: "LobbyCoordinator", zodSchema: null, ackNotes: "{ ok, error? }", cleanupOnJoinLikePaths: "none" },
   { event: "start_solo_match", direction: "C2S", handlerModule: "GameManager.attachSocket", zodSchema: "joinLessonFlexibleSchema", ackNotes: "{ ok, error?, message? }", cleanupOnJoinLikePaths: "combo_start_solo" },
-  { event: "answer", direction: "C2S", handlerModule: "GameManager.attachSocket", zodSchema: "answerSchema", ackNotes: "{ ok: boolean }", cleanupOnJoinLikePaths: "none" },
+  { event: "answer", direction: "C2S", handlerModule: "GameManager.attachSocket", zodSchema: "answerSchema", ackNotes: "SimpleBooleanAck (reason? عند الفشل)", cleanupOnJoinLikePaths: "none" },
   { event: "round_ready", direction: "C2S", handlerModule: "GameManager.attachSocket", zodSchema: "ignoredClientBodySchema", ackNotes: "{ ok: boolean }", cleanupOnJoinLikePaths: "none" },
   { event: "resume_match", direction: "C2S", handlerModule: "ReconnectCoordinator", zodSchema: "resumeMatchSchema", ackNotes: "ResumeMatchAck", cleanupOnJoinLikePaths: "none" },
   { event: "continue_as_spectator", direction: "C2S", handlerModule: "ReconnectCoordinator", zodSchema: "continueSpectatorSchema", ackNotes: "ResumeMatchAck", cleanupOnJoinLikePaths: "none" },

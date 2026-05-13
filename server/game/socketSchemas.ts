@@ -55,8 +55,16 @@ export const continueSpectatorSchema = z.object({
   participantId: z.string().uuid().optional(),
 });
 
+/**
+ * `questionId` هنا هو معرّف تشغيلي للسؤال الحالي في المباراة (يطابق `question` على السلك)،
+ * وليس بالضرورة `public.questions.id`. دروس الاستيراد/المخصصة تستخدم أرقام سالبة متناقصة.
+ * التحقق الدلالي: `Match.canAcceptChoice`.
+ */
 export const answerSchema = z.object({
-  questionId: z.number().int().positive(),
+  questionId: z
+    .number()
+    .int()
+    .refine((n) => n !== 0, { message: "question_id_nonzero" }),
   choiceIndex: z.number().int().min(0),
 });
 
