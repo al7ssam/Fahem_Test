@@ -18,6 +18,10 @@ export type ResultScreenDeps = {
   getMyParticipantId: () => string | null;
   getPlayerNameDraft: () => string;
   getEffectivePlayerName: (draft: string) => string;
+  /** عند true يبقى زر النتيجة يعيد ضبطًا كاملاً (حالات خطأ/فارغة). */
+  shouldAgainButtonUseFullReset: () => boolean;
+  /** جولة جديدة بنفس إعدادات اللوبي/الفردي دون العودة لشاشة الاسم. */
+  retryPublicMatchFromResult: () => void;
   // "Play Again" — resets all match/room state
   resetAllForReplay: () => void;
   // "Back to private room"
@@ -99,7 +103,11 @@ export function renderResultScreen(deps: ResultScreenDeps): void {
   });
   const againBtn = app.querySelector<HTMLButtonElement>("#again")!;
   againBtn.addEventListener("click", () => {
-    deps.resetAllForReplay();
+    if (deps.shouldAgainButtonUseFullReset()) {
+      deps.resetAllForReplay();
+    } else {
+      deps.retryPublicMatchFromResult();
+    }
     deps.render();
   });
   const backPrivateRoomBtn = app.querySelector<HTMLButtonElement>("#back-private-room");

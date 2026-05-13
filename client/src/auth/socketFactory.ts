@@ -17,6 +17,7 @@ export function createAuthedSocket(): Socket<
   return io({
     path: "/socket.io",
     transports: ["websocket", "polling"],
+    autoConnect: false,
     ...(accessToken ? { auth: { accessToken } } : {}),
   });
 }

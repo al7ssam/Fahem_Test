@@ -118,6 +118,10 @@ let selectedSubcategoryKey: string | null = null;
 let selectedSubcategoryLabel: string | null = null;
 let playerNameDraft = "";
 let searchFlowToken = 0;
+/** آخر نوع انضمام عبر المقبس — لإعادة المحاولة من شاشة النتيجة. */
+let lastSocketJoinKind: JoinKind = "public";
+/** عند true يعيد زر النتيجة ضبطًا كاملاً بدل إعادة الجولة بنفس الإعدادات. */
+let resultScreenAgainIsFullReset = false;
 let soloLearningPending = false;
 let privateRoomCodeState: string | null = null;
 let privateRoomHostParticipantId: string | null = null;
@@ -2822,6 +2826,7 @@ function render(): void {
       beginLessonPlayback,
       openSavedLessonsLibraryScreen,
       returnToHomeFromSearch,
+      finishLessonFromDoneScreen,
       render,
     });
     return;
@@ -3262,6 +3267,8 @@ function render(): void {
       getMyParticipantId: () => myParticipantId,
       getPlayerNameDraft: () => playerNameDraft,
       getEffectivePlayerName,
+      shouldAgainButtonUseFullReset: () => resultScreenAgainIsFullReset,
+      retryPublicMatchFromResult,
       resetAllForReplay: () => {
         matchLessonReviewItems = null;
         matchLessonReviewIndex = 0;
@@ -3583,6 +3590,27 @@ function exitLessonPlaybackToHub(): void {
 
   lessonBrowseStep = "lesson_hub";
   phase = "lesson_menu";
+}
+
+/** إنهاء الدرس من شاشة `lesson_done` — يوحّد التنقل مع `exitLessonPlaybackToHub`. */
+function finishLessonFromDoneScreen(): void {
+  if (lessonSoloPlaybackReturnTarget === "custom_lesson") {
+    customLessonPreviewLesson = null;
+    customLessonValidatedBody = null;
+    customLessonSessionToken = null;
+    customLessonErr = "";
+    customLessonMsg = "";
+  }
+  exitLessonPlaybackToHub();
+  if (phase === "lesson_menu") {
+    void fetchLessonBrowse()
+      .then(() => {
+        render();
+      })
+      .catch(() => {
+        render();
+      });
+  }
 }
 
 async function fetchLessonBrowse(): Promise<void> {
@@ -4632,6 +4660,7 @@ function applyMatchStateSnapshotFromServer(s: Socket, snap: Record<string, unkno
 /** ناتج `game_over` — يُستدعى من `attachGameplaySocketListeners` مع تنظيف عدّاد اللوبي من سياق المقبس. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- لقطة خادم مرنة؛ الحقول تُفرّع يدوياً كالسابق
 function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): void {
+  resultScreenAgainIsFullReset = false;
   clearReconnectMultiplayerRuntime();
   matchHeartsPerPlayerSetting = null;
   clearLobbyCountdown();
@@ -4669,6 +4698,7 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
     if (stats) stats.classList.add("hidden");
     if (againBtn) againBtn.textContent = "العودة والمحاولة لاحقًا";
     applyResultScreenPresentation("empty", "");
+    resultScreenAgainIsFullReset = true;
     return;
   }
   if (
@@ -4682,6 +4712,7 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
     if (stats) stats.classList.add("hidden");
     if (againBtn) againBtn.textContent = "العودة للقائمة";
     applyResultScreenPresentation("empty", "");
+    resultScreenAgainIsFullReset = true;
     return;
   }
   if (
@@ -4696,6 +4727,7 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
     if (stats) stats.classList.add("hidden");
     if (againBtn) againBtn.textContent = "العودة والمحاولة";
     applyResultScreenPresentation("empty", "");
+    resultScreenAgainIsFullReset = true;
     return;
   }
   if (
@@ -4832,6 +4864,78 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
   applyResultScreenPresentation(kind, emojiForFallback);
 }
 
+/** إعادة جولة علنية أو فردية من شاشة النتيجة دون العودة لشاشة الاسم. */
+function retryPublicMatchFromResult(): void {
+  if (resultScreenAgainIsFullReset) return;
+  const name = getEffectivePlayerName(playerNameDraft);
+  storePlayerName(name);
+  playerNameDraft = name;
+  const mode: GameMode = currentGameMode ?? selectedModeInName;
+
+  matchLessonReviewItems = null;
+  matchLessonReviewIndex = 0;
+  myParticipantId = null;
+  studyCards = [];
+  lobbyPlayersList = [];
+  matchTeamPlayMode = null;
+  matchHeartsPerPlayerSetting = null;
+  privateReadyPending = false;
+  socket?.disconnect();
+  socket = null;
+  resetPrivateRoomTeamLobbyClientState();
+
+  if (!mode || (lastSocketJoinKind !== "solo" && lastSocketJoinKind !== "public")) {
+    phase = "name";
+    nameFlowStep = "mode";
+    render();
+    return;
+  }
+
+  if (lastSocketJoinKind === "solo") {
+    soloLearningPending = true;
+    lobbyNotice =
+      mode === "direct"
+        ? `جاري بدء التعلم الفردي... (${difficultyModeLabelAr(selectedDifficultyMode)})`
+        : mode === "lesson"
+          ? "جاري بدء التعلم الفردي... (درس في تحدٍ)"
+          : `جاري بدء التعلم الفردي... (${selectedSubcategoryLabel ?? selectedSubcategoryKey ?? ""} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
+    phase = "matchmaking";
+    render();
+    connectSoloSocket(
+      name,
+      mode,
+      mode === "study_then_quiz" ? selectedSubcategoryKey : null,
+      selectedDifficultyMode,
+      mode === "lesson" ? selectedLessonMatchId : undefined,
+    );
+    return;
+  }
+
+  phase = "matchmaking";
+  if (mode === "direct") {
+    lobbyNotice = `جاري الاتصال بالخادم... (${difficultyModeLabelAr(selectedDifficultyMode)})`;
+    render();
+    connectSocket(name, "direct", null, selectedDifficultyMode, "public");
+    return;
+  }
+  if (mode === "study_then_quiz") {
+    lobbyNotice = `جاري الاتصال بالخادم... (${selectedSubcategoryLabel ?? selectedSubcategoryKey ?? ""} - ${difficultyModeLabelAr(selectedDifficultyMode)})`;
+    render();
+    connectSocket(name, "study_then_quiz", selectedSubcategoryKey, selectedDifficultyMode, "public");
+    return;
+  }
+  if (mode === "lesson" && selectedLessonMatchId != null && selectedLessonMatchId > 0) {
+    lobbyNotice = "جاري الاتصال بالخادم والبحث عن منافسين لنفس الدرس…";
+    render();
+    connectSocket(name, "lesson", null, "mix", "public", undefined, selectedLessonMatchId);
+    return;
+  }
+
+  phase = "name";
+  nameFlowStep = "mode";
+  render();
+}
+
 function connectSocket(
   name: string,
   mode: GameMode,
@@ -4846,6 +4950,7 @@ function connectSocket(
   const playerSessionId = getOrCreatePlayerSessionId();
   const flowToken = ++searchFlowToken;
   const joinFlowStartMs = performance.now();
+  lastSocketJoinKind = joinKind;
   socket?.removeAllListeners();
   socket?.disconnect();
   reconnectRuntimeActive = false;
@@ -4868,14 +4973,30 @@ function connectSocket(
   }
   let joinAckTimer: number | null = null;
   let joinCompleted = false;
+  let connectionWaitTimer: number | null = null;
+  let soloGameStartedWaitTimer: number | null = null;
+  const JOIN_CONNECT_PHASE_MS = 20_000;
+  const SOLO_GAME_STARTED_WAIT_MS = 20_000;
+
+  const clearJoinFlowTimers = (): void => {
+    if (joinAckTimer != null) {
+      window.clearTimeout(joinAckTimer);
+      joinAckTimer = null;
+    }
+    if (connectionWaitTimer != null) {
+      window.clearTimeout(connectionWaitTimer);
+      connectionWaitTimer = null;
+    }
+    if (soloGameStartedWaitTimer != null) {
+      window.clearTimeout(soloGameStartedWaitTimer);
+      soloGameStartedWaitTimer = null;
+    }
+  };
 
   const failBackToName = (msg: string): void => {
     if (flowToken !== searchFlowToken) return;
     myParticipantId = null;
-    if (joinAckTimer) {
-      window.clearTimeout(joinAckTimer);
-      joinAckTimer = null;
-    }
+    clearJoinFlowTimers();
     joinCompleted = true;
     soloLearningPending = false;
     if (joinKind === "private_create" || joinKind === "private_join") {
@@ -4889,6 +5010,14 @@ function connectSocket(
       resetPrivateRoomTeamLobbyClientState();
       matchTeamPlayMode = null;
       matchHeartsPerPlayerSetting = null;
+    }
+    try {
+      s.disconnect();
+    } catch {
+      /* ignore */
+    }
+    if (socket === s) {
+      socket = null;
     }
     phase = "name";
     render();
@@ -4920,6 +5049,10 @@ function connectSocket(
   };
 
   s.on("connect", async () => {
+    if (connectionWaitTimer != null) {
+      window.clearTimeout(connectionWaitTimer);
+      connectionWaitTimer = null;
+    }
     console.debug("[join-flow] click->connect_ms", Math.round(performance.now() - joinFlowStartMs), "socket", s.id);
     const noticeEl = app.querySelector<HTMLParagraphElement>("#lobby-notice");
     if (noticeEl && (phase === "matchmaking" || phase === "private_room_lobby")) {
@@ -4951,22 +5084,17 @@ function connectSocket(
           flowToken,
         )
       ) {
-        if (joinAckTimer) {
-          window.clearTimeout(joinAckTimer);
-          joinAckTimer = null;
-        }
+        clearJoinFlowTimers();
         joinCompleted = true;
         if (noticeEl) noticeEl.textContent = "تمت استعادة المباراة.";
         return;
       }
       failBackToName("تعذر استعادة المباراة. انتهت المهلة أو لم تعد الجلسة صالحة.");
-      socket?.disconnect();
       return;
     }
     joinAckTimer = window.setTimeout(() => {
       if (joinCompleted) return;
       failBackToName("انتهت مهلة انتظار رد الخادم على طلب الانضمام. تحقق من الشبكة ثم أعد المحاولة.");
-      socket?.disconnect();
     }, 8000);
     const payload = {
       name,
@@ -5044,6 +5172,12 @@ function connectSocket(
             ? "تم إنشاء الجولة الفردية. جاري البدء..."
             : "تم الدخول بنجاح. جاري البحث عن منافسين...";
         }
+      }
+      if (joinKind === "solo") {
+        soloGameStartedWaitTimer = window.setTimeout(() => {
+          if (flowToken !== searchFlowToken) return;
+          failBackToName("تعذر بدء الجولة الفردية: انتهت مهلة انتظار بدء اللعب من الخادم.");
+        }, SOLO_GAME_STARTED_WAIT_MS);
       }
       },
     );
@@ -5333,6 +5467,10 @@ function connectSocket(
         isCaptain?: boolean;
       }>;
     }) => {
+      if (soloGameStartedWaitTimer != null) {
+        window.clearTimeout(soloGameStartedWaitTimer);
+        soloGameStartedWaitTimer = null;
+      }
       lobbyCountdown.clear();
       applyGameStartedClientPayload(payload);
     },
@@ -5497,6 +5635,12 @@ function connectSocket(
     getContinueWatchButton: () => app.querySelector<HTMLButtonElement>("#continue-watch"),
     getStudyReadyStateElement: () => app.querySelector<HTMLParagraphElement>("#study-ready-state"),
   } satisfies GameplaySocketDeps);
+
+  connectionWaitTimer = window.setTimeout(() => {
+    if (flowToken !== searchFlowToken) return;
+    if (joinCompleted) return;
+    failBackToName("انتهت مهلة الاتصال بالخادم. تحقق من الشبكة ثم أعد المحاولة.");
+  }, JOIN_CONNECT_PHASE_MS);
 
   s.connect();
 }

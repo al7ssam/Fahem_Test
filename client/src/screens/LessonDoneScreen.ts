@@ -18,6 +18,8 @@ export type LessonDoneScreenDeps = {
   beginLessonPlayback: (data: LessonPlaybackPayload) => void;
   openSavedLessonsLibraryScreen: () => void;
   returnToHomeFromSearch: () => void;
+  /** إنهاء الدرس — نفس منطق الخروج من التشغيل الفردي (تصنيفات / مخصص / مكتبة). */
+  finishLessonFromDoneScreen: () => void;
   render: () => void;
 };
 
@@ -54,20 +56,7 @@ export function renderLessonDoneScreen(deps: LessonDoneScreenDeps): void {
   });
   app.querySelector("#lesson-done-end-custom")?.addEventListener("click", () => {
     deps.clearTimer();
-    const fromSavedLibrary = deps.getLessonSoloPlaybackReturnTarget() === "saved_lessons_library";
-    deps.resetLessonState();
-    deps.setLessonSoloPlaybackReturnTarget("lesson_menu");
-    if (fromSavedLibrary) {
-      deps.openSavedLessonsLibraryScreen();
-      return;
-    }
-    deps.setCustomLessonPreviewLesson(null);
-    deps.setCustomLessonValidatedBody(null);
-    deps.setCustomLessonSessionToken(null);
-    deps.setCustomLessonErr("");
-    deps.setCustomLessonMsg("");
-    deps.setPhase("custom_lesson");
-    deps.render();
+    deps.finishLessonFromDoneScreen();
   });
   app.querySelector("#lesson-done-home-main")?.addEventListener("click", () => {
     deps.clearTimer();
