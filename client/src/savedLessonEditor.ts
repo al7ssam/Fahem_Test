@@ -33,13 +33,6 @@ export function readLibraryIconFromEditor(root: HTMLElement): string | null {
     .trim();
 }
 
-function readNum(el: HTMLInputElement | null, fallback: number, min: number, max: number): number {
-  if (!el) return fallback;
-  const v = parseFloat(el.value);
-  if (!Number.isFinite(v)) return fallback;
-  return Math.min(max, Math.max(min, v));
-}
-
 function readInt(el: HTMLInputElement | null, fallback: number, min: number, max: number): number {
   if (!el) return fallback;
   const v = parseInt(el.value, 10);
@@ -104,6 +97,10 @@ export function renderSavedLessonEditorMarkup(
   const sections = Array.isArray(payload.sections) ? payload.sections : [];
   const title = String(lesson.title ?? "");
   const defaultAnswerMs = Number(lesson.defaultAnswerMs ?? 15000);
+  const defaultAnswerSec =
+    Number.isFinite(defaultAnswerMs) && defaultAnswerMs > 0
+      ? Math.round(defaultAnswerMs / 1000)
+      : 15;
   const slugStored =
     lesson.slug != null && String(lesson.slug).trim() !== "" ? String(lesson.slug).trim() : "";
   const descVal = lesson.description != null ? String(lesson.description) : "";
@@ -132,8 +129,8 @@ export function renderSavedLessonEditorMarkup(
       <input type="text" id="sle-lesson-title" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" value="${escapeEditorHtml(title)}" maxlength="300" />
       <label class="block text-xs text-slate-400">الوصف (اختياري)</label>
       <textarea id="sle-lesson-desc" rows="2" class="app-input w-full px-2 py-2 text-xs">${escapeEditorHtml(descVal)}</textarea>
-      <label class="block text-xs text-slate-400">زمن الإجابة الافتراضي (مللي)</label>
-      <input type="number" id="sle-lesson-def-ms" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" min="3000" max="120000" step="500" value="${Number.isFinite(defaultAnswerMs) ? defaultAnswerMs : 15000}" />
+      <label class="block text-xs text-slate-400">زمن الإجابة الافتراضي (ثانية)</label>
+      <input type="number" id="sle-lesson-def-sec" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" min="3" max="120" step="1" value="${defaultAnswerSec}" />
     </div>
   `;
 
@@ -148,8 +145,10 @@ export function renderSavedLessonEditorMarkup(
           : null;
     const studyPhaseMsNum =
       studyPhaseRaw != null && studyPhaseRaw !== "" ? Number(studyPhaseRaw) : null;
-    const studyMs =
-      studyPhaseMsNum != null && Number.isFinite(studyPhaseMsNum) ? studyPhaseMsNum : "";
+    const studySec =
+      studyPhaseMsNum != null && Number.isFinite(studyPhaseMsNum)
+        ? Math.round(studyPhaseMsNum / 1000)
+        : "";
     const items = Array.isArray(sec.items) ? sec.items : [];
     const itemBlocks = items.map((itRaw, ii) => {
       const it = (itRaw ?? {}) as Record<string, unknown>;
@@ -160,7 +159,9 @@ export function renderSavedLessonEditorMarkup(
       const correctIndex = Number(it.correctIndex ?? 0);
       const studyBody = String(it.studyBody ?? it.study_body ?? "");
       const answerMsRaw = it.answerMs ?? it.answer_ms;
-      const answerMs = answerMsRaw != null && answerMsRaw !== "" ? Number(answerMsRaw) : "";
+      const answerMsNum = answerMsRaw != null && answerMsRaw !== "" ? Number(answerMsRaw) : null;
+      const answerSec =
+        answerMsNum != null && Number.isFinite(answerMsNum) ? Math.round(answerMsNum / 1000) : "";
       const diff = String(it.difficulty ?? "medium");
       const subKey = String(it.subcategoryKey ?? it.subcategory_key ?? "general_default");
 
@@ -183,8 +184,8 @@ export function renderSavedLessonEditorMarkup(
           <input id="sle-s${si}-i${ii}-correct" type="number" min="0" max="3" class="app-input w-24 px-2 py-1 text-sm" value="${Number.isFinite(correctIndex) ? correctIndex : 0}" />
           <label class="block text-[11px] text-slate-400">بطاقة المذاكرة</label>
           <textarea id="sle-s${si}-i${ii}-study" rows="3" class="app-input w-full px-2 py-1 text-xs">${escapeEditorHtml(studyBody)}</textarea>
-          <label class="block text-[11px] text-slate-400">زمن السؤال (مللي، اختياري)</label>
-          <input id="sle-s${si}-i${ii}-ams" type="number" class="app-input w-full px-2 py-1 text-xs" min="3000" max="120000" step="100" value="${answerMs === "" ? "" : answerMs}" />
+          <label class="block text-[11px] text-slate-400">زمن السؤال (ثانية، اختياري)</label>
+          <input id="sle-s${si}-i${ii}-asec" type="number" class="app-input w-full px-2 py-1 text-xs" min="3" max="120" step="1" value="${answerSec === "" ? "" : answerSec}" />
           <input type="hidden" id="sle-s${si}-i${ii}-diff" value="${escapeEditorHtml(diff)}" />
           <input type="hidden" id="sle-s${si}-i${ii}-sub" value="${escapeEditorHtml(subKey)}" />
         </div>
@@ -203,8 +204,8 @@ export function renderSavedLessonEditorMarkup(
           </div>
           <label class="block text-xs text-slate-400">عنوان القسم</label>
           <input type="text" id="sle-sec-${si}-title" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" value="${escapeEditorHtml(titleAr)}" maxlength="500" />
-          <label class="block text-xs text-slate-400">زمن طور المذاكرة للقسم (مللي)</label>
-          <input type="number" id="sle-sec-${si}-study-ms" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" min="2000" max="300000" step="500" value="${studyMs === "" ? "" : studyMs}" />
+          <label class="block text-xs text-slate-400">زمن طور المذاكرة للقسم (ثانية)</label>
+          <input type="number" id="sle-sec-${si}-study-sec" class="app-input w-full px-2 py-2 text-sm min-h-[44px]" min="2" max="300" step="1" value="${studySec === "" ? "" : studySec}" />
           <div class="space-y-3">${itemBlocks.join("")}</div>
         </div>
       </details>
@@ -231,17 +232,20 @@ export function collectSavedLessonPayloadFromEditor(root: HTMLElement): {
   const desc = (root.querySelector<HTMLTextAreaElement>("#sle-lesson-desc")?.value ?? "").trim();
   const slugRaw = (root.querySelector<HTMLInputElement>("#sle-lesson-slug-preserve")?.value ?? "").trim();
   const slug = slugRaw === "" ? null : slugRaw;
-  const defMs = readNum(root.querySelector("#sle-lesson-def-ms"), 15000, 3000, 120000);
+  const defSec = readInt(root.querySelector("#sle-lesson-def-sec"), 15, 3, 120);
+  const defMs = defSec * 1000;
 
   const sectionDetails = root.querySelectorAll("details");
   const sections: Record<string, unknown>[] = [];
   let si = 0;
   for (const det of sectionDetails) {
     const secTitle = (det.querySelector<HTMLInputElement>(`#sle-sec-${si}-title`)?.value ?? "").trim();
-    const studyMsEl = det.querySelector<HTMLInputElement>(`#sle-sec-${si}-study-ms`);
-    const studyRaw = studyMsEl?.value?.trim() ?? "";
+    const studySecEl = det.querySelector<HTMLInputElement>(`#sle-sec-${si}-study-sec`);
+    const studyRaw = studySecEl?.value?.trim() ?? "";
     const studyPhaseMs =
-      studyRaw === "" ? null : Math.min(300000, Math.max(2000, parseInt(studyRaw, 10) || 0));
+      studyRaw === ""
+        ? null
+        : Math.min(300_000, Math.max(2_000, (parseInt(studyRaw, 10) || 0) * 1000));
 
     const itemWraps = det.querySelectorAll(`[data-sle-item^="${si}-"]`);
     const items: Record<string, unknown>[] = [];
@@ -272,8 +276,9 @@ export function collectSavedLessonPayloadFromEditor(root: HTMLElement): {
       if (!studyBody) {
         return { ok: false, error: `القسم ${si + 1} سؤال ${ii + 1}: بطاقة المذاكرة مطلوبة.` };
       }
-      const amsRaw = root.querySelector<HTMLInputElement>(`#sle-s${si}-i${ii}-ams`)?.value?.trim() ?? "";
-      const answerMs = amsRaw === "" ? null : readInt(root.querySelector(`#sle-s${si}-i${ii}-ams`), 15000, 3000, 120000);
+      const asecRaw = root.querySelector<HTMLInputElement>(`#sle-s${si}-i${ii}-asec`)?.value?.trim() ?? "";
+      const answerMs =
+        asecRaw === "" ? null : readInt(root.querySelector(`#sle-s${si}-i${ii}-asec`), 15, 3, 120) * 1000;
       const difficulty = (
         root.querySelector<HTMLInputElement>(`#sle-s${si}-i${ii}-diff`)?.value ?? "medium"
       ).trim() || "medium";

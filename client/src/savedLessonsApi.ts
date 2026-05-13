@@ -70,10 +70,17 @@ export async function patchSavedLesson(
   id: string,
   body: { title?: string; payload?: Record<string, unknown>; libraryIcon?: string | null },
 ): Promise<{ ok: boolean; error?: string }> {
+  /** المخطط في الخادم يقبل نصاً أو "" فقط؛ null يُرفَض من Zod فيُرسل فراغاً لمسح الأيقونة. */
+  const serialized: Record<string, unknown> = {};
+  if (body.title !== undefined) serialized.title = body.title;
+  if (body.payload !== undefined) serialized.payload = body.payload;
+  if (body.libraryIcon !== undefined) {
+    serialized.libraryIcon = body.libraryIcon === null ? "" : body.libraryIcon;
+  }
   const res = await apiFetch(`/api/me/saved-lessons/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(serialized),
   });
   const data = (await res.json()) as { ok?: boolean; error?: string };
   if (!res.ok || data.ok === false) {
