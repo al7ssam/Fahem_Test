@@ -815,7 +815,7 @@ export class Match {
   private countActive(): number {
     let n = 0;
     for (const p of this.players.values()) {
-      if (!p.eliminated && p.hearts > 0) n++;
+      if (this.isParticipantActiveForTeam(p)) n++;
     }
     return n;
   }
@@ -864,7 +864,7 @@ export class Match {
       return true;
     }
     for (const [participantId, p] of this.players) {
-      if (p.eliminated || p.hearts <= 0) continue;
+      if (!this.isParticipantActiveForTeam(p)) continue;
       if (!this.pendingAnswers.has(participantId)) return false;
     }
     return true;

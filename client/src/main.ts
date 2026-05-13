@@ -12,7 +12,7 @@ import {
   type BuildLessonAiPromptOptions,
 } from "./lessonPromptBuilder";
 import { parseLessonPastedJson } from "@shared/lessonJsonParse";
-import type { ReviewItem } from "../shared/reviewItem";
+import type { ReviewItem } from "../../shared/reviewItem";
 import { loadCustomLessonDraft, saveCustomLessonDraft } from "./customLessonDraft";
 import {
   hasLocalCustomLessonPromptPrefs,
@@ -2907,7 +2907,14 @@ function render(): void {
         const nextReady = !Boolean(me?.ready);
         privateReadyPending = true;
         render();
+        const fallback = setTimeout(() => {
+          if (privateReadyPending) {
+            privateReadyPending = false;
+            render();
+          }
+        }, 5000);
         socket?.emit("private_room_set_ready", { ready: nextReady }, (ack?: { ok?: boolean }) => {
+          clearTimeout(fallback);
           privateReadyPending = false;
           if (!ack?.ok) {
             lobbyNotice = "تعذر تغيير حالة الجاهزية.";
@@ -3018,7 +3025,14 @@ function render(): void {
       const nextReady = !Boolean(me?.ready);
       privateReadyPending = true;
       render();
+      const fallback = setTimeout(() => {
+        if (privateReadyPending) {
+          privateReadyPending = false;
+          render();
+        }
+      }, 5000);
       socket?.emit("private_room_set_ready", { ready: nextReady }, (ack?: { ok?: boolean }) => {
+        clearTimeout(fallback);
         privateReadyPending = false;
         if (!ack?.ok) {
           lobbyNotice = "تعذر تغيير حالة الجاهزية.";
@@ -4363,6 +4377,13 @@ function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
         s.emit("answer", {
           questionId: currentQuestionId,
           choiceIndex: idx,
+        }, (ack?: { ok?: boolean }) => {
+          if (!ack?.ok) {
+            answered = false;
+            b.classList.remove("option-btn--selected");
+            opts.querySelectorAll("button").forEach((ob) => { ob.disabled = false; });
+            if (status) status.textContent = "تعذر إرسال الإجابة. حاول مرة أخرى.";
+          }
         });
         disableAllOptionButtons();
         return;
@@ -4377,6 +4398,13 @@ function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
         s.emit("answer", {
           questionId: currentQuestionId,
           choiceIndex: idx,
+        }, (ack?: { ok?: boolean }) => {
+          if (!ack?.ok) {
+            answered = false;
+            b.classList.remove("option-btn--selected");
+            opts.querySelectorAll("button").forEach((ob) => { ob.disabled = false; });
+            if (status) status.textContent = "تعذر إرسال إجابة الفريق. حاول مرة أخرى.";
+          }
         });
         disableAllOptionButtons();
         return;
@@ -4388,6 +4416,13 @@ function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
           s.emit("answer", {
             questionId: currentQuestionId,
             choiceIndex: idx,
+          }, (ack?: { ok?: boolean }) => {
+            if (!ack?.ok) {
+              teamRoundCaptainSubmitted = false;
+              b.classList.remove("option-btn--selected");
+              opts.querySelectorAll("button").forEach((ob) => { ob.disabled = false; });
+              if (status) status.textContent = "تعذر إرسال إجابة الفريق. حاول مرة أخرى.";
+            }
           });
           captainTapPendingIndex = null;
           teamRoundCaptainSubmitted = true;
@@ -4398,6 +4433,12 @@ function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
           s.emit("answer", {
             questionId: currentQuestionId,
             choiceIndex: idx,
+          }, (ack?: { ok?: boolean }) => {
+            if (!ack?.ok) {
+              captainTapPendingIndex = null;
+              highlightSelected(-1);
+              if (status) status.textContent = "تعذر إرسال التصويت. حاول مرة أخرى.";
+            }
           });
           highlightSelected(idx);
           if (status) status.textContent = "اضغط نفس الخيار مرة ثانية للإرسال النهائي.";
@@ -4408,6 +4449,11 @@ function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
       s.emit("answer", {
         questionId: currentQuestionId,
         choiceIndex: idx,
+      }, (ack?: { ok?: boolean }) => {
+        if (!ack?.ok) {
+          highlightSelected(-1);
+          if (status) status.textContent = "تعذر إرسال التصويت. حاول مرة أخرى.";
+        }
       });
       highlightSelected(idx);
       if (status) status.textContent = "سُجّل تصويتك. انتظر موافقة الكابتن.";
@@ -4616,6 +4662,27 @@ function applyMatchStateSnapshotFromServer(s: Socket, snap: Record<string, unkno
   applyMatchStateSnapshotFromServerWithDeps(snapshotApplyDeps, s, snap);
 }
 
+/** نتائج لا نعرض معها زر مراجعة الأسئلة رغم أن الخادم قد يرسل `lessonReview` في أنماط مباشر/مذاكرة. */
+function shouldSuppressLessonReviewOnGameOver(payload: {
+  outcomeType?: string;
+  reason?: string;
+}): boolean {
+  if (payload.reason === "no_questions" || payload.outcomeType === "no_questions") return true;
+  if (payload.outcomeType === "server_shutdown" || payload.reason === "server_shutdown") return true;
+  if (
+    payload.outcomeType === "server_aborted" ||
+    payload.reason === "db_error" ||
+    payload.reason === "runtime_error"
+  ) {
+    return true;
+  }
+  if (payload.outcomeType === "solo_incomplete" || payload.outcomeType === "solo_study_incomplete") {
+    return true;
+  }
+  if (payload.outcomeType === "team_match") return true;
+  return false;
+}
+
 /** ناتج `game_over` — يُستدعى من `attachGameplaySocketListeners` مع تنظيف عدّاد اللوبي من سياق المقبس. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- لقطة خادم مرنة؛ الحقول تُفرّع يدوياً كالسابق
 function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): void {
@@ -4625,8 +4692,10 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
   clearLobbyCountdown();
   clearTimer();
   const lr = payload.lessonReview;
+  const hasLessonReviewPayload = Array.isArray(lr) && lr.length > 0;
+  const suppressLessonReview = shouldSuppressLessonReviewOnGameOver(payload);
   matchLessonReviewItems =
-    Array.isArray(lr) && lr.length > 0
+    !suppressLessonReview && hasLessonReviewPayload
       ? (lr as NonNullable<typeof matchLessonReviewItems>)
       : null;
   matchLessonReviewIndex = 0;
@@ -4651,7 +4720,6 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
   const loseCopy = rm?.loser?.trim() || DEFAULT_RESULT_MESSAGES.loser;
   const tieCopy = rm?.tie?.trim() || DEFAULT_RESULT_MESSAGES.tie;
   if (payload.reason === "no_questions" || payload.outcomeType === "no_questions") {
-    matchLessonReviewItems = null;
     title.textContent = "لا توجد أسئلة";
     body.textContent = "أضف أسئلة إلى قاعدة البيانات ثم أعد المحاولة.";
     if (stats) stats.classList.add("hidden");
@@ -4664,7 +4732,6 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
     payload.outcomeType === "server_shutdown" ||
     payload.reason === "server_shutdown"
   ) {
-    matchLessonReviewItems = null;
     title.textContent = "توقف الخادم مؤقتًا";
     body.textContent =
       "انتهت الجلسة لأن الخادم يُحدَّث أو يُغلق. يمكنك بدء جولة جديدة بعد لحظات.";
@@ -4679,7 +4746,6 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
     payload.reason === "db_error" ||
     payload.reason === "runtime_error"
   ) {
-    matchLessonReviewItems = null;
     title.textContent = "تعذر إكمال المباراة";
     body.textContent =
       "حدث خطأ في الخادم أثناء الجولة. إذا تكرر ذلك، أعد المحاولة لاحقًا.";
@@ -4693,7 +4759,6 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
     payload.outcomeType === "solo_incomplete" ||
     payload.outcomeType === "solo_study_incomplete"
   ) {
-    matchLessonReviewItems = null;
     title.textContent = loseTitle;
     body.textContent = loseCopy;
     if (againBtn) againBtn.textContent = "حاول مرة أخرى";
@@ -4711,7 +4776,6 @@ function handleGameplayGameOver(payload: any, clearLobbyCountdown: () => void): 
     return;
   }
   if (payload.outcomeType === "team_match") {
-    matchLessonReviewItems = null;
     matchTeamPlayMode = null;
     const teamExtra = app.querySelector<HTMLDivElement>("#res-team-extra");
     if (teamExtra) {
