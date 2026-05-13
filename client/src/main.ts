@@ -164,6 +164,7 @@ let captainTapPendingIndex: number | null = null;
 /** عدد الأصوات لكل خيار (وضع كابتن) لعرض حي على الأزرار. */
 let teamVoteCountsByChoice: Record<number, number> = {};
 let privateReadyPending = false;
+let privateReadyTargetState: boolean | null = null;
 let privateQrDataUrl: string | null = null;
 let isPrivateRoomSession = false;
 let lastPrivateRoomCode: string | null = null;
@@ -217,14 +218,21 @@ function playerIsMe(p: { participantId?: string; userId?: string | null }): bool
 function syncMyParticipantIdFromPlayers(
   players: Array<{ participantId?: string; userId?: string | null }>,
 ): void {
+  if (myParticipantId && players.some((p) => p.participantId === myParticipantId)) {
+    return;
+  }
   const uid = accountUserId();
   if (uid) {
     const me = players.find((p) => p.userId === uid);
-    if (me?.participantId) myParticipantId = me.participantId;
+    myParticipantId = me?.participantId ?? null;
     return;
   }
   if (players.length === 1 && players[0]?.participantId) {
     myParticipantId = players[0].participantId;
+    return;
+  }
+  if (myParticipantId && !players.some((p) => p.participantId === myParticipantId)) {
+    myParticipantId = null;
   }
 }
 
@@ -1166,6 +1174,7 @@ function resetPrivateRoomSyncStateForNewSocketIntent(): void {
 }
 
 type PrivateLobbyJoinAck = {
+  participantId?: string;
   roomCode?: string;
   inviteUrl?: string;
   hostParticipantId?: string;
@@ -1179,6 +1188,7 @@ type PrivateLobbyJoinAck = {
 /** تطبيق نتيجة إنشاء/انضمام غرفة خاصة بعد ack ناجح — انتقال UI واحد. */
 function applyPrivateLobbyJoinAck(joinKind: JoinKind, ack: PrivateLobbyJoinAck): void {
   if (joinKind !== "private_create" && joinKind !== "private_join") return;
+  if (ack.participantId) myParticipantId = ack.participantId;
   if (ack.roomCode) privateRoomCodeState = ack.roomCode;
   if (ack.inviteUrl) privateRoomInviteUrl = ack.inviteUrl;
   if (ack.hostParticipantId) privateRoomHostParticipantId = ack.hostParticipantId;
@@ -1222,6 +1232,7 @@ function disconnectSearchSocket(): void {
   privateRoomInviteUrl = null;
   privateRoomVersionState = 0;
   privateReadyPending = false;
+  privateReadyTargetState = null;
   privateQrDataUrl = null;
   isPrivateRoomSession = false;
   clearReconnectMultiplayerRuntime();
@@ -2904,19 +2915,28 @@ function render(): void {
       app.querySelector<HTMLButtonElement>("#private-ready-btn")?.addEventListener("click", () => {
         if (privateReadyPending) return;
         const me = lobbyPlayersList.find((p) => playerIsMe(p));
+        if (!me?.participantId) {
+          lobbyNotice = "تعذر تحديد هويتك في الغرفة. أعد الدخول للغرفة الخاصة.";
+          render();
+          return;
+        }
         const nextReady = !Boolean(me?.ready);
         privateReadyPending = true;
+        privateReadyTargetState = nextReady;
         render();
         const fallback = setTimeout(() => {
           if (privateReadyPending) {
             privateReadyPending = false;
+            privateReadyTargetState = null;
+            lobbyNotice = "تأخر تحديث الجاهزية. تحقق من الاتصال ثم حاول مرة أخرى.";
             render();
           }
         }, 5000);
         socket?.emit("private_room_set_ready", { ready: nextReady }, (ack?: { ok?: boolean }) => {
           clearTimeout(fallback);
-          privateReadyPending = false;
           if (!ack?.ok) {
+            privateReadyPending = false;
+            privateReadyTargetState = null;
             lobbyNotice = "تعذر تغيير حالة الجاهزية.";
             const n = app.querySelector<HTMLParagraphElement>("#lobby-notice");
             if (n) n.textContent = lobbyNotice;
@@ -3022,19 +3042,28 @@ function render(): void {
     app.querySelector<HTMLButtonElement>("#private-ready-btn")?.addEventListener("click", () => {
       if (privateReadyPending) return;
       const me = lobbyPlayersList.find((p) => playerIsMe(p));
+      if (!me?.participantId) {
+        lobbyNotice = "تعذر تحديد هويتك في الغرفة. أعد الدخول للغرفة الخاصة.";
+        render();
+        return;
+      }
       const nextReady = !Boolean(me?.ready);
       privateReadyPending = true;
+      privateReadyTargetState = nextReady;
       render();
       const fallback = setTimeout(() => {
         if (privateReadyPending) {
           privateReadyPending = false;
+          privateReadyTargetState = null;
+          lobbyNotice = "تأخر تحديث الجاهزية. تحقق من الاتصال ثم حاول مرة أخرى.";
           render();
         }
       }, 5000);
       socket?.emit("private_room_set_ready", { ready: nextReady }, (ack?: { ok?: boolean }) => {
         clearTimeout(fallback);
-        privateReadyPending = false;
         if (!ack?.ok) {
+          privateReadyPending = false;
+          privateReadyTargetState = null;
           lobbyNotice = "تعذر تغيير حالة الجاهزية.";
         }
         render();
@@ -3274,13 +3303,27 @@ function render(): void {
         resetPrivateRoomTeamLobbyClientState();
       },
       backToPrivateRoom: (roomCode, name) => {
+        const modeForRejoin = currentGameMode ?? "direct";
+        const subcategoryForRejoin =
+          modeForRejoin === "study_then_quiz" ? selectedSubcategoryKey : null;
+        const lessonForRejoin =
+          modeForRejoin === "lesson" ? selectedLessonMatchId : undefined;
         phase = "matchmaking";
         privateRoomCodeState = roomCode;
         privateRoomInviteUrl = `${window.location.origin}?room=${roomCode}`;
         lobbyNotice = "جاري العودة إلى الغرفة الخاصة...";
         privateReadyPending = false;
+        privateReadyTargetState = null;
         render();
-        connectSocket(name, "direct", null, "mix", "private_join", roomCode);
+        connectSocket(
+          name,
+          modeForRejoin,
+          subcategoryForRejoin,
+          selectedDifficultyMode,
+          "private_join",
+          roomCode,
+          lessonForRejoin,
+        );
       },
       returnToHomeFromSearch,
       getSocket: () => socket,
@@ -4365,9 +4408,18 @@ function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
       b.classList.remove("option-btn--pressed");
     };
     const submitAnswer = (): void => {
-      if (spectatorFollowing) return;
-      if (currentQuestionId == null) return;
-      if (teamRoundUiLocked || teamRoundCaptainSubmitted) return;
+      if (spectatorFollowing) {
+        if (status) status.textContent = "أنت في وضع المشاهد ولا يمكنك إرسال إجابة.";
+        return;
+      }
+      if (currentQuestionId == null) {
+        if (status) status.textContent = "تعذر تحديد السؤال الحالي. انتظر التحديث التالي.";
+        return;
+      }
+      if (teamRoundUiLocked || teamRoundCaptainSubmitted) {
+        if (status) status.textContent = "إجابة الفريق مقفلة لهذا السؤال.";
+        return;
+      }
 
       if (!tmode) {
         if (answered) return;
@@ -4390,7 +4442,10 @@ function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
       }
 
       if (tmode === "teams_first_answer") {
-        if (!myTeamId) return;
+        if (!myTeamId) {
+          if (status) status.textContent = "يجب الانضمام إلى فريق قبل إرسال الإجابة.";
+          return;
+        }
         if (answered) return;
         answered = true;
         b.classList.add("option-btn--selected");
@@ -4410,7 +4465,10 @@ function bindQuestionOptionsUi(s: Socket, q: IncomingQuestionPayload): void {
         return;
       }
 
-      if (!myTeamId) return;
+      if (!myTeamId) {
+        if (status) status.textContent = "يجب الانضمام إلى فريق قبل التصويت أو الإرسال.";
+        return;
+      }
       if (amCaptain) {
         if (captainTapPendingIndex === idx) {
           s.emit("answer", {
@@ -4903,6 +4961,7 @@ function retryPublicMatchFromResult(): void {
   matchTeamPlayMode = null;
   matchHeartsPerPlayerSetting = null;
   privateReadyPending = false;
+  privateReadyTargetState = null;
   socket?.disconnect();
   socket = null;
   resetPrivateRoomTeamLobbyClientState();
@@ -5029,6 +5088,7 @@ function connectSocket(
       privateRoomVersionState = 0;
       privateQrDataUrl = null;
       privateReadyPending = false;
+      privateReadyTargetState = null;
       isPrivateRoomSession = false;
       resetPrivateRoomTeamLobbyClientState();
       matchTeamPlayMode = null;
@@ -5294,7 +5354,9 @@ function connectSocket(
           },
           syncMyParticipantIdFromPlayers,
           setPrivateReadyPending: (v) => {
+            if (!v && privateReadyTargetState !== null) return;
             privateReadyPending = v;
+            if (!v) privateReadyTargetState = null;
           },
           setPrivateRoomInviteUrl: (url) => {
             privateRoomInviteUrl = url;
@@ -5318,6 +5380,24 @@ function connectSocket(
         } satisfies PrivateRoomStateApplyDeps,
         payload,
       );
+      if (privateReadyPending) {
+        const uid = accountUserId();
+        const me = payload.players.find((p) => {
+          if (myParticipantId && p.participantId) return p.participantId === myParticipantId;
+          if (uid && p.userId) return p.userId === uid;
+          return false;
+        });
+        if (
+          me &&
+          (privateReadyTargetState == null || me.ready === privateReadyTargetState)
+        ) {
+          privateReadyPending = false;
+          privateReadyTargetState = null;
+          if (phase === "private_room_lobby" || phase === "matchmaking") {
+            render();
+          }
+        }
+      }
     },
   );
 
@@ -5454,6 +5534,8 @@ function connectSocket(
     lobbyNotice =
       payload?.reason === "not_enough_questions"
         ? payload.message || "لا توجد أسئلة كافية في مستوى الصعوبة هذا أو هذا التصنيف."
+        : payload?.reason === "not_all_ready"
+          ? payload.message || "ألغى أحد اللاعبين الجاهزية، فتوقف العد التنازلي."
         : payload?.reason === "not_enough_teams"
           ? payload.message || "يجب أن يكون هناك فريقان على الأقل بأعضاء لبدء وضع الفرق."
           : payload?.reason === "teams_lobby_missing"

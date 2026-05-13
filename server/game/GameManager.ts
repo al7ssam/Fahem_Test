@@ -199,6 +199,8 @@ export class GameManager {
   private readonly participantIdToSocket = new Map<string, string>();
   private readonly participantIdToMatch = new Map<string, Match>();
   private readonly runningMatches = new Map<string, Match>();
+  /** يمنع بدءًا متوازيًا لنفس الغرفة أثناء عمليات تحقق async. */
+  private readonly privateRoomStartInFlight = new Set<string>();
   /** مهلة إقصاء المقعد بعد انقطاع النقل دون استئناف. */
   private readonly pendingReconnectByParticipantId = new Map<string, ReturnType<typeof setTimeout>>();
   /** حد معدل طلبات resume_match لكل مقبس (نافذة زمنية). */
@@ -661,6 +663,30 @@ export class GameManager {
 
   private isPrivateRoomHost(room: PrivateRoomState, participantId: string | undefined): boolean {
     return Boolean(participantId && room.hostParticipantId === participantId);
+  }
+
+  private clearPrivateRoomReadyFlags(room: PrivateRoomState): void {
+    for (const member of room.members.values()) {
+      member.ready = false;
+      member.readyOrder = null;
+    }
+  }
+
+  private cancelPrivateRoomStart(
+    roomCode: string,
+    room: PrivateRoomState,
+    payload: { reason: string; message: string; difficultyMode?: DifficultyMode },
+  ): void {
+    room.lockedParticipantIds = [];
+    room.countdownEndsAt = null;
+    if (room.matchStartTimer) {
+      clearTimeout(room.matchStartTimer);
+      room.matchStartTimer = null;
+    }
+    this.clearPrivateRoomReadyFlags(room);
+    room.roomVersion += 1;
+    this.emitPrivateLobbyState(roomCode);
+    this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", payload);
   }
 
   private removeParticipantFromAllTeamsInRoom(room: PrivateRoomState, participantId: string): void {
@@ -1141,77 +1167,83 @@ export class GameManager {
   }
 
   private async tryStartPrivateRoom(roomCode: string): Promise<void> {
-    const room = this.privateRooms.get(roomCode);
-    if (!room || room.matchStartTimer) return;
-    if (this.draining) return;
-    const members = [...room.members.values()];
-    if (members.length < 2) return;
-    const allReady = members.every((m) => m.ready);
-    if (!allReady) return;
-    if (room.teamPlayMode !== "individual" && room.teamsLobby) {
-      const ids = new Set(members.map((m) => m.participantId));
-      if (!allRoomMembersAssignedToTeams(ids, room.teamsLobby)) return;
-    }
-    if (room.mode === "study_then_quiz") {
-      const key = room.subcategoryKey ?? "general_default";
-      const difficultyFilter = room.difficultyMode === "mix" ? null : room.difficultyMode;
-      const total = await countQuestionsBySubcategory(getPool(), key, true, difficultyFilter);
+    if (this.privateRoomStartInFlight.has(roomCode)) return;
+    this.privateRoomStartInFlight.add(roomCode);
+    try {
+      const room = this.privateRooms.get(roomCode);
+      if (!room || room.matchStartTimer) return;
       if (this.draining) return;
-      if (total < 30) {
-        this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
-          reason: "not_enough_questions",
-          message: room.difficultyMode === "mix"
-            ? "لا توجد أسئلة كافية في هذا التصنيف."
-            : "لا توجد أسئلة كافية في مستوى الصعوبة هذا داخل التصنيف. جرّب اختيار مزيج.",
-          difficultyMode: room.difficultyMode,
-        });
-        return;
+      const members = [...room.members.values()];
+      if (members.length < 2) return;
+      const allReady = members.every((m) => m.ready);
+      if (!allReady) return;
+      if (room.teamPlayMode !== "individual" && room.teamsLobby) {
+        const ids = new Set(members.map((m) => m.participantId));
+        if (!allRoomMembersAssignedToTeams(ids, room.teamsLobby)) return;
       }
-    }
-    if (room.mode === "lesson") {
-      if (room.customLessonPlayback) {
-        if (room.customLessonPlayback.steps.length === 0) {
-          this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
-            reason: "lesson_invalid",
-            message: "الدرس المخصص لا يحتوي على خطوات.",
-          });
-          return;
-        }
-      } else {
-        const lid = room.lessonId;
-        if (lid == null || lid < 1) {
-          this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
-            reason: "lesson_invalid",
-            message: "غرفة الدرس لا تحتوي على معرّف درس صالح.",
-          });
-          return;
-        }
-        const lesson = await getPublishedLessonPlaybackById(lid);
+      if (room.mode === "study_then_quiz") {
+        const key = room.subcategoryKey ?? "general_default";
+        const difficultyFilter = room.difficultyMode === "mix" ? null : room.difficultyMode;
+        const total = await countQuestionsBySubcategory(getPool(), key, true, difficultyFilter);
         if (this.draining) return;
-        if (!lesson || lesson.steps.length === 0) {
-          this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
-            reason: "lesson_not_found",
-            message: "الدرس غير متاح أو غير منشور.",
+        if (total < 30) {
+          this.cancelPrivateRoomStart(roomCode, room, {
+            reason: "not_enough_questions",
+            message: room.difficultyMode === "mix"
+              ? "لا توجد أسئلة كافية في هذا التصنيف."
+              : "لا توجد أسئلة كافية في مستوى الصعوبة هذا داخل التصنيف. جرّب اختيار مزيج.",
+            difficultyMode: room.difficultyMode,
           });
           return;
         }
       }
-    }
-    if (this.draining) return;
-    room.lockedParticipantIds = members.map((m) => m.participantId);
-    room.countdownEndsAt = Date.now() + (this.matchFillWindowSeconds * 1000);
-    room.roomVersion += 1;
-    this.io.to(this.privateLobbyRoom(roomCode)).emit("match_starting", {
-      seconds: Math.max(1, Math.ceil((room.countdownEndsAt - Date.now()) / 1000)),
-      participantIds: room.lockedParticipantIds,
-    });
-    this.emitPrivateLobbyState(roomCode);
-    room.matchStartTimer = setTimeout(() => {
-      room.matchStartTimer = null;
-      room.countdownEndsAt = null;
+      if (room.mode === "lesson") {
+        if (room.customLessonPlayback) {
+          if (room.customLessonPlayback.steps.length === 0) {
+            this.cancelPrivateRoomStart(roomCode, room, {
+              reason: "lesson_invalid",
+              message: "الدرس المخصص لا يحتوي على خطوات.",
+            });
+            return;
+          }
+        } else {
+          const lid = room.lessonId;
+          if (lid == null || lid < 1) {
+            this.cancelPrivateRoomStart(roomCode, room, {
+              reason: "lesson_invalid",
+              message: "غرفة الدرس لا تحتوي على معرّف درس صالح.",
+            });
+            return;
+          }
+          const lesson = await getPublishedLessonPlaybackById(lid);
+          if (this.draining) return;
+          if (!lesson || lesson.steps.length === 0) {
+            this.cancelPrivateRoomStart(roomCode, room, {
+              reason: "lesson_not_found",
+              message: "الدرس غير متاح أو غير منشور.",
+            });
+            return;
+          }
+        }
+      }
+      if (this.draining) return;
+      room.lockedParticipantIds = members.map((m) => m.participantId);
+      room.countdownEndsAt = Date.now() + (this.matchFillWindowSeconds * 1000);
       room.roomVersion += 1;
-      void this.startPrivateRoomMatch(roomCode);
-    }, this.matchFillWindowSeconds * 1000);
+      this.io.to(this.privateLobbyRoom(roomCode)).emit("match_starting", {
+        seconds: Math.max(1, Math.ceil((room.countdownEndsAt - Date.now()) / 1000)),
+        participantIds: room.lockedParticipantIds,
+      });
+      this.emitPrivateLobbyState(roomCode);
+      room.matchStartTimer = setTimeout(() => {
+        room.matchStartTimer = null;
+        room.countdownEndsAt = null;
+        room.roomVersion += 1;
+        void this.startPrivateRoomMatch(roomCode);
+      }, this.matchFillWindowSeconds * 1000);
+    } finally {
+      this.privateRoomStartInFlight.delete(roomCode);
+    }
   }
 
   private async startPrivateRoomMatch(roomCode: string): Promise<void> {
@@ -1236,16 +1268,14 @@ export class GameManager {
           ? await getPublishedLessonPlaybackById(room.lessonId)
           : null;
     if (room.mode === "lesson" && !lessonPlayback) {
-      room.lockedParticipantIds = [];
-      room.roomVersion += 1;
-      this.emitPrivateLobbyState(roomCode);
+      this.cancelPrivateRoomStart(roomCode, room, {
+        reason: "lesson_not_found",
+        message: "الدرس غير متاح أو غير منشور.",
+      });
       return;
     }
     if (room.teamPlayMode !== "individual" && !room.teamsLobby) {
-      room.lockedParticipantIds = [];
-      room.roomVersion += 1;
-      this.emitPrivateLobbyState(roomCode);
-      this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+      this.cancelPrivateRoomStart(roomCode, room, {
         reason: "teams_lobby_missing",
         message: "وضع الفرق غير مكتمل. اضبط الفرق من اللوبي ثم أعد المحاولة.",
       });
@@ -1254,10 +1284,7 @@ export class GameManager {
     if (room.teamPlayMode !== "individual" && room.teamsLobby) {
       const snaps = nonEmptyTeamSnapshots(room.teamsLobby);
       if (snaps.length < 2) {
-        room.lockedParticipantIds = [];
-        room.roomVersion += 1;
-        this.emitPrivateLobbyState(roomCode);
-        this.io.to(this.privateLobbyRoom(roomCode)).emit("match_start_cancelled", {
+        this.cancelPrivateRoomStart(roomCode, room, {
           reason: "not_enough_teams",
           message: "يجب أن يكون هناك فريقان على الأقل بأعضاء لبدء وضع الفرق.",
         });

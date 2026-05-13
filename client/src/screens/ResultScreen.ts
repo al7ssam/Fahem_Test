@@ -63,7 +63,7 @@ export function renderResultScreen(deps: ResultScreenDeps): void {
         <div id="res-team-extra" class="w-full text-right hidden"></div>
         <div id="res-stats" class="result-screen__stats hidden"></div>
         <button id="match-lesson-review-open" type="button" class="result-screen__again ui-btn ui-btn--primary w-full py-3 text-base ${
-          mlItems && mlItems.length > 0 && !showPrivateRoomActions ? "" : "hidden"
+          mlItems && mlItems.length > 0 ? "" : "hidden"
         }">${deps.getGameMode() === "lesson" ? "مراجعة الدرس" : "مراجعة الأسئلة"}</button>
         <div class="${showPrivateRoomActions ? "w-full flex flex-col sm:flex-row gap-3" : "hidden"}">
           <button id="back-private-room" type="button" class="result-screen__again ui-btn ui-btn--cta w-full py-3 text-base">العودة للغرفة الخاصة</button>

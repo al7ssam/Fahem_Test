@@ -19,4 +19,5 @@ export type PrivateRoomMutationAck = {
   ok: boolean;
   error?: string;
   message?: string;
+  participantId?: string;
 };

@@ -181,6 +181,7 @@ export function registerPrivateRoomSocketHandlers(
         const inviteUrl = origin ? `${origin}?room=${roomCode}` : `?room=${roomCode}`;
         cb?.({
           ok: true,
+          participantId,
           roomCode,
           inviteUrl,
           hostParticipantId: participantId,
@@ -215,6 +216,14 @@ export function registerPrivateRoomSocketHandlers(
         const room = g.privateRooms.get(roomCode);
         if (!room) {
           cb?.({ ok: false, error: Ack.room_not_found, message: "الغرفة غير موجودة." });
+          return;
+        }
+        if (room.matchStartTimer) {
+          cb?.({
+            ok: false,
+            error: Ack.countdown_started,
+            message: "بدأ العد التنازلي بالفعل. انتظر الجولة التالية ثم انضم.",
+          });
           return;
         }
         if (
@@ -260,6 +269,7 @@ export function registerPrivateRoomSocketHandlers(
         g.emitPrivateLobbyState(roomCode);
         cb?.({
           ok: true,
+          participantId,
           roomCode,
           hostParticipantId: room.hostParticipantId,
           mode: room.mode,
